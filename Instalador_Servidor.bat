@@ -30,8 +30,9 @@ git config --global http.sslVerify false >nul 2>&1
 :: 3. Revisar si ya esta clonado
 IF EXIST ".git" (
     echo [INFO] Detectado como repositorio existente.
-    echo [INFO] Deteniendo servidores en ejecucion si estaban encendidos...
+    echo [INFO] Deteniendo servidores y liberando puerto 8000 si estaba ocupado...
     taskkill /F /IM node.exe >nul 2>&1
+    powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
     echo [INFO] Obteniendo actualizaciones desde GitHub...
     git pull origin main
 ) ELSE (

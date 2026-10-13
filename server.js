@@ -44,6 +44,11 @@ const backendProc = spawn('node', ['src/index.js'], {
 backendProc.on('error', (err) => {
     console.error('[Error Backend]:', err);
 });
+backendProc.on('exit', (code) => {
+    if (code !== 0 && !isShuttingDown) {
+        console.error(`[Error Backend]: El proceso backend terminó con código ${code}.`);
+    }
+});
 
 // Iniciar Frontend (Next.js en producción en el puerto 8000, escuchando en 0.0.0.0)
 const frontendDir = path.join(__dirname, 'frontend');
@@ -62,6 +67,11 @@ const frontendProc = spawn('node', [nextBin, 'start', '-p', String(PORT), '-H', 
 
 frontendProc.on('error', (err) => {
     console.error('[Error Frontend]:', err);
+});
+frontendProc.on('exit', (code) => {
+    if (code !== 0 && !isShuttingDown) {
+        console.error(`[Error Frontend]: El proceso frontend terminó con código ${code}. Verifica si el puerto ${PORT} está ocupado.`);
+    }
 });
 
 let isShuttingDown = false;

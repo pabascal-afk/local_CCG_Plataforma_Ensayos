@@ -142,31 +142,34 @@ namespace Launcher {
         }
 
         private async Task CheckConnections() {
-            string localhostUrl = "http://localhost:8000";
-            string fallbackIpUrl = "http://192.168.3.16:8000";
+            var candidateHosts = new System.Collections.Generic.List<string>();
+
+            // 0. Archivo de configuracion local opcional (server_ip.txt)
+            try {
+                string cfgFile = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "server_ip.txt");
+                if (System.IO.File.Exists(cfgFile)) {
+                    string ipFromCfg = System.IO.File.ReadAllText(cfgFile).Trim();
+                    if (!string.IsNullOrEmpty(ipFromCfg)) {
+                        candidateHosts.Add(ipFromCfg.StartsWith("http") ? ipFromCfg : "http://" + ipFromCfg + ":8000");
+                    }
+                }
+            } catch { }
+
+            candidateHosts.Add("http://localhost:8000");
+            candidateHosts.Add("http://192.168.0.142:8000");
+            candidateHosts.Add("http://192.168.3.16:8000");
+            candidateHosts.Add("http://ensayos.local:8000");
 
             using (HttpClient client = new HttpClient(CreateHandler())) {
                 client.Timeout = TimeSpan.FromMilliseconds(1500);
 
-                // 1. Probar en este mismo equipo
-                statusLabel.Text = "Buscando servidor en este equipo (localhost:8000)...";
-                if (await TryConnect(client, localhostUrl + "/api/health")) {
-                    OpenUrl(localhostUrl);
-                    return;
-                }
-
-                // 2. Probar en IP de servidor habitual
-                statusLabel.Text = "Buscando servidor en la red local (192.168.3.16:8000)...";
-                if (await TryConnect(client, fallbackIpUrl + "/api/health")) {
-                    OpenUrl(fallbackIpUrl);
-                    return;
-                }
-
-                // 3. Probar por mDNS
-                statusLabel.Text = "Buscando servidor por red local (ensayos.local:8000)...";
-                if (await TryConnect(client, "http://ensayos.local:8000/api/health")) {
-                    OpenUrl("http://ensayos.local:8000");
-                    return;
+                foreach (string baseUrl in candidateHosts) {
+                    string cleanUrl = baseUrl.TrimEnd('/');
+                    statusLabel.Text = "Buscando servidor en " + cleanUrl + "...";
+                    if (await TryConnect(client, cleanUrl + "/api/health")) {
+                        OpenUrl(cleanUrl);
+                        return;
+                    }
                 }
             }
 
