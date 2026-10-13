@@ -5,7 +5,7 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  // Todo el tráfico entra por el puerto 5000; /api/* se redirige internamente al backend.
+  // Todo el tráfico entra por el puerto 8000; /api/* se redirige internamente al backend.
   async rewrites() {
     return [{ source: '/api/:path*', destination: `${API_TARGET}/api/:path*` }];
   },
