@@ -2,14 +2,14 @@
 
 Sistema institucional integral para la administración, aplicación en línea, corrección automática, análisis psicométrico (TRI/IRT), monitoreo en tiempo real, gestión de evaluaciones remediales y trayectorias multianuales de Ensayos SIMCE.
 
-Diseñado para funcionar en **Servidor Local dentro de la Red del Colegio (LAN)** en el **Puerto 8000**, sin depender de túneles externos ni servicios en la nube de pago.
+Diseñado para funcionar en **Servidor Local dentro de la Red del Colegio (LAN)** en el **Puerto 3300**, sin depender de túneles externos ni servicios en la nube de pago.
 
 ---
 
 ## 🚀 Arquitectura en Red Local (LAN)
 
-- **Puerto Principal de la Red (LAN):** `8000` (`http://<IP_SERVIDOR>:8000` o `http://localhost:8000`)
-- **Frontend:** Next.js 14 optimizado en producción (escuchando en `0.0.0.0:8000`).
+- **Puerto Principal de la Red (LAN):** `3300` (`http://<IP_SERVIDOR>:3300` o `http://localhost:3300`)
+- **Frontend:** Next.js 14 optimizado en producción (escuchando en `0.0.0.0:3300`).
 - **Backend / API:** Node.js + Express + Prisma ORM + SQLite (escuchando en `127.0.0.1:3001` detrás del proxy interno).
 - **Base de Datos:** SQLite local rápida, autónoma y persistente (`backend/simce.db`).
 
@@ -24,7 +24,7 @@ Diseñado para funcionar en **Servidor Local dentro de la Red del Colegio (LAN)*
    - Instala todas las dependencias (`npm install`).
    - Genera el cliente Prisma y aplica migraciones a la base de datos SQLite.
    - Compila la versión de producción de Next.js (`npm run build`).
-   - Configura la regla en el Firewall de Windows para permitir tráfico entrante por el puerto 8000.
+   - Configura la regla en el Firewall de Windows para permitir tráfico entrante por el puerto 3300.
    - Crea un acceso directo en el Escritorio con el logo institucional.
    - Inicia automáticamente la plataforma en segundo plano.
 
@@ -36,13 +36,13 @@ Diseñado para funcionar en **Servidor Local dentro de la Red del Colegio (LAN)*
    - Mantiene los procesos de frontend y backend orquestados.
    - Coloca un icono en el área de notificaciones (junto al reloj de Windows).
    - Menú contextual:
-     - 🌐 **Abrir en este PC:** Abre `http://localhost:8000` en el navegador.
-     - 📱 **Abrir desde la red (IP):** Abre `http://<IP_LOCAL>:8000`.
+     - 🌐 **Abrir en este PC:** Abre `http://localhost:3300` en el navegador.
+     - 📱 **Abrir desde la red (IP):** Abre `http://<IP_LOCAL>:3300`.
      - ❌ **Detener Servidor:** Apaga limpiamente el frontend, backend y el icono.
 
 4. **`Lanzador_Plataforma.exe`:**
    - Aplicación cliente ligera para los computadores de la sala de profesores, laboratorios o salas de clases.
-   - Comprueba la conectividad al servidor local en el puerto 8000 y abre automáticamente el navegador web predeterminado.
+   - Comprueba la conectividad al servidor local en el puerto 3300 y abre automáticamente el navegador web predeterminado.
 
 ---
 
@@ -86,7 +86,7 @@ Diseñado para funcionar en **Servidor Local dentro de la Red del Colegio (LAN)*
 ├── Launcher.cs               # Código fuente del cliente lanzador (C# .NET)
 ├── Iniciar_Plataforma.vbs    # Ejecutor silencioso en segundo plano
 ├── Instalador_Servidor.bat   # Script de instalación y actualización automática
-├── server.js                 # Orquestador del servidor (Puerto 8000 + Backend 3001)
+├── server.js                 # Orquestador del servidor (Puerto 3300 + Backend 3001)
 ├── tray.js                   # Integración con la bandeja de Windows (systray2)
 ├── package.json              # Dependencias del orquestador
 └── README.md                 # Documentación técnica y operacional

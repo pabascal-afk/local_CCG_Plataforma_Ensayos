@@ -150,15 +150,15 @@ namespace Launcher {
                 if (System.IO.File.Exists(cfgFile)) {
                     string ipFromCfg = System.IO.File.ReadAllText(cfgFile).Trim();
                     if (!string.IsNullOrEmpty(ipFromCfg)) {
-                        candidateHosts.Add(ipFromCfg.StartsWith("http") ? ipFromCfg : "http://" + ipFromCfg + ":8000");
+                        candidateHosts.Add(ipFromCfg.StartsWith("http") ? ipFromCfg : "http://" + ipFromCfg + ":3300");
                     }
                 }
             } catch { }
 
-            candidateHosts.Add("http://localhost:8000");
-            candidateHosts.Add("http://192.168.0.142:8000");
-            candidateHosts.Add("http://192.168.3.16:8000");
-            candidateHosts.Add("http://ensayos.local:8000");
+            candidateHosts.Add("http://localhost:3300");
+            candidateHosts.Add("http://192.168.0.142:3300");
+            candidateHosts.Add("http://192.168.3.16:3300");
+            candidateHosts.Add("http://ensayos.local:3300");
 
             using (HttpClient client = new HttpClient(CreateHandler())) {
                 client.Timeout = TimeSpan.FromMilliseconds(1500);
@@ -177,7 +177,7 @@ namespace Launcher {
             progressBar.Style = ProgressBarStyle.Blocks;
             progressBar.Value = 100;
             statusLabel.ForeColor = Color.DarkRed;
-            statusLabel.Text = "Servidor no accesible en la red local (Puerto 8000).";
+            statusLabel.Text = "Servidor no accesible en la red local (Puerto 3300).";
             retryButton.Visible = true;
             closeButton.Visible = true;
         }

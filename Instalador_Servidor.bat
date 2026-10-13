@@ -30,9 +30,9 @@ git config --global http.sslVerify false >nul 2>&1
 :: 3. Revisar si ya esta clonado
 IF EXIST ".git" (
     echo [INFO] Detectado como repositorio existente.
-    echo [INFO] Deteniendo servidores y liberando puerto 8000 si estaba ocupado...
+    echo [INFO] Deteniendo servidores y liberando puerto 3300 si estaba ocupado...
     taskkill /F /IM node.exe >nul 2>&1
-    powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+    powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 3300 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
     echo [INFO] Obteniendo actualizaciones desde GitHub...
     git pull origin main
 ) ELSE (
@@ -89,11 +89,11 @@ echo.
 echo ==========================================================
 echo   [4/4] Configurando Firewall y Acceso de Red Local (LAN)...
 echo ==========================================================
-:: Permitir puerto 8000 en el Firewall de Windows para conexion de otros equipos en la LAN
-netsh advfirewall firewall show rule name="Plataforma Ensayos SIMCE (Puerto 8000)" >nul 2>&1
+:: Permitir puerto 3300 en el Firewall de Windows para conexion de otros equipos en la LAN
+netsh advfirewall firewall show rule name="Plataforma Ensayos SIMCE (Puerto 3300)" >nul 2>&1
 IF ERRORLEVEL 1 (
-    echo [INFO] Creando regla de Firewall para puerto 8000 (LAN)...
-    netsh advfirewall firewall add rule name="Plataforma Ensayos SIMCE (Puerto 8000)" dir=in action=allow protocol=TCP localport=8000 >nul 2>&1
+    echo [INFO] Creando regla de Firewall para puerto 3300 (LAN)...
+    netsh advfirewall firewall add rule name="Plataforma Ensayos SIMCE (Puerto 3300)" dir=in action=allow protocol=TCP localport=3300 >nul 2>&1
 )
 
 :: Crear acceso directo en el Escritorio
@@ -104,7 +104,7 @@ echo.
 color 0A
 echo ==========================================================
 echo   [EXITO] Instalacion y configuracion completada con exito.
-echo   La plataforma correra en el puerto 8000.
+echo   La plataforma correra en el puerto 3300.
 echo ==========================================================
 echo.
 echo Arrancando el servidor en segundo plano...

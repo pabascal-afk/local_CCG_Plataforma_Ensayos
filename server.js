@@ -16,7 +16,7 @@ function getLocalIp() {
     return '127.0.0.1';
 }
 
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 3300;
 const BACKEND_PORT = process.env.BACKEND_PORT || 3001;
 const localIp = getLocalIp();
 
@@ -50,7 +50,7 @@ backendProc.on('exit', (code) => {
     }
 });
 
-// Iniciar Frontend (Next.js en producción en el puerto 8000, escuchando en 0.0.0.0)
+// Iniciar Frontend (Next.js en producción en el puerto 3300, escuchando en 0.0.0.0)
 const frontendDir = path.join(__dirname, 'frontend');
 const nextBin = path.join(frontendDir, 'node_modules', 'next', 'dist', 'bin', 'next');
 
