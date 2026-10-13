@@ -23,29 +23,78 @@ namespace Launcher {
 
         public MainForm() {
             this.Text = "Plataforma Ensayos SIMCE - CCG";
-            this.Size = new Size(390, 185);
+            this.Size = new Size(420, 215);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
+            try {
+                this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            } catch { }
+
+            Panel pnlHeader = new Panel() {
+                Dock = DockStyle.Top,
+                Height = 56,
+                Padding = new Padding(15, 8, 15, 4)
+            };
+
+            PictureBox picLogo = new PictureBox() {
+                Size = new Size(40, 40),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Dock = DockStyle.Left
+            };
+            if (this.Icon != null) {
+                try {
+                    picLogo.Image = this.Icon.ToBitmap();
+                } catch { }
+            }
+
+            Panel pnlTitles = new Panel() {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(10, 2, 0, 0)
+            };
+
+            Label titleLabel = new Label() {
+                Text = "Colegio Cerro Grande",
+                Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(14, 61, 153),
+                Dock = DockStyle.Top,
+                Height = 22
+            };
+
+            Label subtitleLabel = new Label() {
+                Text = "Plataforma de Ensayos SIMCE (Red Local)",
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(90, 90, 90),
+                Dock = DockStyle.Top,
+                Height = 18
+            };
+
+            pnlTitles.Controls.Add(subtitleLabel);
+            pnlTitles.Controls.Add(titleLabel);
+
+            pnlHeader.Controls.Add(pnlTitles);
+            pnlHeader.Controls.Add(picLogo);
+
             statusLabel = new Label() {
                 Text = "Iniciando conexion con el servidor...",
                 AutoSize = false,
-                TextAlign = ContentAlignment.MiddleCenter,
+                TextAlign = ContentAlignment.MiddleLeft,
                 Dock = DockStyle.Top,
-                Height = 48,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+                Height = 32,
+                Padding = new Padding(16, 0, 16, 0),
+                Font = new Font("Segoe UI", 9f, FontStyle.Regular)
             };
 
-            Panel pnlProgress = new Panel() { Dock = DockStyle.Top, Height = 28, Padding = new Padding(20, 0, 20, 0) };
+            Panel pnlProgress = new Panel() { Dock = DockStyle.Top, Height = 24, Padding = new Padding(18, 0, 18, 0) };
             progressBar = new ProgressBar() {
                 Style = ProgressBarStyle.Marquee,
                 Dock = DockStyle.Fill
             };
             pnlProgress.Controls.Add(progressBar);
 
-            Panel pnlButtons = new Panel() { Dock = DockStyle.Bottom, Height = 42, Padding = new Padding(15, 5, 15, 8) };
+            Panel pnlButtons = new Panel() { Dock = DockStyle.Bottom, Height = 42, Padding = new Padding(18, 5, 18, 8) };
             
             retryButton = new Button() {
                 Text = "Reintentar",
@@ -76,7 +125,12 @@ namespace Launcher {
 
             this.Controls.Add(pnlProgress);
             this.Controls.Add(statusLabel);
+            this.Controls.Add(pnlHeader);
             this.Controls.Add(pnlButtons);
+
+            pnlHeader.BringToFront();
+            statusLabel.BringToFront();
+            pnlProgress.BringToFront();
 
             this.Load += async (s, e) => await CheckConnections();
         }

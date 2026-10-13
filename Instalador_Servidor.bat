@@ -97,7 +97,7 @@ IF ERRORLEVEL 1 (
 
 :: Crear acceso directo en el Escritorio
 echo [INFO] Creando acceso directo en el Escritorio...
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'Plataforma Ensayos SIMCE.lnk')); $s.TargetPath = [System.IO.Path]::Combine((Get-Location).Path, 'Iniciar_Plataforma.vbs'); $s.WorkingDirectory = (Get-Location).Path; $s.Description = 'Iniciar Plataforma de Ensayos SIMCE (Colegio Cerro Grande)'; if (Test-Path 'CCG-logo-300x300.png') { $s.IconLocation = (Join-Path (Get-Location).Path 'CCG-logo-300x300.png') }; $s.Save()" >nul 2>&1
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'Plataforma Ensayos SIMCE.lnk')); $s.TargetPath = [System.IO.Path]::Combine((Get-Location).Path, 'Iniciar_Plataforma.vbs'); $s.WorkingDirectory = (Get-Location).Path; $s.Description = 'Iniciar Plataforma de Ensayos SIMCE (Colegio Cerro Grande)'; if (Test-Path 'app.ico') { $s.IconLocation = (Join-Path (Get-Location).Path 'app.ico') } elseif (Test-Path 'CCG-logo-300x300.png') { $s.IconLocation = (Join-Path (Get-Location).Path 'CCG-logo-300x300.png') }; $s.Save()" >nul 2>&1
 
 echo.
 color 0A

@@ -9,6 +9,10 @@ function getIconBase64() {
         if (fs.existsSync(iconPath)) {
             return fs.readFileSync(iconPath, 'utf8').trim();
         }
+        const icoPath = path.join(__dirname, 'app.ico');
+        if (fs.existsSync(icoPath)) {
+            return fs.readFileSync(icoPath).toString('base64');
+        }
     } catch (e) {
         // Fallback below
     }
