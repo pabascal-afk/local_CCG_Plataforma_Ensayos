@@ -1,0 +1,23 @@
+{
+  "name": "local-ccg-plataforma-ensayos",
+  "version": "1.0.0",
+  "description": "Plataforma de Ensayos SIMCE - Servidor Local Colegio Cerro Grande",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "build:frontend": "cd frontend && npm run build",
+    "test:backend": "cd backend && npm test"
+  },
+  "keywords": [
+    "simce",
+    "colegio",
+    "ensayos",
+    "evaluaciones"
+  ],
+  "author": "Colegio Cerro Grande",
+  "license": "ISC",
+  "dependencies": {
+    "systray2": "^2.1.4"
+  }
+}

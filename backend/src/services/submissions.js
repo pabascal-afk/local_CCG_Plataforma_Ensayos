@@ -1,0 +1,82 @@
+const { prisma } = require('../lib/prisma');
+const { computeResults } = require('./grading');
+
+/**
+ * Momento límite de un intento: el menor entre (inicio + duración) y el cierre de la asignación.
+ */
+function getDeadline(submission, assignment, exam) {
+  const closes = new Date(assignment.closesAt).getTime();
+  if (!exam.durationMinutes) return new Date(closes);
+  const byDuration = new Date(submission.startedAt).getTime() + exam.durationMinutes * 60 * 1000;
+  return new Date(Math.min(closes, byDuration));
+}
+
+/**
+ * Corrige y cierra un intento. Idempotente: si ya estaba entregado, lo devuelve sin cambios.
+ */
+async function finalizeSubmission(submissionId, { auto = false } = {}) {
+  return prisma.$transaction(async (tx) => {
+    const submission = await tx.submission.findUnique({
+      where: { id: submissionId },
+      include: {
+        answers: true,
+        assignment: { include: { exam: { include: { questions: true } } } },
+      },
+    });
+    if (!submission) throw new Error('Intento no encontrado');
+    if (submission.status === 'SUBMITTED') return submission;
+
+    const exam = submission.assignment.exam;
+    const answersMap = {};
+    for (const a of submission.answers) answersMap[a.questionId] = a.selectedAnswer;
+
+    const results = computeResults(exam.questions, answersMap, exam);
+
+    for (const pq of results.perQuestion) {
+      if (pq.selected === null) continue;
+      await tx.submissionAnswer.update({
+        where: { submissionId_questionId: { submissionId, questionId: pq.questionId } },
+        data: { isCorrect: pq.isCorrect },
+      });
+    }
+
+    return tx.submission.update({
+      where: { id: submissionId },
+      data: {
+        status: 'SUBMITTED',
+        submittedAt: new Date(),
+        autoSubmitted: auto,
+        correctCount: results.correctCount,
+        percent: results.percent,
+        grade: results.grade,
+        achievementLevel: results.achievementLevel,
+        simceScore: results.simceScore,
+        theta: results.theta,
+        seTheta: results.seTheta,
+      },
+    });
+  });
+}
+
+/**
+ * Entrega automáticamente los intentos cuyo tiempo venció (alumno cerró el navegador, etc.).
+ */
+async function sweepExpiredSubmissions() {
+  const open = await prisma.submission.findMany({
+    where: { status: 'IN_PROGRESS' },
+    include: { assignment: { include: { exam: true } } },
+  });
+  const now = Date.now();
+  let count = 0;
+  for (const s of open) {
+    const deadline = getDeadline(s, s.assignment, s.assignment.exam).getTime();
+    // 30 s de gracia para el último autoguardado
+    if (now > deadline + 30 * 1000) {
+      await finalizeSubmission(s.id, { auto: true });
+      count += 1;
+    }
+  }
+  return count;
+}
+
+module.exports = { getDeadline, finalizeSubmission, sweepExpiredSubmissions };

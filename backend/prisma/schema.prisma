@@ -1,0 +1,183 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Roles: ADMIN | DIRECTOR | TEACHER | STUDENT
+model User {
+  rut                String          @id // normalizado: 12345678-9 / 12345678-K
+  passwordHash       String
+  role               String          @default("STUDENT")
+  name               String
+  mustChangePassword Boolean         @default(true)
+  isActive           Boolean         @default(true)
+  courseId           Int? // solo estudiantes
+  course             Course?         @relation("StudentCourse", fields: [courseId], references: [id])
+  teaching           TeacherCourse[]
+  managedAssignments ExamAssignment[] @relation("ManagedAssignments")
+  proposedRemedials   RemedialProposal[] @relation("ProposedRemedials")
+  submissions        Submission[]
+  createdAt          DateTime        @default(now())
+}
+
+model Course {
+  id          Int              @id @default(autoincrement())
+  level       String // 4B | 6B | 2M
+  letter      String
+  year        Int
+  students    User[]           @relation("StudentCourse")
+  teachers    TeacherCourse[]
+  assignments ExamAssignment[]
+  simceMilestones SimceMilestone[]
+  remedialProposals RemedialProposal[]
+
+  @@unique([level, letter, year])
+}
+
+model TeacherCourse {
+  teacherRut String
+  courseId   Int
+  teacher    User   @relation(fields: [teacherRut], references: [rut], onDelete: Cascade)
+  course     Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([teacherRut, courseId])
+}
+
+model Exam {
+  id              Int              @id @default(autoincrement())
+  title           String
+  subject         String // Lectura | Matematica | Ciencias Naturales | Historia
+  level           String // 4B | 6B | 2M
+  pdfPath         String // nombre de archivo dentro de backend/uploads
+  optionsCount    Int              @default(4) // 4 = A-D, 5 = A-E
+  durationMinutes Int?
+  passThreshold   Float            @default(0.6) // exigencia para el 4.0
+  minGrade        Float            @default(1.0)
+  cutElemental    Float            @default(0.50)
+  cutAdecuado     Float            @default(0.75)
+  simceCutElemental Int?           @default(241)
+  simceCutAdecuado  Int?           @default(284)
+  orderNumber     Int              @default(1)
+  examType        String           @default("ENSAYO")
+  createdAt       DateTime         @default(now())
+  questions       Question[]
+  assignments     ExamAssignment[]
+  remedialProposals RemedialProposal[]
+}
+
+model Question {
+  id                Int                @id @default(autoincrement())
+  examId            Int
+  questionNumber    Int
+  correctAnswer     String
+  skill             String? // Habilidad
+  axis              String? // Eje tematico
+  learningObjective String? // OA puntual
+  difficulty        Float?             @default(0.0) // Parámetro b TRI (-3 a +3)
+  discrimination    Float?             @default(1.0) // Parámetro a TRI (0.5 a 2.5)
+  guessing          Float?             @default(0.25) // Parámetro c TRI
+  exam              Exam               @relation(fields: [examId], references: [id], onDelete: Cascade)
+  answers           SubmissionAnswer[]
+
+  @@unique([examId, questionNumber])
+}
+
+model ExamAssignment {
+  id                 Int          @id @default(autoincrement())
+  examId             Int
+  courseId           Int
+  opensAt            DateTime
+  closesAt           DateTime
+  status             String       @default("SCHEDULED") // SCHEDULED | ONGOING | COMPLETED | RESCHEDULED | CANCELLED
+  originalOpensAt    DateTime?
+  cancelReason       String?
+  dynamicPassword    String?      // PIN / clave temporal de clase generada por el profesor
+  dynamicPasswordActive Boolean   @default(false)
+  released           Boolean      @default(false) // resultados visibles al alumno
+  releasedAt         DateTime?
+  releasedBy         String?
+  assignedTeacherRut String?
+  remedialOriginId   Int?         // Asignación de ensayo SIMCE origen si esta es una remedial
+  assignedTeacher    User?        @relation("ManagedAssignments", fields: [assignedTeacherRut], references: [rut])
+  exam               Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  course             Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  submissions        Submission[]
+  remedialProposals  RemedialProposal[] @relation("OriginRemedials")
+
+  @@unique([examId, courseId])
+}
+
+model Submission {
+  id               Int                @id @default(autoincrement())
+  studentRut       String
+  assignmentId     Int
+  status           String             @default("IN_PROGRESS") // IN_PROGRESS | SUBMITTED
+  startedAt        DateTime           @default(now())
+  submittedAt      DateTime?
+  autoSubmitted    Boolean            @default(false)
+  correctCount     Int?
+  percent          Float?
+  grade            Float?
+  achievementLevel String? // INSUFICIENTE | ELEMENTAL | ADECUADO
+  simceScore       Int? // Escala oficial SIMCE (100 a 400)
+  theta            Float? // Habilidad latente estimada (-3.5 a +3.5)
+  seTheta          Float? // Error estándar de medición
+  student          User               @relation(fields: [studentRut], references: [rut], onDelete: Cascade)
+  assignment       ExamAssignment     @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  answers          SubmissionAnswer[]
+
+  @@unique([studentRut, assignmentId]) // un solo intento
+}
+
+model SubmissionAnswer {
+  id             Int        @id @default(autoincrement())
+  submissionId   Int
+  questionId     Int
+  selectedAnswer String
+  isCorrect      Boolean?
+  updatedAt      DateTime   @updatedAt
+  submission     Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  question       Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, questionId])
+}
+
+model SimceMilestone {
+  id        Int      @id @default(autoincrement())
+  title     String
+  level     String   // "4B", "6B", "8B", "2M", o nivel general
+  courseId  Int?     // Si aplica a un curso específico
+  course    Course?  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  date      DateTime
+  year      Int
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RemedialProposal {
+  id                  Int            @id @default(autoincrement())
+  originAssignmentId  Int
+  remedialExamId      Int?
+  teacherRut          String
+  courseId            Int
+  suggestedDate       DateTime
+  startTime           String         @default("08:30")
+  endTime             String         @default("10:00")
+  notes               String?
+  status              String         @default("PENDING") // PENDING | APPROVED | REJECTED
+  reviewNotes         String?
+  reviewedByRut       String?
+  createdAssignmentId Int?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  originAssignment    ExamAssignment @relation("OriginRemedials", fields: [originAssignmentId], references: [id], onDelete: Cascade)
+  course              Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  teacher             User           @relation("ProposedRemedials", fields: [teacherRut], references: [rut], onDelete: Cascade)
+  remedialExam        Exam?          @relation(fields: [remedialExamId], references: [id], onDelete: SetNull)
+}

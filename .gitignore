@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Next.js & builds
+.next/
+frontend/.next/
+frontend/out/
+build/
+dist/
+
+# Environment files
+.env
+.env*.local
+backend/.env
+
+# Databases & local sqlite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+backend/prisma/*.db
+backend/prisma/*.db-journal
+
+# Uploads
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Logs
+*.log
+backend-err.log
+backend.log
+frontend-err.log
+frontend.log
+npm-debug.log*
+
+# Scratch & temporary
+scratch/
+.system_generated/
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
