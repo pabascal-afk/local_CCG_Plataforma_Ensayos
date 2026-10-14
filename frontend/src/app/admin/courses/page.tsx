@@ -95,11 +95,16 @@ export default function CoursesPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al importar cursos");
 
-      alert(`Cursos procesados con éxito. Creados: ${data.imported}. Errores: ${data.errors.length}`);
+      if (data.errors && data.errors.length > 0) {
+        const errorDetails = data.errors.slice(0, 5).map((errItem: any) => `• Fila ${errItem.row}: ${errItem.error}`).join("\n");
+        alert(`Cursos creados con éxito: ${data.imported}\n\nFilas con advertencia o error (${data.errors.length}):\n${errorDetails}${data.errors.length > 5 ? '\n... (y más)' : ''}`);
+      } else {
+        alert(`¡Importación exitosa! Se procesaron ${data.imported} curso(s) correctamente.`);
+      }
       setImportFile(null);
       loadCourses();
     } catch (err: any) {
-      alert(err.message);
+      alert("Error al importar: " + err.message);
     } finally {
       setImporting(false);
     }

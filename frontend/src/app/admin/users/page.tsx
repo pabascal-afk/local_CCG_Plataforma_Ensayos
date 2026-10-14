@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
@@ -101,6 +101,8 @@ export default function UsersPage() {
     loadData();
   }, [selectedYear]);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const handleImport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return;
@@ -118,13 +120,22 @@ export default function UsersPage() {
         body: formData
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error al importar");
+      if (!res.ok) throw new Error(data.error || "Error al importar usuarios");
       
-      alert(`Importados con éxito: ${data.imported}. Errores: ${data.errors.length}`);
+      if (data.errors && data.errors.length > 0) {
+        const errorDetails = data.errors.slice(0, 5).map((errItem: any) => `• Fila ${errItem.row}: ${errItem.error}`).join("\n");
+        alert(`Importados con éxito: ${data.imported}\n\nFilas con advertencia o error (${data.errors.length}):\n${errorDetails}${data.errors.length > 5 ? '\n... (y más)' : ''}`);
+      } else {
+        alert(`¡Importación exitosa! Se procesaron ${data.imported} usuario(s) correctamente.`);
+      }
+
       setFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       loadData();
     } catch (err: any) {
-      alert(err.message);
+      alert("Error al importar: " + err.message);
     } finally {
       setImporting(false);
     }
@@ -248,6 +259,7 @@ export default function UsersPage() {
 
                 <form onSubmit={handleImport} className="flex items-center gap-1.5 bg-white p-1 border rounded-lg shadow-sm">
                   <input 
+                    ref={fileInputRef}
                     type="file" 
                     accept=".xlsx,.csv" 
                     onChange={e => setFile(e.target.files?.[0] || null)}

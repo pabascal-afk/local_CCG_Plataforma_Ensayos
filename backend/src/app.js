@@ -27,11 +27,14 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada' });
 });
 
-// Manejador de errores
+// Manejador de errores global
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Error interno del servidor' });
+  console.error('[API Error no controlado]:', err);
+  const status = typeof err.status === 'number' ? err.status : 500;
+  res.status(status).json({
+    error: err.message || 'Error interno del servidor',
+  });
 });
 
 module.exports = app;

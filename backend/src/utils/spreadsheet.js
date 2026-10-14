@@ -7,43 +7,49 @@ const { Readable } = require('stream');
  */
 async function parseSpreadsheet(buffer, filename = '') {
   if (!buffer || buffer.length === 0) {
-    throw new Error('El archivo está vacío');
+    throw new Error('El archivo está vacío. Por favor selecciona un archivo con datos.');
+  }
+
+  const lowerName = String(filename || '').toLowerCase();
+
+  if (lowerName.endsWith('.xls') && !lowerName.endsWith('.xlsx')) {
+    throw new Error('El formato .xls antiguo de Excel no es compatible. Por favor abre el archivo en Excel y guárdalo como Libro de Excel (.xlsx) o CSV (.csv).');
   }
 
   const wb = new exceljs.Workbook();
-  const lowerName = String(filename || '').toLowerCase();
-  
-  // Si la extensión es .csv, o si el archivo no empieza con 'PK' (0x50, 0x4B - firma zip de xlsx)
   const isZip = buffer.length >= 2 && buffer[0] === 0x50 && buffer[1] === 0x4b;
-  const isCsv = lowerName.endsWith('.csv') || !isZip;
 
-  if (isCsv) {
+  // 1. Si tiene firma de archivo zip ('PK') o extensión .xlsx, intentar como Excel primero
+  if (isZip || lowerName.endsWith('.xlsx')) {
     try {
-      const text = buffer.toString('utf-8');
-      const firstLine = text.split('\n')[0] || '';
-      const delimiter = firstLine.includes(';') ? ';' : (firstLine.includes('\t') ? '\t' : ',');
-      await wb.csv.read(Readable.from(text), { parserOptions: { delimiter } });
-      if (wb.worksheets.length > 0) return wb.worksheets[0];
-    } catch {
-      // Fallback a xlsx si fallara
+      await wb.xlsx.load(buffer);
+      if (wb.worksheets && wb.worksheets.length > 0) {
+        return wb.worksheets[0];
+      }
+    } catch (err) {
+      if (isZip) {
+        throw new Error('El archivo Excel (.xlsx) no se pudo leer o está corrupto: ' + (err.message || 'Error de lectura'));
+      }
     }
   }
 
-  // Intento como xlsx
+  // 2. Intentar como CSV (detectando delimitador y removiendo BOM UTF-8)
   try {
-    await wb.xlsx.load(buffer);
-    if (wb.worksheets.length > 0) return wb.worksheets[0];
-  } catch (err) {
-    if (isZip) {
-      throw new Error('El archivo Excel (.xlsx) está dañado o no es válido');
+    let text = buffer.toString('utf-8');
+    if (text.charCodeAt(0) === 0xFEFF) {
+      text = text.slice(1);
     }
-    // Si no era zip y falló xlsx, intentar csv con coma
-    const text = buffer.toString('utf-8');
-    await wb.csv.read(Readable.from(text), { parserOptions: { delimiter: ',' } });
-    if (wb.worksheets.length > 0) return wb.worksheets[0];
+    const firstLine = text.split(/\r?\n/)[0] || '';
+    const delimiter = firstLine.includes(';') ? ';' : (firstLine.includes('\t') ? '\t' : ',');
+    await wb.csv.read(Readable.from(text), { parserOptions: { delimiter } });
+    if (wb.worksheets && wb.worksheets.length > 0) {
+      return wb.worksheets[0];
+    }
+  } catch (err) {
+    // Si falló como CSV
   }
 
-  throw new Error('No se pudo leer la hoja de cálculo');
+  throw new Error('No se pudo procesar la hoja de cálculo. Asegúrate de subir un archivo válido en formato .xlsx o .csv.');
 }
 
 /**
@@ -54,7 +60,7 @@ async function parseSpreadsheet(buffer, filename = '') {
  */
 async function createEmptyTemplate(columns, sheetName = 'Formato') {
   const wb = new exceljs.Workbook();
-  wb.creator = 'Colegio Concepción de Chillán';
+  wb.creator = 'Colegio Cerro Grande';
   wb.created = new Date();
 
   const sheet = wb.addWorksheet(sheetName);

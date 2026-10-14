@@ -23,6 +23,15 @@ const checkAdmin = (req, res, next) => {
   next();
 };
 
+function normalizeRole(val) {
+  const v = String(val || '').trim().toUpperCase();
+  if (['ESTUDIANTE', 'ALUMNO', 'STUDENT'].includes(v)) return 'STUDENT';
+  if (['PROFESOR', 'PROFESORA', 'DOCENTE', 'TEACHER'].includes(v)) return 'TEACHER';
+  if (['DIRECTOR', 'DIRECTORA', 'DIRECTIVO', 'UTP', 'JEFE_UTP'].includes(v)) return 'DIRECTOR';
+  if (['ADMIN', 'ADMINISTRADOR'].includes(v)) return 'ADMIN';
+  return 'STUDENT';
+}
+
 // ==========================================
 // PLANTILLAS VACÍAS (FORMATOS DE SUBIDA .xlsx)
 // ==========================================
@@ -885,58 +894,62 @@ router.delete('/courses/:id', checkAdmin, async (req, res, next) => {
 
 // Importar Cursos desde Excel o CSV
 router.post('/courses/import', checkAdmin, uploadMemory.single('file'), async (req, res, next) => {
-  if (!req.file) return res.status(400).json({ error: 'No se envió archivo' });
+  if (!req.file) return res.status(400).json({ error: 'No se envió ningún archivo para importar' });
+
+  let worksheet;
+  try {
+    worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
+  } catch (parseErr) {
+    return res.status(400).json({ error: parseErr.message || 'No se pudo leer el archivo Excel o CSV' });
+  }
 
   try {
-    const worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
     const results = { imported: 0, errors: [] };
 
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
-      const row = worksheet.getRow(rowNumber);
-      const col1 = (row.getCell(1).text || '').trim();
-      const col2 = (row.getCell(2).text || '').trim();
-      const col3 = (row.getCell(3).text || '').trim();
-      const col4 = (row.getCell(4).text || '').trim();
-
-      let level = '';
-      let letter = '';
-      let year = new Date().getFullYear();
-
-      if (col4) {
-        // Formato 4 columnas: Nivel, Enseñanza, Letra, Año
-        const nivelNum = col1.replace(/[^0-9]/g, '');
-        const ens = col2.toUpperCase().includes('M') ? 'M' : 'B';
-        level = `${nivelNum}${ens}`;
-        letter = col3.toUpperCase();
-        year = parseInt(col4, 10) || new Date().getFullYear();
-      } else {
-        // Formato 3 columnas: Nivel (ej. 2M o 4B), Letra, Año
-        level = col1.toUpperCase();
-        if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
-        letter = col2.toUpperCase();
-        year = parseInt(col3, 10) || new Date().getFullYear();
-      }
-
-      if (!level || !letter) continue;
-
       try {
-        const existing = await prisma.course.findFirst({
-          where: { level, letter, year }
-        });
-        if (!existing) {
-          await prisma.course.create({
-            data: { level, letter, year }
-          });
+        const row = worksheet.getRow(rowNumber);
+        const col1 = String(row.getCell(1).text || row.getCell(1).value || '').trim();
+        const col2 = String(row.getCell(2).text || row.getCell(2).value || '').trim();
+        const col3 = String(row.getCell(3).text || row.getCell(3).value || '').trim();
+        const col4 = String(row.getCell(4).text || row.getCell(4).value || '').trim();
+
+        let level = '';
+        let letter = '';
+        let year = new Date().getFullYear();
+
+        if (col4) {
+          // Formato 4 columnas: Nivel, Enseñanza, Letra, Año
+          const nivelNum = col1.replace(/[^0-9]/g, '');
+          const ens = col2.toUpperCase().includes('M') ? 'M' : 'B';
+          level = `${nivelNum}${ens}`;
+          letter = col3.toUpperCase().replace(/[^A-Z]/g, '');
+          year = parseInt(col4, 10) || new Date().getFullYear();
+        } else {
+          // Formato 3 columnas: Nivel (ej. 2M o 4B), Letra, Año
+          level = col1.toUpperCase();
+          if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
+          letter = col2.toUpperCase().replace(/[^A-Z]/g, '');
+          year = parseInt(col3, 10) || new Date().getFullYear();
         }
+
+        if (!level || !letter) continue;
+
+        await prisma.course.upsert({
+          where: { level_letter_year: { level, letter, year } },
+          update: {},
+          create: { level, letter, year }
+        });
         results.imported++;
       } catch (err) {
         results.errors.push({ row: rowNumber, error: err.message });
       }
     }
 
-    res.json(results);
+    return res.json(results);
   } catch (error) {
-    next(error);
+    console.error('[Error importando cursos]:', error);
+    return res.status(500).json({ error: 'Error al importar cursos: ' + error.message });
   }
 });
 
@@ -1071,80 +1084,92 @@ router.delete('/users/:rut', checkAdmin, async (req, res, next) => {
 
 // Importar Usuarios desde Excel o CSV
 router.post('/users/import', checkAdmin, uploadMemory.single('file'), async (req, res, next) => {
-  if (!req.file) return res.status(400).json({ error: 'No se envió archivo' });
+  if (!req.file) return res.status(400).json({ error: 'No se envió ningún archivo para importar' });
+
+  let worksheet;
+  try {
+    worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
+  } catch (parseErr) {
+    console.error('[Error parseando archivo de usuarios]:', parseErr);
+    return res.status(400).json({ error: parseErr.message || 'No se pudo leer el archivo Excel o CSV' });
+  }
 
   try {
-    const worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
     const results = { imported: 0, errors: [] };
 
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
-      const row = worksheet.getRow(rowNumber);
-      const col1 = (row.getCell(1).text || '').trim();
-      const col2 = (row.getCell(2).text || '').trim();
-      const col3 = (row.getCell(3).text || '').trim();
-      const col4 = (row.getCell(4).text || '').trim();
-      const col5 = (row.getCell(5).text || '').trim();
-      const col6 = (row.getCell(6).text || '').trim();
-      const col7 = (row.getCell(7).text || '').trim();
-
-      let rut = normalizeRut(col1);
-      let name = col2;
-      let level = '';
-      let letter = '';
-      let year = new Date().getFullYear();
-      let role = 'STUDENT';
-
-      if (rut.length < 3 || !name) continue;
-
-      if (col6) {
-        // Formato 6 o 7 columnas: RUT, Nombre, Nivel, Enseñanza, Letra, Año, [Rol]
-        const nivelNum = col3.replace(/[^0-9]/g, '');
-        const ens = col4.toUpperCase().includes('M') ? 'M' : 'B';
-        level = `${nivelNum}${ens}`;
-        letter = col5.toUpperCase();
-        year = parseInt(col6, 10) || new Date().getFullYear();
-        if (col7) role = col7.toUpperCase();
-      } else if (col5 && /^\d{4}$/.test(col4)) {
-        // Formato 5 columnas: RUT, Nombre, Curso, Año, Rol
-        let courseString = col3.toUpperCase();
-        year = parseInt(col4, 10) || new Date().getFullYear();
-        role = col5.toUpperCase();
-        const match = courseString.match(/^(\d+)([BM]?)\s*([A-Z])$/);
-        if (match) {
-          level = match[1] + (match[2] || "B");
-          letter = match[3];
-        } else if (courseString.length >= 2) {
-          level = courseString.slice(0, -1);
-          if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
-          letter = courseString.slice(-1);
-        }
-      } else {
-        // Formato anterior: RUT, Nombre, Curso, Rol
-        let courseString = col3.toUpperCase();
-        if (col4) role = col4.toUpperCase();
-        const match = courseString.match(/^(\d+)([BM]?)\s*([A-Z])$/);
-        if (match) {
-          level = match[1] + (match[2] || "B");
-          letter = match[3];
-        } else if (courseString.length >= 2) {
-          level = courseString.slice(0, -1);
-          if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
-          letter = courseString.slice(-1);
-        }
-      }
-
-      let courseId = null;
-      if (role === 'STUDENT' && level && letter) {
-        let course = await prisma.course.findFirst({ where: { level, letter, year } });
-        if (!course) {
-          course = await prisma.course.create({ data: { year, level, letter } });
-        }
-        courseId = course.id;
-      }
-
       try {
-        const password = rut.split('-')[0].slice(0, 6);
+        const row = worksheet.getRow(rowNumber);
+        const col1 = String(row.getCell(1).text || row.getCell(1).value || '').trim();
+        const col2 = String(row.getCell(2).text || row.getCell(2).value || '').trim();
+        const col3 = String(row.getCell(3).text || row.getCell(3).value || '').trim();
+        const col4 = String(row.getCell(4).text || row.getCell(4).value || '').trim();
+        const col5 = String(row.getCell(5).text || row.getCell(5).value || '').trim();
+        const col6 = String(row.getCell(6).text || row.getCell(6).value || '').trim();
+        const col7 = String(row.getCell(7).text || row.getCell(7).value || '').trim();
+
+        let rut = normalizeRut(col1);
+        let name = col2;
+        let level = '';
+        let letter = '';
+        let year = new Date().getFullYear();
+        let role = 'STUDENT';
+
+        if (!rut || rut.length < 3 || !name) continue;
+
+        if (col6) {
+          // Formato 6 o 7 columnas: RUT, Nombre, Nivel, Enseñanza, Letra, Año, [Rol]
+          const nivelNum = col3.replace(/[^0-9]/g, '');
+          const ens = col4.toUpperCase().includes('M') ? 'M' : 'B';
+          level = `${nivelNum}${ens}`;
+          letter = col5.toUpperCase().replace(/[^A-Z]/g, '');
+          year = parseInt(col6, 10) || new Date().getFullYear();
+          if (col7) role = normalizeRole(col7);
+        } else if (col5 && /^\d{4}$/.test(col4)) {
+          // Formato 5 columnas: RUT, Nombre, Curso, Año, Rol
+          let courseString = col3.toUpperCase();
+          year = parseInt(col4, 10) || new Date().getFullYear();
+          role = normalizeRole(col5);
+          const match = courseString.match(/^(\d+)([BM]?)\s*([A-Z])$/);
+          if (match) {
+            level = match[1] + (match[2] || "B");
+            letter = match[3];
+          } else if (courseString.length >= 2) {
+            level = courseString.slice(0, -1);
+            if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
+            letter = courseString.slice(-1);
+          }
+        } else {
+          // Formato anterior: RUT, Nombre, Curso, Rol
+          let courseString = col3.toUpperCase();
+          if (col4) role = normalizeRole(col4);
+          const match = courseString.match(/^(\d+)([BM]?)\s*([A-Z])$/);
+          if (match) {
+            level = match[1] + (match[2] || "B");
+            letter = match[3];
+          } else if (courseString.length >= 2) {
+            level = courseString.slice(0, -1);
+            if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
+            letter = courseString.slice(-1);
+          }
+        }
+
+        let courseId = null;
+        if (role === 'STUDENT' && level && letter) {
+          let course = await prisma.course.upsert({
+            where: {
+              level_letter_year: { level, letter, year }
+            },
+            update: {},
+            create: { level, letter, year }
+          });
+          courseId = course.id;
+        }
+
+        const rawDigits = rut.replace(/[^0-9]/g, '');
+        const password = rawDigits.length >= 4 ? rawDigits.slice(0, 6) : 'simce123';
         const hash = await bcrypt.hash(password, 10);
+
         await prisma.user.upsert({
           where: { rut },
           update: { name, role, courseId },
@@ -1156,9 +1181,10 @@ router.post('/users/import', checkAdmin, uploadMemory.single('file'), async (req
       }
     }
 
-    res.json(results);
+    return res.json(results);
   } catch (error) {
-    next(error);
+    console.error('[Error interno al procesar usuarios]:', error);
+    return res.status(500).json({ error: 'Error interno al procesar usuarios: ' + error.message });
   }
 });
 
@@ -1450,31 +1476,37 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
 
 // Importar Pauta de Ensayo desde Excel o CSV
 router.post('/exams/:id/import-questions', checkAdmin, uploadMemory.single('file'), async (req, res, next) => {
-  if (!req.file) return res.status(400).json({ error: 'No se envió archivo' });
+  if (!req.file) return res.status(400).json({ error: 'No se envió ningún archivo para importar' });
+
+  let worksheet;
+  try {
+    worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
+  } catch (parseErr) {
+    return res.status(400).json({ error: parseErr.message || 'No se pudo leer el archivo Excel o CSV' });
+  }
 
   try {
     const examId = parseInt(req.params.id, 10);
     const exam = await prisma.exam.findUnique({ where: { id: examId } });
     if (!exam) return res.status(404).json({ error: 'Ensayo no encontrado' });
 
-    const worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
     const results = { imported: 0, errors: [] };
 
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
-      const row = worksheet.getRow(rowNumber);
-      let qNumStr = (row.getCell(1).text || '').trim();
-      let qNum = parseInt(qNumStr, 10);
-      let ans = (row.getCell(2).text || '').trim().toUpperCase();
-      let skill = (row.getCell(3).text || '').trim() || null;
-      let axis = (row.getCell(4).text || '').trim() || null;
-      let oa = (row.getCell(5).text || '').trim() || null;
-      let diffStr = (row.getCell(6).text || '').trim();
-      let difficulty = diffStr !== '' ? parseFloat(diffStr) : 0.0;
-      if (isNaN(difficulty)) difficulty = 0.0;
-
-      if (isNaN(qNum) || !ans) continue;
-
       try {
+        const row = worksheet.getRow(rowNumber);
+        let qNumStr = String(row.getCell(1).text || row.getCell(1).value || '').trim();
+        let qNum = parseInt(qNumStr, 10);
+        let ans = String(row.getCell(2).text || row.getCell(2).value || '').trim().toUpperCase();
+        let skill = String(row.getCell(3).text || row.getCell(3).value || '').trim() || null;
+        let axis = String(row.getCell(4).text || row.getCell(4).value || '').trim() || null;
+        let oa = String(row.getCell(5).text || row.getCell(5).value || '').trim() || null;
+        let diffStr = String(row.getCell(6).text || row.getCell(6).value || '').trim();
+        let difficulty = diffStr !== '' ? parseFloat(diffStr) : 0.0;
+        if (isNaN(difficulty)) difficulty = 0.0;
+
+        if (isNaN(qNum) || !ans) continue;
+
         await prisma.question.upsert({
           where: { examId_questionNumber: { examId, questionNumber: qNum } },
           update: { correctAnswer: ans, skill, axis, learningObjective: oa, difficulty },
@@ -1486,9 +1518,10 @@ router.post('/exams/:id/import-questions', checkAdmin, uploadMemory.single('file
       }
     }
 
-    res.json(results);
+    return res.json(results);
   } catch (error) {
-    next(error);
+    console.error('[Error importando pauta]:', error);
+    return res.status(500).json({ error: 'Error al importar pauta: ' + error.message });
   }
 });
 
@@ -1799,26 +1832,32 @@ router.delete('/milestones/:id', checkAdmin, async (req, res, next) => {
 
 // Importar Asignaciones desde Excel o CSV
 router.post('/assignments/import', checkAdmin, uploadMemory.single('file'), async (req, res, next) => {
-  if (!req.file) return res.status(400).json({ error: 'No se envió archivo' });
+  if (!req.file) return res.status(400).json({ error: 'No se envió ningún archivo para importar' });
+
+  let worksheet;
+  try {
+    worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
+  } catch (parseErr) {
+    return res.status(400).json({ error: parseErr.message || 'No se pudo leer el archivo Excel o CSV' });
+  }
 
   try {
-    const worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
     const results = { imported: 0, errors: [] };
 
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
-      const row = worksheet.getRow(rowNumber);
-      let examIdStr = (row.getCell(1).text || '').trim();
-      let examId = parseInt(examIdStr, 10);
-      let level = (row.getCell(2).text || '').trim().toUpperCase();
-      let letter = (row.getCell(3).text || '').trim().toUpperCase();
-      let teacherRut = (row.getCell(4).text || '').trim();
-      let opensAtStr = (row.getCell(5).text || '').trim();
-      let closesAtStr = (row.getCell(6).text || '').trim();
-
-      if (!level || !letter) continue;
-      if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
-
       try {
+        const row = worksheet.getRow(rowNumber);
+        let examIdStr = String(row.getCell(1).text || row.getCell(1).value || '').trim();
+        let examId = parseInt(examIdStr, 10);
+        let level = String(row.getCell(2).text || row.getCell(2).value || '').trim().toUpperCase();
+        let letter = String(row.getCell(3).text || row.getCell(3).value || '').trim().toUpperCase();
+        let teacherRut = String(row.getCell(4).text || row.getCell(4).value || '').trim();
+        let opensAtStr = String(row.getCell(5).text || row.getCell(5).value || '').trim();
+        let closesAtStr = String(row.getCell(6).text || row.getCell(6).value || '').trim();
+
+        if (!level || !letter) continue;
+        if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
+
         // Resolve Exam
         let exam = null;
         if (!isNaN(examId)) {
@@ -1844,7 +1883,7 @@ router.post('/assignments/import', checkAdmin, uploadMemory.single('file'), asyn
           });
         }
         if (!course) {
-          results.errors.push({ row: rowNumber, error: `Curso ${level.replace('B', '° Básico').replace('M', '° Medio')} ${letter} no encontrado` });
+          results.errors.push({ row: rowNumber, error: `Curso ${level} ${letter} no encontrado` });
           continue;
         }
 
@@ -1861,8 +1900,16 @@ router.post('/assignments/import', checkAdmin, uploadMemory.single('file'), asyn
         const opensAt = opensAtStr ? new Date(opensAtStr) : new Date();
         const closesAt = closesAtStr ? new Date(closesAtStr) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-        await prisma.examAssignment.create({
-          data: {
+        await prisma.examAssignment.upsert({
+          where: {
+            examId_courseId: { examId: exam.id, courseId: course.id }
+          },
+          update: {
+            opensAt: isNaN(opensAt.getTime()) ? new Date() : opensAt,
+            closesAt: isNaN(closesAt.getTime()) ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : closesAt,
+            assignedTeacherRut
+          },
+          create: {
             examId: exam.id,
             courseId: course.id,
             opensAt: isNaN(opensAt.getTime()) ? new Date() : opensAt,
@@ -1876,9 +1923,10 @@ router.post('/assignments/import', checkAdmin, uploadMemory.single('file'), asyn
       }
     }
 
-    res.json(results);
+    return res.json(results);
   } catch (error) {
-    next(error);
+    console.error('[Error importando asignaciones]:', error);
+    return res.status(500).json({ error: 'Error al importar asignaciones: ' + error.message });
   }
 });
 
