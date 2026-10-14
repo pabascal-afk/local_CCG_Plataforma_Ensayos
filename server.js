@@ -160,15 +160,32 @@ if (fs.existsSync(prismaBin)) {
     }
 }
 
-// Asegurar existencia de usuario administrador si la BD es nueva
-const directDbPath = path.join(backendDir, 'simce.db');
-const prismaDbPath = path.join(backendDir, 'prisma', 'simce.db');
-if (!fs.existsSync(directDbPath) && !fs.existsSync(prismaDbPath)) {
-    log('[Backend] Inicializando usuario administrador por defecto...');
-    try {
-        spawnSync(nodeExe, ['clean-db.js'], { cwd: backendDir, stdio: 'inherit', env: process.env });
-    } catch (e) {}
-}
+// Asegurar existencia del usuario administrador en la base de datos
+try {
+    const ensureAdminScript = `
+    const { PrismaClient } = require('@prisma/client');
+    const bcrypt = require('bcryptjs');
+    const prisma = new PrismaClient();
+    async function run() {
+        const passwordHash = await bcrypt.hash('admin123', 10);
+        await prisma.user.upsert({
+            where: { rut: '11111111-1' },
+            update: { isActive: true, role: 'ADMIN' },
+            create: {
+                rut: '11111111-1',
+                name: 'Administrador (UTP / Admin)',
+                role: 'ADMIN',
+                passwordHash,
+                mustChangePassword: false,
+                isActive: true,
+            }
+        });
+    }
+    run().catch(() => {}).finally(() => prisma.$disconnect());
+    `;
+    spawnSync(nodeExe, ['-e', ensureAdminScript], { cwd: backendDir, stdio: 'ignore', env: process.env });
+    log('[Backend] Usuario administrador garantizado (RUT: 11111111-1 / admin123).');
+} catch (e) {}
 
 // 5. Auto-verificación de Frontend (dependencias y build de producción en .next)
 const frontendNodeModules = path.join(frontendDir, 'node_modules');

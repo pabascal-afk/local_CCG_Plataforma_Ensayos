@@ -49,7 +49,28 @@ router.post('/login', loginLimiter, async (req, res) => {
   } else {
     rut = normalizeRut(parsed.data.rut);
   }
-  const user = await prisma.user.findUnique({ where: { rut } });
+  let user = await prisma.user.findUnique({ where: { rut } });
+
+  // Si se intenta ingresar como ADMIN (11111111-1 o admin) con la clave maestra y no existe aún en la BD:
+  if (!user && (rut === '11111111-1' || rawInput === 'admin') && (parsed.data.password === 'admin123' || parsed.data.password === 'simce123')) {
+    const passwordHash = await bcrypt.hash('admin123', 10);
+    user = await prisma.user.upsert({
+      where: { rut: '11111111-1' },
+      update: {
+        isActive: true,
+        passwordHash,
+        role: 'ADMIN'
+      },
+      create: {
+        rut: '11111111-1',
+        name: 'Administrador (UTP / Admin)',
+        role: 'ADMIN',
+        passwordHash,
+        mustChangePassword: false,
+        isActive: true,
+      }
+    });
+  }
 
   let passwordMatches = user && user.isActive && (
     (await bcrypt.compare(parsed.data.password, user.passwordHash)) ||
