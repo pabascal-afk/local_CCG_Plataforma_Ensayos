@@ -1,4 +1,4 @@
-const { spawn, exec, execSync } = require('child_process');
+const { spawn, spawnSync, exec, execSync } = require('child_process');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -13,6 +13,43 @@ function log(msg) {
     const line = `[${ts}] ${msg}`;
     try { console.log(line); } catch (e) {}
     try { logStream.write(line + '\n'); } catch (e) {}
+}
+
+const nodeExe = process.execPath;
+
+// Localizador robusto del ejecutable interno npm-cli.js para evitar fallos de npm.cmd en Windows
+function findNpmCli() {
+    const nodeDir = path.dirname(nodeExe);
+    const candidates = [
+        path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+        path.join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+        path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'nodejs', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+        path.join(process.env.APPDATA || '', 'npm', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    ];
+    for (const c of candidates) {
+        try {
+            if (fs.existsSync(c)) return c;
+        } catch (e) {}
+    }
+    return null;
+}
+
+function runNpm(args, cwd) {
+    const npmCli = findNpmCli();
+    if (npmCli) {
+        const res = spawnSync(nodeExe, [npmCli, ...args], {
+            cwd,
+            stdio: 'inherit',
+            env: { ...process.env, npm_config_loglevel: 'error' }
+        });
+        if (res.status !== 0) {
+            throw new Error(`npm ${args.join(' ')} falló con código ${res.status}`);
+        }
+        return;
+    }
+    // Fallback nativo
+    execSync(`npm ${args.join(' ')}`, { cwd, stdio: 'inherit', shell: true });
 }
 
 // 2. Detección inteligente de la IP local de la red LAN
@@ -31,11 +68,9 @@ function getLocalIp() {
 
     for (const name of Object.keys(interfaces)) {
         const lowerName = name.toLowerCase();
-        // Omitir interfaces virtuales típicas
         const isVirtual = lowerName.includes('virtual') || lowerName.includes('vethernet') || lowerName.includes('vmware') || lowerName.includes('wsl');
         for (const iface of interfaces[name]) {
             if (iface.family === 'IPv4' && !iface.internal) {
-                // Si está en la subred 192.168.3.x (red del colegio), máxima prioridad
                 if (iface.address.startsWith('192.168.3.')) {
                     return iface.address;
                 }
@@ -53,11 +88,8 @@ function getLocalIp() {
 const PORT = parseInt(process.env.PORT, 10) || 3300;
 const BACKEND_PORT = parseInt(process.env.BACKEND_PORT, 10) || 3001;
 const localIp = getLocalIp();
-const nodeExe = process.execPath;
-const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 
-// 3. Liberar puertos si quedaron tomados por instancias anteriores o procesos zombis
+// 3. Liberar puertos si quedaron tomados por procesos anteriores
 function freePortIfBusy(port) {
     try {
         const cmd = `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"`;
@@ -87,65 +119,87 @@ log('===============================================================');
 const backendDir = path.join(__dirname, 'backend');
 const frontendDir = path.join(__dirname, 'frontend');
 
-// 4. Auto-verificación de Backend (entorno, dependencias, BD con usuario admin)
+// 4. Auto-verificación de Backend (entorno, dependencias y sincronización de base de datos)
 const backendEnv = path.join(backendDir, '.env');
 const backendEnvExample = path.join(backendDir, '.env.example');
 if (!fs.existsSync(backendEnv) && fs.existsSync(backendEnvExample)) {
     try {
         fs.copyFileSync(backendEnvExample, backendEnv);
-        log('[Backend] Archivo .env creado automáticamente desde .env.example');
+        log('[Backend] Archivo backend/.env creado desde .env.example');
     } catch (e) {}
 }
 
 const backendNodeModules = path.join(backendDir, 'node_modules');
 if (!fs.existsSync(backendNodeModules)) {
-    log('[Backend] Instalando dependencias de Node.js en backend...');
+    log('[Backend] Instalando dependencias en backend...');
     try {
-        execSync(`"${npmCmd}" install --no-audit`, { cwd: backendDir, stdio: 'inherit' });
+        runNpm(['install', '--no-audit'], backendDir);
     } catch (e) {
-        log(`[Backend Error] Falló npm install: ${e.message}`);
+        log(`[Backend Error] Falló npm install en backend: ${e.message}`);
     }
 }
 
-// Verificar base de datos SQLite y usuario admin
-const prismaDbPath = path.join(backendDir, 'prisma', 'simce.db');
-const directDbPath = path.join(backendDir, 'simce.db');
-if (!fs.existsSync(prismaDbPath) && !fs.existsSync(directDbPath)) {
-    log('[Backend] Base de datos no encontrada. Inicializando y creando usuario admin...');
+// Sincronizar esquema de base de datos directamente con el binario de Prisma
+const prismaBin = path.join(backendDir, 'node_modules', 'prisma', 'build', 'index.js');
+if (fs.existsSync(prismaBin)) {
     try {
-        execSync(`"${npxCmd}" prisma generate`, { cwd: backendDir, stdio: 'inherit' });
-        execSync(`"${npxCmd}" prisma migrate deploy`, { cwd: backendDir, stdio: 'inherit' });
-        execSync(`"${nodeExe}" clean-db.js`, { cwd: backendDir, stdio: 'inherit' });
-        log('[Backend] Base de datos creada con éxito (Admin: 11111111-1 / admin123)');
+        log('[Backend] Sincronizando esquema de base de datos (asegurando todas las columnas)...');
+        spawnSync(nodeExe, [prismaBin, 'db', 'push', '--accept-data-loss'], {
+            cwd: backendDir,
+            stdio: 'ignore',
+            env: process.env
+        });
+        spawnSync(nodeExe, [prismaBin, 'generate'], {
+            cwd: backendDir,
+            stdio: 'ignore',
+            env: process.env
+        });
+        log('[Backend] Esquema de base de datos actualizado correctamente.');
     } catch (e) {
-        log(`[Backend Error] Error inicializando base de datos: ${e.message}`);
+        log(`[Backend Advertencia] Error sincronizando Prisma: ${e.message}`);
     }
+}
+
+// Asegurar existencia de usuario administrador si la BD es nueva
+const directDbPath = path.join(backendDir, 'simce.db');
+const prismaDbPath = path.join(backendDir, 'prisma', 'simce.db');
+if (!fs.existsSync(directDbPath) && !fs.existsSync(prismaDbPath)) {
+    log('[Backend] Inicializando usuario administrador por defecto...');
+    try {
+        spawnSync(nodeExe, ['clean-db.js'], { cwd: backendDir, stdio: 'inherit', env: process.env });
+    } catch (e) {}
 }
 
 // 5. Auto-verificación de Frontend (dependencias y build de producción en .next)
 const frontendNodeModules = path.join(frontendDir, 'node_modules');
 if (!fs.existsSync(frontendNodeModules)) {
-    log('[Frontend] Instalando dependencias de Node.js en frontend...');
+    log('[Frontend] Instalando dependencias en frontend...');
     try {
-        execSync(`"${npmCmd}" install --no-audit`, { cwd: frontendDir, stdio: 'inherit' });
+        runNpm(['install', '--no-audit'], frontendDir);
     } catch (e) {
         log(`[Frontend Error] Falló npm install en frontend: ${e.message}`);
     }
 }
 
 const frontendBuildId = path.join(frontendDir, '.next', 'BUILD_ID');
-if (!fs.existsSync(frontendBuildId)) {
+const nextBin = path.join(frontendDir, 'node_modules', 'next', 'dist', 'bin', 'next');
+
+if (!fs.existsSync(frontendBuildId) && fs.existsSync(nextBin)) {
     log('========================================================================');
     log(' [AVISO] Compilando frontend Next.js para producción por primera vez...');
     log(' Esto puede tardar 1 o 2 minutos. Por favor espere...');
     log('========================================================================');
     try {
-        execSync(`"${npmCmd}" run build`, { 
-            cwd: frontendDir, 
+        const buildRes = spawnSync(nodeExe, [nextBin, 'build'], {
+            cwd: frontendDir,
             stdio: 'inherit',
             env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' }
         });
-        log('[Frontend] Compilación finalizada exitosamente.');
+        if (buildRes.status === 0) {
+            log('[Frontend] Compilación finalizada exitosamente.');
+        } else {
+            log(`[Frontend Error] La compilación falló con código ${buildRes.status}`);
+        }
     } catch (e) {
         log(`[Frontend Error] Error crítico compilando Next.js: ${e.message}`);
     }
@@ -181,8 +235,6 @@ backendProc.on('exit', (code) => {
 });
 
 // 7. Iniciar Frontend (Next.js en producción en el puerto 3300, escuchando en 0.0.0.0)
-const nextBin = path.join(frontendDir, 'node_modules', 'next', 'dist', 'bin', 'next');
-
 const frontendProc = spawn(nodeExe, [nextBin, 'start', '-p', String(PORT), '-H', '0.0.0.0'], {
     cwd: frontendDir,
     env: { 

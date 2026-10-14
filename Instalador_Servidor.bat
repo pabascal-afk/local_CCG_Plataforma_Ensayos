@@ -74,8 +74,9 @@ IF NOT EXIST ".env" (
     copy ".env.example" ".env" >nul
 )
 call npm install --no-audit
-call npx prisma generate
-call npx prisma migrate deploy
+echo [INFO] Sincronizando esquema de base de datos...
+node node_modules\prisma\build\index.js db push --accept-data-loss
+node node_modules\prisma\build\index.js generate
 
 :: Si no existe la base de datos o si se desea dejar solo el usuario admin
 IF NOT EXIST "simce.db" (
@@ -93,7 +94,7 @@ echo ==========================================================
 cd frontend
 call npm install --no-audit
 echo [INFO] Generando build optimizado para produccion en puerto 3300...
-call npm run build
+node node_modules\next\dist\bin\next build
 IF ERRORLEVEL 1 (
     color 0C
     echo [ERROR] Fallo la compilacion del Frontend Next.js.

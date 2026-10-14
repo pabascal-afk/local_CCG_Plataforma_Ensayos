@@ -42,6 +42,10 @@ CREATE TABLE "Exam" (
     "minGrade" REAL NOT NULL DEFAULT 1.0,
     "cutElemental" REAL NOT NULL DEFAULT 0.50,
     "cutAdecuado" REAL NOT NULL DEFAULT 0.75,
+    "simceCutElemental" INTEGER DEFAULT 241,
+    "simceCutAdecuado" INTEGER DEFAULT 284,
+    "orderNumber" INTEGER NOT NULL DEFAULT 1,
+    "examType" TEXT NOT NULL DEFAULT 'ENSAYO',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -53,6 +57,10 @@ CREATE TABLE "Question" (
     "correctAnswer" TEXT NOT NULL,
     "skill" TEXT,
     "axis" TEXT,
+    "learningObjective" TEXT,
+    "difficulty" REAL DEFAULT 0.0,
+    "discrimination" REAL DEFAULT 1.0,
+    "guessing" REAL DEFAULT 0.25,
     CONSTRAINT "Question_examId_fkey" FOREIGN KEY ("examId") REFERENCES "Exam" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -63,9 +71,17 @@ CREATE TABLE "ExamAssignment" (
     "courseId" INTEGER NOT NULL,
     "opensAt" DATETIME NOT NULL,
     "closesAt" DATETIME NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'SCHEDULED',
+    "originalOpensAt" DATETIME,
+    "cancelReason" TEXT,
+    "dynamicPassword" TEXT,
+    "dynamicPasswordActive" BOOLEAN NOT NULL DEFAULT false,
     "released" BOOLEAN NOT NULL DEFAULT false,
     "releasedAt" DATETIME,
     "releasedBy" TEXT,
+    "assignedTeacherRut" TEXT,
+    "remedialOriginId" INTEGER,
+    CONSTRAINT "ExamAssignment_assignedTeacherRut_fkey" FOREIGN KEY ("assignedTeacherRut") REFERENCES "User" ("rut") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "ExamAssignment_examId_fkey" FOREIGN KEY ("examId") REFERENCES "Exam" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "ExamAssignment_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "Course" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
@@ -83,6 +99,9 @@ CREATE TABLE "Submission" (
     "percent" REAL,
     "grade" REAL,
     "achievementLevel" TEXT,
+    "simceScore" INTEGER,
+    "theta" REAL,
+    "seTheta" REAL,
     CONSTRAINT "Submission_studentRut_fkey" FOREIGN KEY ("studentRut") REFERENCES "User" ("rut") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Submission_assignmentId_fkey" FOREIGN KEY ("assignmentId") REFERENCES "ExamAssignment" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
@@ -97,6 +116,43 @@ CREATE TABLE "SubmissionAnswer" (
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "SubmissionAnswer_submissionId_fkey" FOREIGN KEY ("submissionId") REFERENCES "Submission" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "SubmissionAnswer_questionId_fkey" FOREIGN KEY ("questionId") REFERENCES "Question" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "SimceMilestone" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "title" TEXT NOT NULL,
+    "level" TEXT NOT NULL,
+    "courseId" INTEGER,
+    "date" DATETIME NOT NULL,
+    "year" INTEGER NOT NULL,
+    "notes" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "SimceMilestone_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "Course" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "RemedialProposal" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "originAssignmentId" INTEGER NOT NULL,
+    "remedialExamId" INTEGER,
+    "teacherRut" TEXT NOT NULL,
+    "courseId" INTEGER NOT NULL,
+    "suggestedDate" DATETIME NOT NULL,
+    "startTime" TEXT NOT NULL DEFAULT '08:30',
+    "endTime" TEXT NOT NULL DEFAULT '10:00',
+    "notes" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "reviewNotes" TEXT,
+    "reviewedByRut" TEXT,
+    "createdAssignmentId" INTEGER,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "RemedialProposal_originAssignmentId_fkey" FOREIGN KEY ("originAssignmentId") REFERENCES "ExamAssignment" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "RemedialProposal_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "Course" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "RemedialProposal_teacherRut_fkey" FOREIGN KEY ("teacherRut") REFERENCES "User" ("rut") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "RemedialProposal_remedialExamId_fkey" FOREIGN KEY ("remedialExamId") REFERENCES "Exam" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateIndex

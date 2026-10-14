@@ -9,6 +9,8 @@
     "test": "jest --runInBand",
     "seed": "node prisma/seed.js",
     "clean": "node clean-db.js",
+    "db:push": "node node_modules/prisma/build/index.js db push --accept-data-loss",
+    "db:generate": "node node_modules/prisma/build/index.js generate",
     "db:migrate": "node --use-system-ca node_modules/prisma/build/index.js migrate dev",
     "db:deploy": "node --use-system-ca node_modules/prisma/build/index.js migrate deploy"
   },
