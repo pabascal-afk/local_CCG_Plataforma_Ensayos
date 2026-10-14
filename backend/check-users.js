@@ -18,6 +18,19 @@ async function main() {
     }
     console.log(`- [${u.role}] ${u.name} | RUT: ${u.rut} -> Clave: ${matched || 'OTRA DESCONOCIDA'}`);
   }
+  const [usersCount, coursesCount, examsCount, subsCount, asgCount] = await Promise.all([
+    prisma.user.count(),
+    prisma.course.count(),
+    prisma.exam.count(),
+    prisma.submission.count(),
+    prisma.examAssignment.count()
+  ]);
+  console.log(`\nEstado de la base de datos:`);
+  console.log(`- Usuarios: ${usersCount}`);
+  console.log(`- Cursos: ${coursesCount}`);
+  console.log(`- Ensayos: ${examsCount}`);
+  console.log(`- Asignaciones: ${asgCount}`);
+  console.log(`- Entregas/Rendiciones: ${subsCount}`);
 }
 
 main().catch(console.error).finally(() => prisma.$disconnect());

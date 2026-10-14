@@ -8,6 +8,7 @@
     "dev": "nodemon src/index.js",
     "test": "jest --runInBand",
     "seed": "node prisma/seed.js",
+    "clean": "node clean-db.js",
     "db:migrate": "node --use-system-ca node_modules/prisma/build/index.js migrate dev",
     "db:deploy": "node --use-system-ca node_modules/prisma/build/index.js migrate deploy"
   },
