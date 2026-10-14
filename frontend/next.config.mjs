@@ -2,6 +2,11 @@
 const API_TARGET = process.env.API_INTERNAL_URL || 'http://127.0.0.1:3001';
 
 const nextConfig = {
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '50mb',
+    },
+  },
   eslint: {
     ignoreDuringBuilds: true,
   },

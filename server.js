@@ -204,10 +204,38 @@ if (!fs.existsSync(frontendNodeModules)) {
 const frontendBuildId = path.join(frontendDir, '.next', 'BUILD_ID');
 const nextBin = path.join(frontendDir, 'node_modules', 'next', 'dist', 'bin', 'next');
 
-if (!fs.existsSync(frontendBuildId) && fs.existsSync(nextBin)) {
+function isFrontendBuildStale() {
+    if (!fs.existsSync(frontendBuildId)) return true;
+    try {
+        const buildTime = fs.statSync(frontendBuildId).mtimeMs;
+        const checkNewer = (dir) => {
+            if (!fs.existsSync(dir)) return false;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    if (entry.name !== 'node_modules' && entry.name !== '.next') {
+                        if (checkNewer(fullPath)) return true;
+                    }
+                } else if (entry.isFile()) {
+                    if (fs.statSync(fullPath).mtimeMs > buildTime) return true;
+                }
+            }
+            return false;
+        };
+        const srcDir = path.join(frontendDir, 'src');
+        const nextConfig = path.join(frontendDir, 'next.config.mjs');
+        if (fs.existsSync(nextConfig) && fs.statSync(nextConfig).mtimeMs > buildTime) return true;
+        return checkNewer(srcDir);
+    } catch (e) {
+        return false;
+    }
+}
+
+if (isFrontendBuildStale() && fs.existsSync(nextBin)) {
     log('========================================================================');
-    log(' [AVISO] Compilando frontend Next.js para producción por primera vez...');
-    log(' Esto puede tardar 1 o 2 minutos. Por favor espere...');
+    log(' [AVISO] Compilando frontend Next.js para producción...');
+    log(' (Detectados cambios o primera compilación. Por favor espere 1 minuto)');
     log('========================================================================');
     try {
         const buildRes = spawnSync(nodeExe, [nextBin, 'build'], {
