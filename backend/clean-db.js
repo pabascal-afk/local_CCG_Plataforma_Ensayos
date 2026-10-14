@@ -6,9 +6,9 @@ const fs = require('fs');
 try {
   const prismaBin = path.join(__dirname, 'node_modules', 'prisma', 'build', 'index.js');
   if (fs.existsSync(prismaBin)) {
-    execSync(`"${process.execPath}" "${prismaBin}" db push --accept-data-loss`, {
+    execSync(`"${process.execPath}" "${prismaBin}" db push --accept-data-loss --schema=prisma/schema.prisma`, {
       cwd: __dirname,
-      stdio: 'ignore'
+      stdio: 'inherit'
     });
   }
 } catch (e) {}

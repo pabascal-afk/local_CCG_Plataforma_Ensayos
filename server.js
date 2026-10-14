@@ -144,14 +144,17 @@ const prismaBin = path.join(backendDir, 'node_modules', 'prisma', 'build', 'inde
 if (fs.existsSync(prismaBin)) {
     try {
         log('[Backend] Sincronizando esquema de base de datos (asegurando todas las columnas)...');
-        spawnSync(nodeExe, [prismaBin, 'db', 'push', '--accept-data-loss'], {
+        const pushRes = spawnSync(nodeExe, [prismaBin, 'db', 'push', '--accept-data-loss', '--schema=prisma/schema.prisma'], {
             cwd: backendDir,
-            stdio: 'ignore',
+            stdio: 'pipe',
             env: process.env
         });
-        spawnSync(nodeExe, [prismaBin, 'generate'], {
+        if (pushRes.status !== 0) {
+            log(`[Backend Advertencia] prisma db push reportó: ${pushRes.stderr ? pushRes.stderr.toString() : pushRes.status}`);
+        }
+        spawnSync(nodeExe, [prismaBin, 'generate', '--schema=prisma/schema.prisma'], {
             cwd: backendDir,
-            stdio: 'ignore',
+            stdio: 'pipe',
             env: process.env
         });
         log('[Backend] Esquema de base de datos actualizado correctamente.');

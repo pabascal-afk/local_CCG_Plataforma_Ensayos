@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { copyToClipboard } from "@/lib/clipboard";
 import { 
   Sparkles, Copy, Check, Download, X, FileSpreadsheet, 
   Bot, HelpCircle, CheckCircle2, SlidersHorizontal, 
@@ -174,8 +175,8 @@ Entrega todo el material listo para imprimir o proyectar en pizarra interactiva.
     return "";
   }, [activeTab, level, subject, examType, questionCount, optionCount, targetOa, courseName, examOriginTitle, includeExplanations]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(generatedPrompt);
+  const handleCopy = async () => {
+    await copyToClipboard(generatedPrompt);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };

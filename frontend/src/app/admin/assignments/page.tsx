@@ -13,6 +13,7 @@ import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/session";
+import { copyToClipboard } from "@/lib/clipboard";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal, { AiPromptMode } from "@/components/AiPromptModal";
 
@@ -550,8 +551,8 @@ export default function AssignmentsDashboard() {
     });
   }, [assignments, selectedTag, tagFilterQuery]);
 
-  const copyPinToClipboard = (pin: string, assignmentId: number) => {
-    navigator.clipboard.writeText(pin);
+  const copyPinToClipboard = async (pin: string, assignmentId: number) => {
+    await copyToClipboard(pin);
     setCopiedPinId(assignmentId);
     setTimeout(() => setCopiedPinId(null), 2000);
   };

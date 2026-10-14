@@ -22,6 +22,7 @@ import {
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
+import { copyToClipboard as safeCopyToClipboard } from "@/lib/clipboard";
 import { useParams } from "next/navigation";
 import AiPromptModal from "@/components/AiPromptModal";
 
@@ -111,8 +112,8 @@ export default function TeacherAssignmentPage() {
     handleSaveDynamicPassword(true, generated);
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string) => {
+    await safeCopyToClipboard(text);
     setCopiedPin(true);
     setTimeout(() => setCopiedPin(false), 2000);
   };

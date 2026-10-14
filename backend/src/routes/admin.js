@@ -1248,40 +1248,51 @@ router.get('/exams', async (req, res, next) => {
           include: { course: true }
         }
       },
-      orderBy: { orderNumber: 'asc' }
+      orderBy: [
+        { orderNumber: 'asc' },
+        { createdAt: 'desc' }
+      ]
     });
+
     // Transform to expected frontend shape
-    const result = exams.map(e => {
+    const result = (exams || []).map(e => {
       const answerKey = {};
       const skillsKeys = {};
       const axesKeys = {};
       const learningObjectivesKeys = {};
       const difficultiesKeys = {};
-      e.questions.forEach(q => {
+
+      (e.questions || []).forEach(q => {
+        if (!q) return;
         answerKey[q.questionNumber] = q.correctAnswer;
         if (q.skill) skillsKeys[q.questionNumber] = q.skill;
         if (q.axis) axesKeys[q.questionNumber] = q.axis;
         if (q.learningObjective) learningObjectivesKeys[q.questionNumber] = q.learningObjective;
         if (q.difficulty !== null && q.difficulty !== undefined) difficultiesKeys[q.questionNumber] = q.difficulty;
       });
+
+      const assignedCourses = (e.assignments || [])
+        .filter(a => a && a.course)
+        .map(a => ({
+          id: a.course.id,
+          level: a.course.level || '',
+          letter: a.course.letter || '',
+          year: a.course.year || new Date().getFullYear(),
+          name: `${(a.course.level || '').replace('B', '° Básico').replace('M', '° Medio')} ${a.course.letter || ''} (${a.course.year || ''})`.trim()
+        }));
+
       return {
         id: e.id,
-        title: e.title,
-        subject: e.subject,
-        level: e.level, 
-        orderNumber: e.orderNumber, 
-        examType: e.examType,
+        title: e.title || 'Ensayo',
+        subject: e.subject || 'General',
+        level: e.level || '', 
+        orderNumber: e.orderNumber ?? 1, 
+        examType: e.examType || 'ENSAYO',
         durationMinutes: e.durationMinutes,
-        optionsCount: e.optionsCount,
-        questionCount: e.questions.length,
+        optionsCount: e.optionsCount || 4,
+        questionCount: (e.questions || []).length,
         createdAt: e.createdAt,
-        assignedCourses: (e.assignments || []).map(a => ({
-          id: a.course.id,
-          level: a.course.level,
-          letter: a.course.letter,
-          year: a.course.year,
-          name: `${a.course.level.replace('B', '° Básico').replace('M', '° Medio')} ${a.course.letter} (${a.course.year})`
-        })),
+        assignedCourses,
         answerKey,
         skillsKeys,
         axesKeys,
@@ -1289,9 +1300,11 @@ router.get('/exams', async (req, res, next) => {
         difficultiesKeys
       };
     });
-    res.json(result);
+
+    return res.json(result);
   } catch (error) {
-    next(error);
+    console.error('[Error al obtener catálogo de ensayos]:', error);
+    return res.status(500).json({ error: 'Error al obtener ensayos: ' + error.message });
   }
 });
 
@@ -1535,28 +1548,31 @@ router.get('/assignments', async (req, res, next) => {
       where: yearFilter ? { course: { year: yearFilter } } : undefined,
       include: {
         exam: true,
-        course: true, assignedTeacher: { select: { name: true, rut: true } }
+        course: true,
+        assignedTeacher: { select: { name: true, rut: true } }
       },
       orderBy: { opensAt: 'desc' }
     });
-    const result = assignments.map(a => ({
+    const result = (assignments || []).map(a => ({
       id: a.id,
       examId: a.examId,
       courseId: a.courseId,
       opensAt: a.opensAt,
       closesAt: a.closesAt,
-      durationMinutes: a.exam.durationMinutes || 90,
+      durationMinutes: a.exam?.durationMinutes || 90,
       dynamicPassword: a.dynamicPassword,
-      dynamicPasswordActive: a.dynamicPasswordActive,
+      dynamicPasswordActive: Boolean(a.dynamicPasswordActive),
       status: a.status,
       originalOpensAt: a.originalOpensAt,
       cancelReason: a.cancelReason,
       Exam: a.exam,
-      Course: a.course, assignedTeacher: a.assignedTeacher
+      Course: a.course,
+      assignedTeacher: a.assignedTeacher
     }));
-    res.json(result);
+    return res.json(result);
   } catch (error) {
-    next(error);
+    console.error('[Error al obtener asignaciones]:', error);
+    return res.status(500).json({ error: 'Error al obtener asignaciones: ' + error.message });
   }
 });
 
@@ -2106,26 +2122,30 @@ router.get('/remedial-alerts', checkAdmin, async (req, res, next) => {
     // Filtrar aquellas que NO tienen ni propuesta PENDING ni APPROVED ni remedial creada
     const alerts = [];
     for (const a of assignments) {
-      const hasApprovedOrPending = a.remedialProposals.some(p => p.status === 'PENDING' || p.status === 'APPROVED');
+      if (!a || !a.exam || !a.course) continue;
+      const hasApprovedOrPending = (a.remedialProposals || []).some(p => p.status === 'PENDING' || p.status === 'APPROVED');
       const hasDirectFollowUp = await prisma.examAssignment.findFirst({
         where: { remedialOriginId: a.id }
       });
 
       if (!hasApprovedOrPending && !hasDirectFollowUp) {
+        const cLevel = (a.course.level || '').replace('B', '° Básico').replace('M', '° Medio');
+        const cLetter = a.course.letter || '';
+        const courseName = `${cLevel} ${cLetter}`.trim();
         alerts.push({
           assignmentId: a.id,
           examId: a.exam.id,
-          examTitle: a.exam.title,
-          subject: a.exam.subject,
-          level: a.exam.level,
+          examTitle: a.exam.title || 'Ensayo',
+          subject: a.exam.subject || 'General',
+          level: a.exam.level || '',
           courseId: a.course.id,
-          courseName: `${a.course.level.replace('B', '° Básico').replace('M', '° Medio')} ${a.course.letter}`,
-          year: a.course.year,
-          submissionsCount: a._count.submissions,
+          courseName,
+          year: a.course.year || new Date().getFullYear(),
+          submissionsCount: a._count?.submissions || 0,
           teacherName: a.assignedTeacher?.name || 'Sin docente asignado',
           teacherRut: a.assignedTeacherRut,
           opensAt: a.opensAt,
-          alertMessage: `El ensayo "${a.exam.title}" de ${a.course.level.replace('B', '° Básico').replace('M', '° Medio')} ${a.course.letter} ya fue rendido pero NO cuenta con plan remedial programado ni propuesto.`
+          alertMessage: `El ensayo "${a.exam.title}" de ${courseName} ya fue rendido pero NO cuenta con plan remedial programado ni propuesto.`
         });
       }
     }

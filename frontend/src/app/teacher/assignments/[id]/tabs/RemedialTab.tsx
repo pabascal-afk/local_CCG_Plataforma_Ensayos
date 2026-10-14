@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
 import { 
   AlertTriangle, BookOpen, PenTool, Bot, Copy, CheckCircle2, 
   Calendar, Clock, Send, Check, X, ShieldAlert, Sparkles, TrendingUp, ChevronRight
@@ -159,8 +160,8 @@ Por favor, genera para mí:
 2. Un QUIZ DE SALIDA (Ticket de Salida) de 10 preguntas de selección múltiple enfocadas EXCLUSIVAMENTE en evaluar estos aprendizajes descendidos, indicando al final la tabla con la pauta de corrección.`;
   };
 
-  const handleCopyPrompt = () => {
-    navigator.clipboard.writeText(generatePrompt());
+  const handleCopyPrompt = async () => {
+    await copyToClipboard(generatePrompt());
     setCopied(true);
     setTimeout(() => setCopied(false), 3000);
   };
