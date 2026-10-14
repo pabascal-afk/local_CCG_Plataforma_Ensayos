@@ -61,13 +61,25 @@ Diseñado para funcionar en **Servidor Local dentro de la Red del Colegio (LAN)*
 
 ---
 
-## 👥 Roles y Credenciales Predeterminadas (Demo / Inicial)
+## 👥 Credenciales de Administrador (Servidor Limpio)
 
-| Rol | RUT | Contraseña Inicial | Funcionalidad |
+| Rol | RUT / Usuario | Contraseña | Funcionalidad |
 | :--- | :--- | :--- | :--- |
-| **Director / Admin** | `11.111.111-1` | `admin123` | Dashboard global, trayectoria multianual, gestión de ensayos, cursos, usuarios y UTP |
-| **Docente** | `22.222.222-2` | `profesor123` | Monitoreo en vivo, pauta, análisis de habilidades, acción remedial y PIN de clase |
-| **Estudiante** | `33.333.333-3` | `alumno123` | Rendición en línea, calculadora, visor de PDF de prueba, informe de logro y retroalimentación |
+| **Administrador (UTP / Admin)** | `11111111-1` o `admin` | `admin123` | Dashboard global, trayectoria multianual, gestión de ensayos, cursos, usuarios y UTP |
+
+> [!NOTE]
+> Para restaurar la base de datos limpia en cualquier momento dejando unicamente este usuario administrador, basta con ejecutar `Limpiar_Base_Datos.bat`.
+
+---
+
+## 🛠️ Herramientas y Scripts del Servidor
+
+- **`Instalador_Servidor.bat`:** Instalador/actualizador automático con auto-elevación a Administrador (Git pull, dependencias, build de Next.js, regla de Firewall y accesos directos).
+- **`Iniciar_Consola.bat`:** Inicia el servidor en una consola visible para ver en tiempo real los registros y verificar que esté listo en `http://192.168.3.16:3300`.
+- **`Iniciar_Plataforma.vbs`:** Inicia el servidor en segundo plano con icono en la bandeja del sistema (*Tray Icon*).
+- **`Configurar_Firewall_Admin.bat`:** Script con auto-elevación para desbloquear el puerto 3300 en el Firewall de Windows en caso de que otros equipos no puedan conectarse.
+- **`Limpiar_Base_Datos.bat`:** Vacía todas las tablas y deja listo el sistema con el usuario administrador inicial.
+- **`Lanzador_Plataforma.exe`:** Aplicación de escritorio ligera para los computadores cliente/alumnos/profesores (busca automáticamente `192.168.3.16:3300` o la IP configurada en `server_ip.txt`).
 
 ---
 

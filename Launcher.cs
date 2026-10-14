@@ -156,17 +156,17 @@ namespace Launcher {
             } catch { }
 
             candidateHosts.Add("http://localhost:3300");
-            candidateHosts.Add("http://192.168.0.142:3300");
             candidateHosts.Add("http://192.168.3.16:3300");
+            candidateHosts.Add("http://192.168.0.142:3300");
             candidateHosts.Add("http://ensayos.local:3300");
 
             using (HttpClient client = new HttpClient(CreateHandler())) {
-                client.Timeout = TimeSpan.FromMilliseconds(1500);
+                client.Timeout = TimeSpan.FromMilliseconds(2000);
 
                 foreach (string baseUrl in candidateHosts) {
                     string cleanUrl = baseUrl.TrimEnd('/');
                     statusLabel.Text = "Buscando servidor en " + cleanUrl + "...";
-                    if (await TryConnect(client, cleanUrl + "/api/health")) {
+                    if (await TryConnect(client, cleanUrl + "/api/health") || await TryConnect(client, cleanUrl + "/")) {
                         OpenUrl(cleanUrl);
                         return;
                     }

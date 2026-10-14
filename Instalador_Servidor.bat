@@ -1,5 +1,17 @@
 @echo off
 color 0B
+title Instalador / Actualizador - Plataforma Ensayos SIMCE (Colegio Cerro Grande)
+
+:: 0. Auto-elevación a permisos de Administrador (indispensable para Firewall de Windows y servicios)
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [INFO] Solicitando permisos de Administrador para configurar Firewall de Windows...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList '/c `\"%~f0`\"' -Verb RunAs"
+    exit /b
+)
+
+cd /d "%~dp0"
+
 echo ==========================================================
 echo    Instalador / Actualizador - Plataforma Ensayos SIMCE
 echo              Colegio Cerro Grande (Red Local)
@@ -24,14 +36,13 @@ IF ERRORLEVEL 1 (
     exit /b
 )
 
-:: Configurar Git para redes locales (evitar problemas con certificados de red interna)
+:: Configurar Git para redes locales
 git config --global http.sslVerify false >nul 2>&1
 
 :: 3. Revisar si ya esta clonado
 IF EXIST ".git" (
     echo [INFO] Detectado como repositorio existente.
     echo [INFO] Deteniendo servidores y liberando puerto 3300 si estaba ocupado...
-    taskkill /F /IM node.exe >nul 2>&1
     powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 3300 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
     echo [INFO] Obteniendo actualizaciones desde GitHub...
     git pull origin main
@@ -51,7 +62,7 @@ echo.
 echo ==========================================================
 echo   [1/4] Instalando dependencias del sistema principal...
 echo ==========================================================
-call npm install
+call npm install --no-audit
 
 echo.
 echo ==========================================================
@@ -62,15 +73,15 @@ IF NOT EXIST ".env" (
     echo [INFO] Creando archivo backend\.env desde plantilla...
     copy ".env.example" ".env" >nul
 )
-call npm install
+call npm install --no-audit
 call npx prisma generate
 call npx prisma migrate deploy
 
-:: Verificar si existe la base de datos con datos o si requiere inicializacion
+:: Si no existe la base de datos o si se desea dejar solo el usuario admin
 IF NOT EXIST "simce.db" (
     IF NOT EXIST "prisma\simce.db" (
-        echo [INFO] Inicializando datos iniciales del colegio (Seed)...
-        call npm run seed
+        echo [INFO] Creando base de datos con usuario administrador (admin123)...
+        call node clean-db.js
     )
 )
 cd ..
@@ -80,34 +91,38 @@ echo ==========================================================
 echo   [3/4] Instalando y compilando Frontend (Next.js)...
 echo ==========================================================
 cd frontend
-call npm install
-echo [INFO] Generando build optimizado para produccion...
+call npm install --no-audit
+echo [INFO] Generando build optimizado para produccion en puerto 3300...
 call npm run build
+IF ERRORLEVEL 1 (
+    color 0C
+    echo [ERROR] Fallo la compilacion del Frontend Next.js.
+    pause
+    exit /b
+)
 cd ..
 
 echo.
 echo ==========================================================
 echo   [4/4] Configurando Firewall y Acceso de Red Local (LAN)...
 echo ==========================================================
-:: Permitir puerto 3300 en el Firewall de Windows para conexion de otros equipos en la LAN
-netsh advfirewall firewall show rule name="Plataforma Ensayos SIMCE (Puerto 3300)" >nul 2>&1
-IF ERRORLEVEL 1 (
-    echo [INFO] Creando regla de Firewall para puerto 3300 (LAN)...
-    netsh advfirewall firewall add rule name="Plataforma Ensayos SIMCE (Puerto 3300)" dir=in action=allow protocol=TCP localport=3300 >nul 2>&1
-)
+echo [INFO] Creando/Actualizando regla de Firewall para puerto 3300 (LAN)...
+netsh advfirewall firewall delete rule name="Plataforma Ensayos SIMCE (Puerto 3300)" >nul 2>&1
+netsh advfirewall firewall add rule name="Plataforma Ensayos SIMCE (Puerto 3300)" dir=in action=allow protocol=TCP localport=3300 >nul 2>&1
 
 :: Crear acceso directo en el Escritorio
-echo [INFO] Creando acceso directo en el Escritorio...
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'Plataforma Ensayos SIMCE.lnk')); $s.TargetPath = [System.IO.Path]::Combine((Get-Location).Path, 'Iniciar_Plataforma.vbs'); $s.WorkingDirectory = (Get-Location).Path; $s.Description = 'Iniciar Plataforma de Ensayos SIMCE (Colegio Cerro Grande)'; if (Test-Path 'app.ico') { $s.IconLocation = (Join-Path (Get-Location).Path 'app.ico') } elseif (Test-Path 'CCG-logo-300x300.png') { $s.IconLocation = (Join-Path (Get-Location).Path 'CCG-logo-300x300.png') }; $s.Save()" >nul 2>&1
+echo [INFO] Creando accesos directos en el Escritorio...
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'Plataforma Ensayos SIMCE (Segundo Plano).lnk')); $s.TargetPath = [System.IO.Path]::Combine((Get-Location).Path, 'Iniciar_Plataforma.vbs'); $s.WorkingDirectory = (Get-Location).Path; $s.Description = 'Iniciar Plataforma SIMCE en Segundo Plano'; if (Test-Path 'app.ico') { $s.IconLocation = (Join-Path (Get-Location).Path 'app.ico') }; $s.Save()" >nul 2>&1
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'Plataforma Ensayos SIMCE (Consola).lnk')); $s.TargetPath = [System.IO.Path]::Combine((Get-Location).Path, 'Iniciar_Consola.bat'); $s.WorkingDirectory = (Get-Location).Path; $s.Description = 'Iniciar Plataforma SIMCE en Consola'; if (Test-Path 'app.ico') { $s.IconLocation = (Join-Path (Get-Location).Path 'app.ico') }; $s.Save()" >nul 2>&1
 
 echo.
 color 0A
 echo ==========================================================
 echo   [EXITO] Instalacion y configuracion completada con exito.
-echo   La plataforma correra en el puerto 3300.
+echo   La plataforma esta lista en el puerto 3300.
 echo ==========================================================
 echo.
-echo Arrancando el servidor en segundo plano...
+echo Arrancando el servidor...
 start "" "Iniciar_Plataforma.vbs"
-timeout /t 5 >nul
+timeout /t 4 >nul
 exit /b
