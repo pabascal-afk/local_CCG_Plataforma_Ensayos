@@ -6,6 +6,7 @@ import { ArrowLeft, Save, Sparkles } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import AiPromptModal from "@/components/AiPromptModal";
+import { getToken } from "@/lib/session";
 
 export default function NewExamPage() {
   const router = useRouter();
@@ -24,9 +25,15 @@ export default function NewExamPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) {
-      setError("Debes subir un archivo PDF.");
+      setError("Debes seleccionar un archivo PDF.");
       return;
     }
+    const token = getToken();
+    if (!token) {
+      setError("Tu sesión ha expirado o no estás autenticado. Por favor inicia sesión nuevamente.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     const formData = new FormData();
@@ -43,14 +50,14 @@ export default function NewExamPage() {
       const res = await fetch("/api/admin/exams", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
+          Authorization: `Bearer ${token}`,
         },
         body: formData,
       });
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => null);
-        throw new Error(errorData?.error || "Error al crear ensayo");
+        throw new Error(errorData?.error || `Error ${res.status}: no se pudo crear el ensayo`);
       }
       
       const newExam = await res.json();

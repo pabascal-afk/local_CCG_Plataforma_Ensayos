@@ -1221,21 +1221,34 @@ router.post('/users/bulk-password', checkAdmin, async (req, res, next) => {
 // =======================
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '../../uploads');
-    if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath);
+    const uploadPath = path.resolve(process.env.UPLOADS_DIR || path.join(__dirname, '../../uploads'));
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    }
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `exam-${Date.now()}${ext}`);
+    const ext = path.extname(file.originalname || '').toLowerCase() || '.pdf';
+    cb(null, `exam-${Date.now()}-${Math.round(Math.random() * 1e4)}${ext}`);
   }
 });
+
 const uploadDisk = multer({
   storage,
   limits: { fileSize: 30 * 1024 * 1024 }, // 30 MB
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') cb(null, true);
-    else cb(new Error('Solo se permiten archivos PDF'));
+    const original = String(file.originalname || '').toLowerCase();
+    const isPdfExt = original.endsWith('.pdf');
+    const isPdfMime = file.mimetype === 'application/pdf' || 
+                      file.mimetype === 'application/x-pdf' || 
+                      file.mimetype === 'application/octet-stream';
+    if (isPdfExt || isPdfMime) {
+      cb(null, true);
+    } else {
+      const err = new Error('Solo se permiten archivos en formato PDF (.pdf)');
+      err.status = 400;
+      cb(err);
+    }
   }
 });
 
@@ -1392,12 +1405,36 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
   }
 });
 
-router.post('/exams', checkAdmin, uploadDisk.single('pdf'), async (req, res, next) => {
+router.post('/exams', checkAdmin, (req, res, next) => {
+  uploadDisk.single('pdf')(req, res, (err) => {
+    if (err) {
+      console.error('[Error de Multer al subir PDF]:', err);
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'El archivo excede el tamaño máximo permitido de 30 MB' });
+      }
+      return res.status(400).json({ error: err.message || 'Error al procesar el archivo PDF' });
+    }
+    next();
+  });
+}, async (req, res, next) => {
   try {
     const { title, subject, level, questionCount, optionsCount, orderNumber, examType } = req.body;
-    if (!req.file) return res.status(400).json({ error: 'Se requiere un archivo PDF' });
+    if (!req.file) {
+      return res.status(400).json({ error: 'Debes seleccionar y subir un archivo PDF para el ensayo' });
+    }
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ error: 'El título del ensayo es obligatorio' });
+    }
+    if (!subject || !String(subject).trim()) {
+      return res.status(400).json({ error: 'Debes seleccionar la asignatura del ensayo' });
+    }
 
-    const qCount = parseInt(questionCount, 10);
+    const qCount = parseInt(questionCount, 10) || 30;
+    const optCount = parseInt(optionsCount, 10) || 4;
+    const ordNum = parseInt(orderNumber, 10) || 1;
+    const eType = examType || 'ENSAYO';
+    const lvl = level || '4B';
+
     const questions = [];
     for (let i = 1; i <= qCount; i++) {
       questions.push({
@@ -1408,21 +1445,23 @@ router.post('/exams', checkAdmin, uploadDisk.single('pdf'), async (req, res, nex
 
     const exam = await prisma.exam.create({
       data: {
-        title,
-        subject,
-        level: level || '4B',
-        optionsCount: parseInt(optionsCount, 10) || 4,
-        orderNumber: parseInt(orderNumber, 10) || 1,
-        examType: examType || 'ENSAYO',
+        title: String(title).trim(),
+        subject: String(subject).trim(),
+        level: lvl,
+        optionsCount: optCount,
+        orderNumber: ordNum,
+        examType: eType,
         pdfPath: req.file.filename,
         questions: {
           create: questions
         }
       }
     });
-    res.json(exam);
+
+    return res.json(exam);
   } catch (error) {
-    next(error);
+    console.error('[Error al crear ensayo en DB]:', error);
+    return res.status(500).json({ error: 'Error al registrar el ensayo en la base de datos: ' + error.message });
   }
 });
 
