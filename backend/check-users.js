@@ -3,10 +3,20 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  const admin = await prisma.user.findUnique({ where: { rut: '11111111-1' } });
-  if (admin) {
-    const isMatch = await bcrypt.compare('admin123', admin.passwordHash);
-    console.log("Admin 11111111-1 password 'admin123' valid?", isMatch);
+  const users = await prisma.user.findMany({
+    where: { role: { in: ['ADMIN', 'DIRECTOR', 'TEACHER'] } },
+    select: { rut: true, name: true, role: true, passwordHash: true }
+  });
+  const candidates = ['simce123', 'admin123', 'profesor123', '1234', '123456'];
+  for (const u of users) {
+    let matched = null;
+    for (const c of candidates) {
+      if (await bcrypt.compare(c, u.passwordHash)) {
+        matched = c;
+        break;
+      }
+    }
+    console.log(`- [${u.role}] ${u.name} | RUT: ${u.rut} -> Clave: ${matched || 'OTRA DESCONOCIDA'}`);
   }
 }
 

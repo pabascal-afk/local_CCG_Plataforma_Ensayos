@@ -3,16 +3,12 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  const hash = await bcrypt.hash('1234', 10);
-  await prisma.user.updateMany({
-    where: { rut: 'profesor-remedial' },
+  const hash = await bcrypt.hash('admin123', 10);
+  await prisma.user.update({
+    where: { rut: '11111111-1' },
     data: { passwordHash: hash }
   });
-  await prisma.user.updateMany({
-    where: { rut: { startsWith: 'alumno-test-' } },
-    data: { passwordHash: hash }
-  });
-  console.log('Contraseñas actualizadas a bcrypt!');
+  console.log('Admin 11111111-1 actualizado con password admin123 con exito!');
 }
 
 main().catch(console.error).finally(() => prisma.$disconnect());
