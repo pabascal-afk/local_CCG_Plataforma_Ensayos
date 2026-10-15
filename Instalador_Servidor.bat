@@ -87,13 +87,11 @@ echo ==========================================================
 cd backend
 IF NOT EXIST ".env" (
     echo [INFO] Creando archivo backend\.env para puerto %APP_BACKEND_PORT%...
-    (
-        echo DATABASE_URL="file:./simce.db?connection_limit=1&socket_timeout=10"
-        echo JWT_SECRET="5deea0503538dd87b4faa6afada5765cc96ca39dbb0167ccf0ac52566b73284686ceb9ff631020786a4aaae74ef95c74"
-        echo PORT=%APP_BACKEND_PORT%
-        echo HOST=127.0.0.1
-        echo UPLOADS_DIR=./uploads
-    ) > .env
+    echo DATABASE_URL="file:./simce.db?connection_limit=1&socket_timeout=10" > .env
+    echo JWT_SECRET="5deea0503538dd87b4faa6afada5765cc96ca39dbb0167ccf0ac52566b73284686ceb9ff631020786a4aaae74ef95c74" >> .env
+    echo PORT=%APP_BACKEND_PORT% >> .env
+    echo HOST=127.0.0.1 >> .env
+    echo UPLOADS_DIR=./uploads >> .env
 )
 IF NOT EXIST "node_modules" (
     echo [INFO] Instalando modulos de backend...
@@ -118,7 +116,7 @@ echo   [2/3] Instalando y compilando Frontend (Next.js)...
 echo ==========================================================
 cd frontend
 IF NOT EXIST "node_modules\qrcode" (
-    echo [INFO] Instalando dependencias de frontend (qrcode, jsqr, etc)...
+    echo [INFO] Instalando dependencias de frontend: qrcode, jsqr...
     call npm install --no-audit
 ) ELSE (
     IF NOT EXIST "node_modules" (
