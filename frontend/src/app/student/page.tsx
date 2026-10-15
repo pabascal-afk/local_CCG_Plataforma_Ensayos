@@ -2,18 +2,19 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Clock, CheckCircle2, PlayCircle, Lock, Award, AlertCircle, CalendarClock } from "lucide-react";
+import { Clock, CheckCircle2, PlayCircle, Lock, Award, AlertCircle, CalendarClock, FileText } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
 
-type State = "UPCOMING" | "AVAILABLE" | "IN_PROGRESS" | "SUBMITTED" | "RESULTS" | "MISSED";
+type State = "UPCOMING" | "AVAILABLE" | "IN_PROGRESS" | "SUBMITTED" | "RESULTS" | "MISSED" | "PRINTED";
 
 interface StudentAssignment {
   id: number;
   opensAt: string;
   closesAt: string;
   state: State;
+  applicationMode?: "DIGITAL" | "PRINTED";
   submissionId: number | null;
   exam: { title: string; subject: string; durationMinutes: number | null; questionCount: number };
 }
@@ -23,11 +24,12 @@ const fmt = (d: string) =>
 
 const BADGE: Record<State, { label: string; cls: string; icon: React.ElementType }> = {
   UPCOMING: { label: "Próximamente", cls: "bg-gray-100 text-gray-600", icon: CalendarClock },
-  AVAILABLE: { label: "Disponible", cls: "bg-blue-100 text-blue-700", icon: PlayCircle },
-  IN_PROGRESS: { label: "En curso", cls: "bg-amber-100 text-amber-700", icon: Clock },
+  AVAILABLE: { label: "Disponible Online", cls: "bg-blue-100 text-blue-700", icon: PlayCircle },
+  IN_PROGRESS: { label: "En curso Online", cls: "bg-amber-100 text-amber-700", icon: Clock },
   SUBMITTED: { label: "Entregado · resultados pendientes", cls: "bg-green-100 text-green-700", icon: CheckCircle2 },
   RESULTS: { label: "Resultados disponibles", cls: "bg-purple-100 text-purple-700", icon: Award },
   MISSED: { label: "No rendido", cls: "bg-red-100 text-red-700", icon: Lock },
+  PRINTED: { label: "Evaluación Impresa en Papel", cls: "bg-indigo-100 text-indigo-800", icon: FileText },
 };
 
 import LongitudinalChart from "@/components/charts/LongitudinalChart";
@@ -128,6 +130,12 @@ function StudentDashboard() {
                   >
                     {a.state === "AVAILABLE" ? "Comenzar" : "Continuar"}
                   </Link>
+                )}
+                {a.state === "PRINTED" && (
+                  <span className="ml-4 shrink-0 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold px-4 py-2 rounded-lg text-center leading-tight">
+                    Rendición en papel<br />
+                    <span className="text-[10px] text-slate-400 font-normal">Pauta aplicada en sala</span>
+                  </span>
                 )}
                 {a.state === "RESULTS" && a.submissionId && (
                   <Link

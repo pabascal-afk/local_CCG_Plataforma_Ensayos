@@ -16,6 +16,8 @@ import {
   HelpCircle,
   Check,
   UserCheck,
+  Camera,
+  Sparkles,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { readOmrSheetFromCanvas, SheetReadResult } from "@/lib/omr/omrEngine";
@@ -61,6 +63,11 @@ export default function OmrScannerModal({
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState("");
+  const [processingProgress, setProcessingProgress] = useState<{
+    current: number;
+    total: number;
+    currentStudent?: string;
+  } | null>(null);
   const [processedSheets, setProcessedSheets] = useState<ProcessedSheetItem[]>([]);
   const [selectedSheetId, setSelectedSheetId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -68,6 +75,8 @@ export default function OmrScannerModal({
   const [successMessage, setSuccessMessage] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // Cargar estudiantes del curso e información de la evaluación
   useEffect(() => {
@@ -108,7 +117,8 @@ export default function OmrScannerModal({
     const newItems: ProcessedSheetItem[] = [];
 
     for (let p = 1; p <= numPages; p++) {
-      setProcessingStatus(`Leyendo página ${p} de ${numPages} de "${file.name}"...`);
+      setProcessingProgress({ current: p, total: numPages, currentStudent: `Página ${p}...` });
+      setProcessingStatus(`Leyendo página ${p} de ${numPages} del PDF "${file.name}"...`);
 
       const page = await pdfDoc.getPage(p);
       const viewport = page.getViewport({ scale: 2.0 }); // alta resolución para OMR
@@ -133,6 +143,10 @@ export default function OmrScannerModal({
             matchedName = found.name;
           }
         }
+
+        const studentLabel = matchedName || (matchedRut ? `RUT: ${matchedRut}` : `Hoja #${p}`);
+        setProcessingProgress({ current: p, total: numPages, currentStudent: studentLabel });
+        setProcessingStatus(`Página ${p} de ${numPages} procesada: ${studentLabel}`);
 
         newItems.push({
           id: `${file.name}-p${p}-${Date.now()}-${Math.random()}`,
@@ -387,7 +401,25 @@ export default function OmrScannerModal({
 
         {/* Zona de Subida / Acciones superiores */}
         <div className="p-4 bg-slate-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Input oculto para PDF multipágina */}
+            <input
+              type="file"
+              ref={pdfInputRef}
+              accept=".pdf"
+              onChange={handleFilesSelected}
+              className="hidden"
+            />
+            {/* Input oculto para Fotos / Imágenes */}
+            <input
+              type="file"
+              ref={imageInputRef}
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              onChange={handleFilesSelected}
+              className="hidden"
+            />
+            {/* Input genérico fallback */}
             <input
               type="file"
               ref={fileInputRef}
@@ -396,28 +428,28 @@ export default function OmrScannerModal({
               onChange={handleFilesSelected}
               className="hidden"
             />
+
+            {/* Botón 1: PDF Multipágina */}
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => pdfInputRef.current?.click()}
               disabled={isProcessing}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition"
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition"
             >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Procesando...</span>
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4" />
-                  <span>Subir PDF Escaneado o Fotos</span>
-                </>
-              )}
+              <FileText className="w-4 h-4" />
+              <span>Subir PDF Multipágina (Todo el Curso)</span>
             </button>
 
-            <span className="text-xs text-gray-500 hidden sm:inline">
-              Formatos admitidos: PDF de varias páginas, JPG o PNG de celular / escáner.
-            </span>
+            {/* Botón 2: Fotos Sueltas */}
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={isProcessing}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold px-3.5 py-2 rounded-xl flex items-center gap-2 shadow-sm transition"
+            >
+              <Camera className="w-4 h-4" />
+              <span>Subir Fotos Sueltas (JPG/PNG)</span>
+            </button>
           </div>
 
           {processedSheets.length > 0 && (
@@ -436,11 +468,35 @@ export default function OmrScannerModal({
           )}
         </div>
 
-        {/* Barra de estado en procesamiento */}
+        {/* Barra de progreso y estado en procesamiento */}
         {isProcessing && (
-          <div className="bg-amber-50 border-b border-amber-200 p-2.5 px-6 flex items-center gap-2.5 text-xs text-amber-800 font-medium">
-            <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
-            <span>{processingStatus || "Analizando marcas en hojas..."}</span>
+          <div className="bg-amber-50 border-b border-amber-200 p-3 px-6 transition">
+            <div className="flex items-center justify-between text-xs text-amber-900 font-semibold mb-1.5">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
+                <span>{processingStatus || "Procesando hojas de respuestas..."}</span>
+                {processingProgress?.currentStudent && (
+                  <span className="text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded text-[11px] font-mono">
+                    Detectado: {processingProgress.currentStudent}
+                  </span>
+                )}
+              </div>
+              {processingProgress && (
+                <span className="font-mono font-bold text-amber-800">
+                  {Math.round((processingProgress.current / (processingProgress.total || 1)) * 100)}% ({processingProgress.current}/{processingProgress.total})
+                </span>
+              )}
+            </div>
+            {processingProgress && (
+              <div className="w-full bg-amber-200/60 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-amber-600 h-2 rounded-full transition-all duration-300"
+                  style={{
+                    width: `${Math.min(100, Math.round((processingProgress.current / (processingProgress.total || 1)) * 100))}%`,
+                  }}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -460,12 +516,38 @@ export default function OmrScannerModal({
 
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {processedSheets.length === 0 && !isProcessing && (
-                <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-400">
-                  <FileText className="w-12 h-12 mb-3 stroke-[1.2] text-gray-300" />
-                  <p className="text-sm font-bold text-gray-600">No hay hojas cargadas todavía</p>
-                  <p className="text-xs text-gray-400 max-w-xs mt-1">
-                    Haz clic en &quot;Subir PDF Escaneado o Fotos&quot; para que el motor OMR reconozca el código QR y las alternativas marcadas por cada alumno.
+                <div className="h-full flex flex-col items-center justify-center p-4 space-y-3">
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider text-center">
+                    Selecciona una forma de carga
                   </p>
+                  
+                  {/* Opción 1: PDF multipágina */}
+                  <div
+                    onClick={() => pdfInputRef.current?.click()}
+                    className="w-full p-4 rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 hover:bg-emerald-50 hover:border-emerald-500 transition cursor-pointer text-center group"
+                  >
+                    <FileText className="w-8 h-8 mx-auto mb-2 text-emerald-600 group-hover:scale-110 transition-transform" />
+                    <p className="text-xs font-bold text-emerald-900">
+                      Subir PDF Multipágina (Recomendado)
+                    </p>
+                    <p className="text-[11px] text-emerald-700 mt-1 leading-snug">
+                      Escanea todas las hojas del curso juntas en una sola pasada y sube el archivo PDF.
+                    </p>
+                  </div>
+
+                  {/* Opción 2: Fotos sueltas */}
+                  <div
+                    onClick={() => imageInputRef.current?.click()}
+                    className="w-full p-4 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 hover:bg-blue-50 hover:border-blue-500 transition cursor-pointer text-center group"
+                  >
+                    <Camera className="w-8 h-8 mx-auto mb-2 text-blue-600 group-hover:scale-110 transition-transform" />
+                    <p className="text-xs font-bold text-blue-900">
+                      Subir Fotos Sueltas (JPG/PNG)
+                    </p>
+                    <p className="text-[11px] text-blue-700 mt-1 leading-snug">
+                      Sube fotos tomadas con teléfono celular o imágenes individuales de hojas.
+                    </p>
+                  </div>
                 </div>
               )}
 

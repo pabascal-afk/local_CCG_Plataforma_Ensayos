@@ -8,7 +8,7 @@ import {
   Timer, KeyRound, RotateCcw, Sparkles, CheckCircle2, ChevronRight,
   ShieldCheck, AlertTriangle, Layers, Copy, Inbox, CheckSquare,
   XCircle, MessageSquare, AlertCircle, Bot, ChevronDown, ChevronUp,
-  Printer, ScanLine
+  Printer, ScanLine, FileText, Monitor, Laptop
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -17,6 +17,7 @@ import { getToken } from "@/lib/session";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal, { AiPromptMode } from "@/components/AiPromptModal";
+import OmrScannerModal from "@/components/OmrScannerModal";
 
 type Exam = { 
   id: number; 
@@ -51,6 +52,7 @@ type Assignment = {
   dynamicPassword?: string | null;
   dynamicPasswordActive?: boolean;
   status?: string;
+  applicationMode?: "DIGITAL" | "PRINTED";
   Exam: Exam; 
   Course: Course; 
   assignedTeacher?: { rut: string; name: string } | null;
@@ -213,6 +215,15 @@ export default function AssignmentsDashboard() {
   const [stagedDynamicPinActive, setStagedDynamicPinActive] = useState(false);
   const [isSubmittingFocus, setIsSubmittingFocus] = useState(false);
   const [focusSuccessNotice, setFocusSuccessNotice] = useState<string | null>(null);
+  const [stagedApplicationMode, setStagedApplicationMode] = useState<"DIGITAL" | "PRINTED">("DIGITAL");
+
+  // Escaneo OMR directo y Cambio de Modalidad con Confirmación
+  const [omrScanAssignmentId, setOmrScanAssignmentId] = useState<number | null>(null);
+  const [modeChangeTarget, setModeChangeTarget] = useState<{
+    assignment: Assignment;
+    newMode: "DIGITAL" | "PRINTED";
+  } | null>(null);
+  const [isChangingMode, setIsChangingMode] = useState(false);
 
   // Estados para Drag and Drop reactivo y robusto
   const [draggedExam, setDraggedExam] = useState<Exam | null>(null);
@@ -595,6 +606,7 @@ export default function AssignmentsDashboard() {
     const randomSuffix = Math.floor(100 + Math.random() * 900);
     setStagedDynamicPin(`SIMCE${cleanLevel}${cleanLetter}${randomSuffix}`);
     setStagedDynamicPinActive(false);
+    setStagedApplicationMode("DIGITAL");
   };
 
   // 1. Arrastrar Examen desde la izquierda
@@ -867,7 +879,8 @@ export default function AssignmentsDashboard() {
           assignedTeacherRut: stagedTeacher ? stagedTeacher.rut : null,
           durationMinutes: stagedDuration,
           dynamicPassword: stagedDynamicPinActive ? stagedDynamicPin : null,
-          dynamicPasswordActive: stagedDynamicPinActive
+          dynamicPasswordActive: stagedDynamicPinActive,
+          applicationMode: stagedApplicationMode
         }
       });
 
@@ -885,6 +898,24 @@ export default function AssignmentsDashboard() {
       alert(err.message || "Error al guardar la asignación");
     } finally {
       setIsSubmittingFocus(false);
+    }
+  };
+
+  // Confirmar cambio de modalidad (Digital <-> Impreso)
+  const handleConfirmModeChange = async () => {
+    if (!modeChangeTarget) return;
+    setIsChangingMode(true);
+    try {
+      await apiFetch(`/admin/assignments/${modeChangeTarget.assignment.id}/mode`, {
+        method: "PATCH",
+        body: { applicationMode: modeChangeTarget.newMode }
+      });
+      await loadData();
+      setModeChangeTarget(null);
+    } catch (err: any) {
+      alert(err.message || "Error al cambiar la modalidad");
+    } finally {
+      setIsChangingMode(false);
     }
   };
 
@@ -1735,6 +1766,77 @@ export default function AssignmentsDashboard() {
                         )}
                       </div>
 
+                      {/* DROP ZONE 5 / CONFIGURACIÓN: MODALIDAD DE RENDICIÓN */}
+                      <div className="border-2 rounded-2xl p-4 transition-all border-slate-200 bg-white hover:border-emerald-300">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2 font-bold text-gray-800 text-xs">
+                            <div className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
+                              <FileText className="w-4 h-4" />
+                            </div>
+                            <span>5. Modalidad de Rendición de la Evaluación</span>
+                          </div>
+                          <span className="text-[10px] text-gray-400 font-semibold italic">
+                            (Selecciona el formato de aplicación)
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 pt-2 border-t border-slate-100">
+                          {/* Opción Digital */}
+                          <div
+                            onClick={() => setStagedApplicationMode("DIGITAL")}
+                            className={`p-3.5 rounded-xl border-2 cursor-pointer transition flex items-start gap-3 ${
+                              stagedApplicationMode === "DIGITAL"
+                                ? "border-blue-600 bg-blue-50/70 shadow-sm ring-2 ring-blue-100"
+                                : "border-gray-200 bg-white hover:border-gray-300 hover:bg-slate-50"
+                            }`}
+                          >
+                            <div className={`p-2 rounded-lg shrink-0 ${
+                              stagedApplicationMode === "DIGITAL" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-500"
+                            }`}>
+                              <Monitor className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-gray-900">💻 Modalidad Digital (Online)</span>
+                                {stagedApplicationMode === "DIGITAL" && (
+                                  <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">Activo</span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                                Los estudiantes rinden directamente desde sus computadores o tablets en la plataforma web.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Opción Impresa */}
+                          <div
+                            onClick={() => setStagedApplicationMode("PRINTED")}
+                            className={`p-3.5 rounded-xl border-2 cursor-pointer transition flex items-start gap-3 ${
+                              stagedApplicationMode === "PRINTED"
+                                ? "border-emerald-600 bg-emerald-50/70 shadow-sm ring-2 ring-emerald-100"
+                                : "border-gray-200 bg-white hover:border-gray-300 hover:bg-slate-50"
+                            }`}
+                          >
+                            <div className={`p-2 rounded-lg shrink-0 ${
+                              stagedApplicationMode === "PRINTED" ? "bg-emerald-600 text-white" : "bg-gray-100 text-gray-500"
+                            }`}>
+                              <Printer className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-gray-900">📄 Modalidad Impresa (Papel / OMR)</span>
+                                {stagedApplicationMode === "PRINTED" && (
+                                  <span className="bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">Activo</span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                                Los alumnos responden en hoja impresa personalizada con código QR. Podrás escanearlas o subir un PDF multipágina con las respuestas.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
                     </div>
 
                     {/* Footer con Botones de Confirmación */}
@@ -1977,6 +2079,25 @@ export default function AssignmentsDashboard() {
                                   {formatCourseName(a.Course)}
                                 </span>
                                 {a.Exam?.examType && getExamTypeBadge(a.Exam.examType)}
+                                {a.applicationMode === "PRINTED" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setModeChangeTarget({ assignment: a, newMode: "DIGITAL" })}
+                                    className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold px-1.5 py-0.5 rounded text-[9px] flex items-center gap-1 transition"
+                                    title="Modalidad Impresa (Papel/OMR). Clic para cambiar a Digital"
+                                  >
+                                    <Printer className="w-2.5 h-2.5 text-emerald-700" /> Papel
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setModeChangeTarget({ assignment: a, newMode: "PRINTED" })}
+                                    className="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-1.5 py-0.5 rounded text-[9px] flex items-center gap-1 transition"
+                                    title="Modalidad Digital (Online). Clic para cambiar a Impreso"
+                                  >
+                                    <Monitor className="w-2.5 h-2.5 text-blue-700" /> Digital
+                                  </button>
+                                )}
                               </div>
                               <button 
                                 onClick={() => handleDelete(a.id)} 
@@ -2016,13 +2137,21 @@ export default function AssignmentsDashboard() {
                                 >
                                   <Printer className="w-3.5 h-3.5" />
                                 </Link>
+                                <button
+                                  type="button"
+                                  onClick={() => setOmrScanAssignmentId(a.id)}
+                                  className="text-gray-400 hover:text-emerald-600 p-1 rounded hover:bg-emerald-50 transition"
+                                  title="Escanear OMR / Subir PDF de respuestas"
+                                >
+                                  <ScanLine className="w-3.5 h-3.5" />
+                                </button>
                                 <Link
                                   href={`/teacher/assignments/${a.id}`}
                                   target="_blank"
                                   className="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition"
                                   title="Digitalizar respuestas / Ver curso"
                                 >
-                                  <ScanLine className="w-3.5 h-3.5" />
+                                  <ChevronRight className="w-3.5 h-3.5" />
                                 </Link>
                               </div>
                             </div>
@@ -2218,6 +2347,16 @@ export default function AssignmentsDashboard() {
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0">
+                              {a.applicationMode === "PRINTED" ? (
+                                <span className="font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                                  <Printer className="w-3 h-3 text-emerald-700" /> Papel (OMR)
+                                </span>
+                              ) : (
+                                <span className="font-bold text-blue-800 bg-blue-100 border border-blue-300 px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                                  <Monitor className="w-3 h-3 text-blue-700" /> Digital
+                                </span>
+                              )}
+
                               {a.dynamicPassword && a.dynamicPasswordActive && (
                                 <span className="font-mono font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded text-[11px]">
                                   PIN: {a.dynamicPassword}
@@ -2318,6 +2457,43 @@ export default function AssignmentsDashboard() {
                                 </div>
                               </div>
 
+                              {/* Tarjeta Modalidad de Rendición */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-3 rounded-xl border border-gray-100 text-xs">
+                                <div className="flex items-center gap-2.5">
+                                  {a.applicationMode === "PRINTED" ? (
+                                    <>
+                                      <div className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
+                                        <Printer className="w-4 h-4" />
+                                      </div>
+                                      <div>
+                                        <span className="text-[10px] text-gray-400 uppercase font-bold block">Modalidad Actual</span>
+                                        <span className="font-bold text-emerald-800">📄 Formato Impreso (Papel / OMR)</span>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
+                                        <Monitor className="w-4 h-4" />
+                                      </div>
+                                      <div>
+                                        <span className="text-[10px] text-gray-400 uppercase font-bold block">Modalidad Actual</span>
+                                        <span className="font-bold text-blue-800">💻 Formato Digital (En Línea)</span>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setModeChangeTarget({
+                                    assignment: a,
+                                    newMode: a.applicationMode === "PRINTED" ? "DIGITAL" : "PRINTED"
+                                  })}
+                                  className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-xl transition"
+                                >
+                                  Cambiar a {a.applicationMode === "PRINTED" ? "Digital" : "Impreso"}
+                                </button>
+                              </div>
+
                               {/* Fila de Tags clickeables de la asignación */}
                               <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-gray-200/60">
                                 <span className="text-[10px] font-bold text-gray-400 uppercase mr-1">Tags:</span>
@@ -2343,7 +2519,7 @@ export default function AssignmentsDashboard() {
                                 <span className="text-[10px] text-gray-500 font-medium">
                                   Hojas de respuestas y escaneo:
                                 </span>
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <Link
                                     href={`/teacher/assignments/${a.id}/print-sheets`}
                                     target="_blank"
@@ -2352,13 +2528,21 @@ export default function AssignmentsDashboard() {
                                     <Printer className="w-3.5 h-3.5 text-indigo-600" />
                                     Imprimir Hojas (PDF)
                                   </Link>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOmrScanAssignmentId(a.id)}
+                                    className="text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm transition"
+                                  >
+                                    <ScanLine className="w-3.5 h-3.5 text-emerald-600" />
+                                    Escanear OMR / Subir PDF
+                                  </button>
                                   <Link
                                     href={`/teacher/assignments/${a.id}`}
                                     target="_blank"
                                     className="text-[11px] font-bold text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm transition"
                                   >
-                                    <ScanLine className="w-3.5 h-3.5 text-blue-600" />
-                                    Digitalizar / Escanear OMR
+                                    <ChevronRight className="w-3.5 h-3.5 text-blue-600" />
+                                    Ver Curso
                                   </Link>
                                 </div>
                               </div>
@@ -3000,6 +3184,90 @@ export default function AssignmentsDashboard() {
             initialExamTitle={aiPromptConfig.examTitle}
             initialDescendedOa={aiPromptConfig.targetOa}
           />
+
+          {/* Modal Pop-up de Confirmación para Cambiar Modalidad (Digital vs Impreso) */}
+          {modeChangeTarget && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl ${
+                    modeChangeTarget.newMode === "PRINTED" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
+                  }`}>
+                    {modeChangeTarget.newMode === "PRINTED" ? <Printer className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-base">
+                      Cambiar Modalidad de Rendición
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      {formatCourseName(modeChangeTarget.assignment.Course)} • {modeChangeTarget.assignment.Exam?.title}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-gray-700 space-y-2">
+                  <p>
+                    ¿Estás seguro de cambiar esta evaluación a modalidad{" "}
+                    <strong className={modeChangeTarget.newMode === "PRINTED" ? "text-emerald-700 font-bold" : "text-blue-700 font-bold"}>
+                      {modeChangeTarget.newMode === "PRINTED" ? "IMPRESA (Papel / OMR)" : "DIGITAL (En línea)"}
+                    </strong>?
+                  </p>
+                  {modeChangeTarget.newMode === "PRINTED" ? (
+                    <p className="text-gray-500">
+                      Los alumnos no podrán rendir la prueba en línea por su cuenta. Podrás imprimir sus hojas de respuestas personalizadas con código QR y escanearlas o subir un PDF multipágina con las respuestas.
+                    </p>
+                  ) : (
+                    <p className="text-gray-500">
+                      Los alumnos podrán ingresar y rendir la prueba de forma interactiva en la plataforma web dentro de la fecha y hora programadas.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setModeChangeTarget(null)}
+                    disabled={isChangingMode}
+                    className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmModeChange}
+                    disabled={isChangingMode}
+                    className={`px-5 py-2 rounded-xl text-white text-xs font-black shadow-sm transition disabled:opacity-50 flex items-center gap-2 ${
+                      modeChangeTarget.newMode === "PRINTED"
+                        ? "bg-emerald-600 hover:bg-emerald-700"
+                        : "bg-blue-600 hover:bg-blue-700"
+                    }`}
+                  >
+                    {isChangingMode ? (
+                      <span>Guardando...</span>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Confirmar Cambio</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Escáner OMR Directo para Administradores */}
+          {omrScanAssignmentId !== null && (
+            <OmrScannerModal
+              assignmentId={omrScanAssignmentId}
+              isOpen={true}
+              onClose={() => setOmrScanAssignmentId(null)}
+              onSuccess={() => {
+                loadData();
+                setOmrScanAssignmentId(null);
+              }}
+            />
+          )}
 
         </AppShell>
       )}

@@ -244,6 +244,10 @@ router.get('/assignments/:id/live', async (req, res, next) => {
     });
 
     res.json({
+      assignment: {
+        id: assignment.id,
+        applicationMode: assignment.applicationMode || 'DIGITAL'
+      },
       questionCount: await prisma.question.count({ where: { examId: assignment.examId } }),
       students: result
     });
@@ -1212,7 +1216,8 @@ router.get('/assignments/:id/printable-sheet-data', async (req, res, next) => {
         id: assignment.id,
         opensAt: assignment.opensAt,
         closesAt: assignment.closesAt,
-        dynamicPassword: assignment.dynamicPassword
+        dynamicPassword: assignment.dynamicPassword,
+        applicationMode: assignment.applicationMode || 'DIGITAL'
       },
       exam: {
         id: assignment.exam.id,
@@ -1639,6 +1644,34 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
     }
 
     res.json(results);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/assignments/:id/mode', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const assignment = await prisma.examAssignment.findUnique({ where: { id } });
+    if (!assignment) return res.status(404).json({ error: 'Asignación no encontrada' });
+
+    const allowedCourses = await getAllowedCourseIds(req.user);
+    if (allowedCourses && !allowedCourses.includes(assignment.courseId)) {
+      return res.status(403).json({ error: 'No tienes permisos para modificar este curso' });
+    }
+
+    const { applicationMode } = req.body;
+    const mode = applicationMode === 'PRINTED' ? 'PRINTED' : 'DIGITAL';
+    const updated = await prisma.examAssignment.update({
+      where: { id },
+      data: { applicationMode: mode },
+      include: {
+        exam: true,
+        course: true,
+        assignedTeacher: { select: { name: true, rut: true } }
+      }
+    });
+    res.json(updated);
   } catch (error) {
     next(error);
   }

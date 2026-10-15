@@ -32,6 +32,7 @@ async function getOwnSubmission(req, submissionId) {
 
 function assignmentState(a, submission, now = new Date()) {
   if (submission?.status === 'SUBMITTED') return a.released ? 'RESULTS' : 'SUBMITTED';
+  if (a.applicationMode === 'PRINTED') return 'PRINTED';
   if (now < a.opensAt) return 'UPCOMING';
   if (now > a.closesAt) return submission ? 'SUBMITTED' : 'MISSED';
   return submission ? 'IN_PROGRESS' : 'AVAILABLE';
@@ -58,6 +59,7 @@ router.get('/assignments', async (req, res) => {
       opensAt: a.opensAt,
       closesAt: a.closesAt,
       released: a.released,
+      applicationMode: a.applicationMode || 'DIGITAL',
       exam: { ...a.exam, questionCount: a.exam._count.questions, _count: undefined },
       state: assignmentState(a, submission),
       submissionId: submission?.id ?? null,
@@ -69,6 +71,10 @@ router.get('/assignments', async (req, res) => {
 router.post('/assignments/:id/start', async (req, res) => {
   const assignment = await getOwnAssignment(req, Number(req.params.id));
   if (!assignment) return res.status(404).json({ error: 'Ensayo no encontrado' });
+
+  if (assignment.applicationMode === 'PRINTED') {
+    return res.status(403).json({ error: 'Esta evaluación está configurada para rendición impresa en papel. Tu profesor o el colegio aplicará la hoja de respuestas física.' });
+  }
 
   const now = new Date();
   let submission = await prisma.submission.findUnique({

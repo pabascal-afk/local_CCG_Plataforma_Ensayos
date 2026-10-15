@@ -1601,6 +1601,7 @@ router.get('/assignments', async (req, res, next) => {
       durationMinutes: a.exam?.durationMinutes || 90,
       dynamicPassword: a.dynamicPassword,
       dynamicPasswordActive: Boolean(a.dynamicPasswordActive),
+      applicationMode: a.applicationMode || 'DIGITAL',
       status: a.status,
       originalOpensAt: a.originalOpensAt,
       cancelReason: a.cancelReason,
@@ -1688,7 +1689,7 @@ router.get('/assignments/export.xlsx', async (req, res, next) => {
 
 router.post('/assignments', checkAdmin, async (req, res, next) => {
   try {
-    const { examId, courseId, opensAt, closesAt, assignedTeacherRut, durationMinutes, dynamicPassword, dynamicPasswordActive } = req.body;
+    const { examId, courseId, opensAt, closesAt, assignedTeacherRut, durationMinutes, dynamicPassword, dynamicPasswordActive, applicationMode } = req.body;
     
     if (durationMinutes !== undefined && durationMinutes !== null) {
       const dur = parseInt(durationMinutes, 10);
@@ -1707,7 +1708,28 @@ router.post('/assignments', checkAdmin, async (req, res, next) => {
         assignedTeacherRut: assignedTeacherRut || null,
         dynamicPassword: dynamicPassword ? String(dynamicPassword).trim().toUpperCase() : null,
         dynamicPasswordActive: Boolean(dynamicPasswordActive),
+        applicationMode: applicationMode === 'PRINTED' ? 'PRINTED' : 'DIGITAL',
       },
+      include: {
+        exam: true,
+        course: true,
+        assignedTeacher: { select: { name: true, rut: true } }
+      }
+    });
+    res.json(assignment);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/assignments/:id/mode', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { applicationMode } = req.body;
+    const mode = applicationMode === 'PRINTED' ? 'PRINTED' : 'DIGITAL';
+    const assignment = await prisma.examAssignment.update({
+      where: { id },
+      data: { applicationMode: mode },
       include: {
         exam: true,
         course: true,

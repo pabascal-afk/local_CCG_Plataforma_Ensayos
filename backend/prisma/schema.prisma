@@ -97,6 +97,7 @@ model ExamAssignment {
   cancelReason       String?
   dynamicPassword    String?      // PIN / clave temporal de clase generada por el profesor
   dynamicPasswordActive Boolean   @default(false)
+  applicationMode    String       @default("DIGITAL") // DIGITAL | PRINTED
   released           Boolean      @default(false) // resultados visibles al alumno
   releasedAt         DateTime?
   releasedBy         String?

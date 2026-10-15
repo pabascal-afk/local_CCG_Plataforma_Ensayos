@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/session";
 import Link from "next/link";
-import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles } from "lucide-react";
+import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check } from "lucide-react";
 import OmrScannerModal from "@/components/OmrScannerModal";
 import FastDigitizerModal from "@/components/FastDigitizerModal";
 
@@ -13,6 +13,8 @@ export default function StudentsTab({ id }: { id: number }) {
   const [importingAnswers, setImportingAnswers] = useState(false);
   const [showOmrModal, setShowOmrModal] = useState(false);
   const [showDigitizerModal, setShowDigitizerModal] = useState(false);
+  const [showModeConfirmModal, setShowModeConfirmModal] = useState(false);
+  const [isUpdatingMode, setIsUpdatingMode] = useState(false);
 
   const refreshData = async () => {
     try {
@@ -20,6 +22,24 @@ export default function StudentsTab({ id }: { id: number }) {
       setData(refreshed);
     } catch (err: any) {
       console.error("Error al refrescar datos:", err);
+    }
+  };
+
+  const handleToggleMode = async () => {
+    if (!data) return;
+    const targetMode = data.applicationMode === "PRINTED" ? "DIGITAL" : "PRINTED";
+    setIsUpdatingMode(true);
+    try {
+      await apiFetch(`/teacher/assignments/${id}/mode`, {
+        method: "PATCH",
+        body: { applicationMode: targetMode },
+      });
+      setShowModeConfirmModal(false);
+      await refreshData();
+    } catch (err: any) {
+      alert(err.message || "Error al actualizar la modalidad");
+    } finally {
+      setIsUpdatingMode(false);
     }
   };
 
@@ -80,14 +100,100 @@ export default function StudentsTab({ id }: { id: number }) {
         onSuccess={refreshData}
       />
 
+      {/* Modal Confirmación de Cambio de Modalidad */}
+      {showModeConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4 text-left">
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-xl ${
+                data.applicationMode === "PRINTED" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"
+              }`}>
+                {data.applicationMode === "PRINTED" ? <Monitor className="w-5 h-5" /> : <Printer className="w-5 h-5" />}
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-900 text-base">
+                  Cambiar Modalidad de Rendición
+                </h3>
+                <p className="text-xs text-gray-500">
+                  {data.course?.name || "Curso"} • {data.exam?.title || "Evaluación"}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-gray-700 space-y-2">
+              <p>
+                ¿Deseas cambiar esta evaluación a modalidad{" "}
+                <strong className={data.applicationMode === "PRINTED" ? "text-blue-700 font-bold" : "text-emerald-700 font-bold"}>
+                  {data.applicationMode === "PRINTED" ? "DIGITAL (En línea)" : "IMPRESA (Papel / OMR)"}
+                </strong>?
+              </p>
+              {data.applicationMode === "PRINTED" ? (
+                <p className="text-gray-500">
+                  Los estudiantes podrán iniciar la prueba online desde sus computadores o tablets en la plataforma durante el horario activo.
+                </p>
+              ) : (
+                <p className="text-gray-500">
+                  Los estudiantes no podrán responder en línea. Deberás imprimir las hojas con código QR para que respondan en papel y luego escanearlas o subir un PDF multipágina con las respuestas.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowModeConfirmModal(false)}
+                disabled={isUpdatingMode}
+                className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleMode}
+                disabled={isUpdatingMode}
+                className={`px-5 py-2 rounded-xl text-white text-xs font-black shadow-sm transition disabled:opacity-50 flex items-center gap-2 ${
+                  data.applicationMode === "PRINTED"
+                    ? "bg-blue-600 hover:bg-blue-700"
+                    : "bg-emerald-600 hover:bg-emerald-700"
+                }`}
+              >
+                {isUpdatingMode ? (
+                  <span>Guardando...</span>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Confirmar Cambio</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bloque Aplicación Impresa y Carga Masiva OMR */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white rounded-2xl p-5 mb-8 shadow-md border border-indigo-900">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
-                Evaluación Híbrida / Papel
-              </span>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              {data.applicationMode === "PRINTED" ? (
+                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase flex items-center gap-1.5">
+                  <Printer className="w-3 h-3 text-emerald-300" /> Modalidad: Impresa (Papel / OMR)
+                </span>
+              ) : (
+                <span className="bg-blue-500/20 text-blue-300 border border-blue-400/40 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase flex items-center gap-1.5">
+                  <Monitor className="w-3 h-3 text-blue-300" /> Modalidad: Digital (En Línea)
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowModeConfirmModal(true)}
+                className="text-[10px] font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/30 px-2 py-0.5 rounded-lg transition"
+              >
+                Cambiar a {data.applicationMode === "PRINTED" ? "Digital" : "Impreso"}
+              </button>
+
               <span className="text-xs text-indigo-300 font-medium flex items-center gap-1">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Corrección instantánea con TRI SIMCE
               </span>
@@ -96,7 +202,7 @@ export default function StudentsTab({ id }: { id: number }) {
               Impresión y Digitalización de Hojas de Respuestas
             </h4>
             <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-              Imprime las hojas con QR personalizado por alumno y luego digitalízalas escaneando el documento, tomando fotos con tu celular, usando el digitador ultra-rápido de teclado o subiendo la planilla Excel del curso.
+              Imprime las hojas con QR personalizado por alumno y luego digitalízalas escaneando el documento, tomando fotos con tu celular, subiendo un PDF multipágina con todo el curso o usando el digitador de teclado.
             </p>
           </div>
 
