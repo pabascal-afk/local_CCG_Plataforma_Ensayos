@@ -21,7 +21,7 @@ title Instalador / Actualizador - %APP_NAME% (Puerto %APP_PORT%)
 net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo [INFO] Solicitando permisos de Administrador para configurar Firewall de Windows...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList '/c `\"%~f0`\"' -Verb RunAs"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList '/k `\"%~f0`\"' -Verb RunAs"
     exit /b
 )
 
@@ -60,7 +60,14 @@ IF EXIST ".git" (
     echo [INFO] Deteniendo servidores y liberando puertos %APP_PORT% y %APP_BACKEND_PORT%...
     powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort %APP_PORT%,%APP_BACKEND_PORT% -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
     echo [INFO] Obteniendo actualizaciones desde GitHub...
+    git fetch origin main
     git pull origin main
+    IF ERRORLEVEL 1 (
+        echo [AVISO] git pull tuvo dificultades por archivos locales modificados.
+        echo [INFO] Guardando cambios locales y sincronizando con origin/main...
+        git stash
+        git pull origin main
+    )
 ) ELSE (
     echo [INFO] Iniciando instalacion por primera vez...
     echo [INFO] Clonando repositorio desde GitHub...
@@ -75,13 +82,7 @@ IF EXIST ".git" (
 
 echo.
 echo ==========================================================
-echo   [1/4] Instalando dependencias del sistema principal...
-echo ==========================================================
-call npm install --no-audit
-
-echo.
-echo ==========================================================
-echo   [2/4] Configurando Backend y Base de Datos SQLite...
+echo   [1/3] Configurando Backend y Base de Datos SQLite...
 echo ==========================================================
 cd backend
 IF NOT EXIST ".env" (
@@ -94,8 +95,11 @@ IF NOT EXIST ".env" (
         echo UPLOADS_DIR=./uploads
     ) > .env
 )
-call npm install --no-audit
-echo [INFO] Sincronizando esquema de base de datos...
+IF NOT EXIST "node_modules" (
+    echo [INFO] Instalando modulos de backend...
+    call npm install --no-audit
+)
+echo [INFO] Sincronizando esquema de base de datos con Prisma...
 node node_modules\prisma\build\index.js db push --accept-data-loss
 node node_modules\prisma\build\index.js generate
 
@@ -110,10 +114,13 @@ cd ..
 
 echo.
 echo ==========================================================
-echo   [3/4] Instalando y compilando Frontend (Next.js)...
+echo   [2/3] Instalando y compilando Frontend (Next.js)...
 echo ==========================================================
 cd frontend
-call npm install --no-audit
+IF NOT EXIST "node_modules" (
+    echo [INFO] Instalando modulos de frontend...
+    call npm install --no-audit
+)
 echo [INFO] Generando build optimizado para produccion en puerto %APP_PORT%...
 node node_modules\next\dist\bin\next build
 IF ERRORLEVEL 1 (
@@ -126,7 +133,7 @@ cd ..
 
 echo.
 echo ==========================================================
-echo   [4/4] Configurando Firewall y Acceso de Red Local (LAN)...
+echo   [3/3] Configurando Firewall y Acceso de Red Local (LAN)...
 echo ==========================================================
 echo [INFO] Creando/Actualizando reglas de Firewall para puertos %APP_PORT% y %APP_BACKEND_PORT% (LAN)...
 netsh advfirewall firewall delete rule name="%APP_NAME% (Puerto %APP_PORT%)" >nul 2>&1
@@ -146,7 +153,7 @@ echo   [EXITO] Instalacion y configuracion completada con exito.
 echo   El servidor %APP_NAME% esta listo en el puerto %APP_PORT%.
 echo ==========================================================
 echo.
-echo Arrancando el servidor %APP_NAME%...
-start "" "Iniciar_Plataforma.vbs"
-timeout /t 4 >nul
+echo Presione cualquier tecla para iniciar el servidor...
+pause
+start "" "Iniciar_Consola.bat"
 exit /b
