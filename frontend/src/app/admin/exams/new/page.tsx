@@ -68,6 +68,8 @@ export default function NewExamPage() {
     }
   };
 
+  const isPruebas = typeof window !== "undefined" && (window.location.port === "3600" || window.location.hostname.includes("pruebas"));
+
   return (
     <RequireRole roles={["ADMIN", "DIRECTOR"]}>
       {(user) => (
@@ -78,8 +80,14 @@ export default function NewExamPage() {
                 <button onClick={() => router.back()} className="text-blue-600 hover:underline flex items-center gap-1 text-sm font-medium mb-2">
                   <ArrowLeft className="w-4 h-4" /> Volver
                 </button>
-                <h1 className="text-3xl font-bold text-gray-900">Nuevo Ensayo</h1>
-                <p className="text-gray-500 mt-1">Sube el PDF y configura los parámetros base. Luego podrás editar la pauta correcta.</p>
+                <h1 className="text-3xl font-bold text-gray-900">
+                  {isPruebas ? "Nueva Evaluación / Prueba Regular" : "Nuevo Ensayo"}
+                </h1>
+                <p className="text-gray-500 mt-1">
+                  {isPruebas 
+                    ? "Sube el PDF de la prueba y configura los parámetros base. Luego podrás ingresar o importar la pauta de preguntas (.xlsx)." 
+                    : "Sube el PDF y configura los parámetros base. Luego podrás editar la pauta correcta."}
+                </p>
               </div>
             </div>
 
@@ -96,9 +104,13 @@ export default function NewExamPage() {
                   <Sparkles className="w-5 h-5 text-amber-300" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-sm text-indigo-950">¿Necesitas crear este ensayo con Inteligencia Artificial?</h3>
+                  <h3 className="font-extrabold text-sm text-indigo-950">
+                    {isPruebas ? "¿Necesitas crear esta prueba con Inteligencia Artificial?" : "¿Necesitas crear este ensayo con Inteligencia Artificial?"}
+                  </h3>
                   <p className="text-xs text-indigo-800 font-medium mt-0.5">
-                    Genera el prompt para que un Agente IA (ChatGPT, Claude, Gemini) elabore las preguntas y la pauta oficial en Excel (.xlsx).
+                    {isPruebas
+                      ? "Genera prompts especializados por OA, conocimientos matemáticos generales (ej. 5° Básico), quizzes de inglés (ej. 3° Medio) y más en Excel (.xlsx)."
+                      : "Genera el prompt para que un Agente IA (ChatGPT, Claude, Gemini) elabore las preguntas y la pauta oficial en Excel (.xlsx)."}
                   </p>
                 </div>
               </div>
@@ -116,10 +128,12 @@ export default function NewExamPage() {
               
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Título del Ensayo</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">
+                    {isPruebas ? "Título de la Evaluación" : "Título del Ensayo"}
+                  </label>
                   <input 
                     type="text" required value={title} onChange={e=>setTitle(e.target.value)}
-                    placeholder="Ej: Ensayo Matemática 4° Básico"
+                    placeholder={isPruebas ? "Ej: Prueba Matemática Unidad 1 - 5° Básico" : "Ej: Ensayo Matemática 4° Básico"}
                     className="w-full border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
                   />
                 </div>
@@ -137,17 +151,29 @@ export default function NewExamPage() {
                   <label className="block text-sm font-bold text-gray-700 mb-1">Asignatura</label>
                   <select required value={subject} onChange={e=>setSubject(e.target.value)} className="w-full border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
                     <option value="">Selecciona...</option>
-                    <option value="Lenguaje">Lenguaje</option>
                     <option value="Matemática">Matemática</option>
+                    <option value="Lenguaje">Lenguaje / Lengua y Lit.</option>
+                    <option value="Inglés">Inglés</option>
                     <option value="Ciencias Naturales">Ciencias Naturales</option>
-                    <option value="Historia">Historia</option>
+                    <option value="Historia">Historia y Geografía</option>
+                    <option value="Biología">Biología</option>
+                    <option value="Física">Física</option>
+                    <option value="Química">Química</option>
+                    <option value="Educación Ciudadana">Educación Ciudadana</option>
+                    <option value="Tecnología">Tecnología</option>
+                    <option value="Artes">Artes Visuales / Música</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-1">Nivel</label>
                   <select value={level} onChange={e=>setLevel(e.target.value)} className="w-full border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                    <option value="1B">1° Básico</option>
+                    <option value="2B">2° Básico</option>
+                    <option value="3B">3° Básico</option>
                     <option value="4B">4° Básico</option>
+                    <option value="5B">5° Básico</option>
                     <option value="6B">6° Básico</option>
+                    <option value="7B">7° Básico</option>
                     <option value="8B">8° Básico</option>
                     <option value="1M">1° Medio</option>
                     <option value="2M">2° Medio</option>
@@ -156,11 +182,24 @@ export default function NewExamPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Tipo de Ensayo</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Tipo de Evaluación</label>
                   <select value={examType} onChange={e=>setExamType(e.target.value)} className="w-full border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-                    <option value="QUIZ">Quiz (Corto)</option>
-                    <option value="ENSAYO">Ensayo Normal</option>
-                    <option value="ENSAYO_LARGO">Ensayo Largo</option>
+                    {isPruebas ? (
+                      <>
+                        <option value="PRUEBA_UNIDAD">Prueba de Unidad</option>
+                        <option value="QUIZ">Quiz / Control Rápido</option>
+                        <option value="CONOCIMIENTOS_GENERALES">Prueba de Conocimientos Generales</option>
+                        <option value="DIAGNOSTICO">Evaluación Diagnóstica</option>
+                        <option value="ENSAYO">Evaluación Sumativa Regular</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="QUIZ">Quiz (Corto)</option>
+                        <option value="ENSAYO">Ensayo Normal</option>
+                        <option value="ENSAYO_LARGO">Ensayo Largo</option>
+                        <option value="DIAGNOSTICO">Diagnóstico</option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>
@@ -208,7 +247,7 @@ export default function NewExamPage() {
                   disabled={saving}
                   className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 transition-colors"
                 >
-                  {saving ? "Creando y procesando PDF..." : <><Save className="w-5 h-5 mr-2" /> Crear Ensayo y Cargar Pauta</>}
+                  {saving ? "Creando y procesando PDF..." : <><Save className="w-5 h-5 mr-2" /> {isPruebas ? "Crear Evaluación y Cargar Pauta" : "Crear Ensayo y Cargar Pauta"}</>}
                 </button>
               </div>
             </form>
