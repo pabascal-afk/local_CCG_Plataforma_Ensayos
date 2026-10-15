@@ -48,12 +48,20 @@ export default function LoginPage() {
     }
   };
 
+  const isTestEnv = typeof window !== "undefined" && window.location.port === "3600";
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center flex flex-col items-center">
         <img src="/CCG-logo-300x300.png" alt="Logo CCG" className="w-24 h-24 mb-2 object-contain" />
-        <h2 className="text-center text-3xl font-extrabold text-amber-600">PRUEBAS CCG</h2>
-        <span className="inline-block px-3 py-0.5 text-xs font-semibold uppercase tracking-wider text-amber-800 bg-amber-100 rounded-full mt-1.5 border border-amber-300">Ambiente de Pruebas (Puerto 3600)</span>
+        <h2 className={`text-center text-3xl font-extrabold ${isTestEnv ? "text-amber-600" : "text-gray-900"}`}>
+          {isTestEnv ? "PRUEBAS CCG" : "ENSAYOS CCG"}
+        </h2>
+        {isTestEnv && (
+          <span className="inline-block px-3 py-0.5 text-xs font-semibold uppercase tracking-wider text-amber-800 bg-amber-100 rounded-full mt-1.5 border border-amber-300">
+            Ambiente de Pruebas (Puerto 3600)
+          </span>
+        )}
         <p className="mt-2 text-center text-sm text-gray-600">
           Ingresa con los datos proporcionados por tu colegio
         </p>

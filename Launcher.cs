@@ -22,7 +22,7 @@ namespace Launcher {
         private Button closeButton;
 
         public MainForm() {
-            this.Text = "PRUEBAS CCG - Puerto 3600";
+            this.Text = "Plataforma Ensayos SIMCE - CCG";
             this.Size = new Size(420, 215);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -56,15 +56,15 @@ namespace Launcher {
             };
 
             Label titleLabel = new Label() {
-                Text = "PRUEBAS CCG",
+                Text = "Colegio Cerro Grande",
                 Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(217, 119, 6),
+                ForeColor = Color.FromArgb(14, 61, 153),
                 Dock = DockStyle.Top,
                 Height = 22
             };
 
             Label subtitleLabel = new Label() {
-                Text = "Ambiente de Pruebas (Puerto 3600)",
+                Text = "Plataforma de Ensayos SIMCE (Red Local)",
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
                 ForeColor = Color.FromArgb(90, 90, 90),
                 Dock = DockStyle.Top,
@@ -150,14 +150,21 @@ namespace Launcher {
                 if (System.IO.File.Exists(cfgFile)) {
                     string ipFromCfg = System.IO.File.ReadAllText(cfgFile).Trim();
                     if (!string.IsNullOrEmpty(ipFromCfg)) {
-                        candidateHosts.Add(ipFromCfg.StartsWith("http") ? ipFromCfg : "http://" + ipFromCfg + ":3600");
+                        candidateHosts.Add(ipFromCfg.StartsWith("http") ? ipFromCfg : "http://" + ipFromCfg + (ipFromCfg.Contains(":") ? "" : ":3300"));
+                        if (!ipFromCfg.Contains(":")) {
+                            candidateHosts.Add("http://" + ipFromCfg + ":3600");
+                        }
                     }
                 }
             } catch { }
 
+            candidateHosts.Add("http://localhost:3300");
             candidateHosts.Add("http://localhost:3600");
+            candidateHosts.Add("http://192.168.3.16:3300");
             candidateHosts.Add("http://192.168.3.16:3600");
+            candidateHosts.Add("http://192.168.0.142:3300");
             candidateHosts.Add("http://192.168.0.142:3600");
+            candidateHosts.Add("http://ensayos.local:3300");
             candidateHosts.Add("http://ensayos.local:3600");
 
             using (HttpClient client = new HttpClient(CreateHandler())) {
@@ -177,7 +184,7 @@ namespace Launcher {
             progressBar.Style = ProgressBarStyle.Blocks;
             progressBar.Value = 100;
             statusLabel.ForeColor = Color.DarkRed;
-            statusLabel.Text = "Servidor PRUEBAS CCG no accesible en la red local (Puerto 3600).";
+            statusLabel.Text = "Servidor no accesible en la red local (Puertos 3300 / 3600).";
             retryButton.Visible = true;
             closeButton.Visible = true;
         }

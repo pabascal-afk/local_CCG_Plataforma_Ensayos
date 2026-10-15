@@ -85,9 +85,51 @@ function getLocalIp() {
     return candidateIps[0] || '127.0.0.1';
 }
 
-const PORT = parseInt(process.env.PORT, 10) || 3600;
-const BACKEND_PORT = parseInt(process.env.BACKEND_PORT, 10) || 3601;
+function loadEnvFile(envPath) {
+    if (!fs.existsSync(envPath)) return {};
+    try {
+        const content = fs.readFileSync(envPath, 'utf8');
+        const env = {};
+        for (const line of content.split(/\r?\n/)) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const eq = trimmed.indexOf('=');
+            if (eq > 0) {
+                const key = trimmed.slice(0, eq).trim();
+                let val = trimmed.slice(eq + 1).trim();
+                if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+                    val = val.slice(1, -1);
+                }
+                env[key] = val;
+            }
+        }
+        return env;
+    } catch (e) {
+        return {};
+    }
+}
+
+const rootEnv = loadEnvFile(path.join(__dirname, '.env'));
+const backendEnvConfig = loadEnvFile(path.join(__dirname, 'backend', '.env'));
+
+// Detección dinámica de entorno (Producción :3300/:3001 vs Pruebas :3600/:3601)
+const detectedBackendPort = parseInt(process.env.BACKEND_PORT || rootEnv.BACKEND_PORT || backendEnvConfig.PORT || '', 10);
+const isPruebasDir = __dirname.toLowerCase().includes('pruebas');
+
+let defaultPort = 3300;
+let defaultBackendPort = 3001;
+
+if (isPruebasDir || detectedBackendPort === 3601 || process.env.PORT === '3600') {
+    defaultPort = 3600;
+    defaultBackendPort = 3601;
+}
+
+const PORT = parseInt(process.env.PORT || rootEnv.PORT || defaultPort, 10);
+const BACKEND_PORT = parseInt(process.env.BACKEND_PORT || rootEnv.BACKEND_PORT || backendEnvConfig.PORT || defaultBackendPort, 10);
 const localIp = getLocalIp();
+
+const isPruebas = PORT === 3600 || BACKEND_PORT === 3601 || isPruebasDir;
+const APP_TITLE = process.env.APP_TITLE || (isPruebas ? 'PRUEBAS CCG' : 'Plataforma de Ensayos SIMCE (Colegio Cerro Grande)');
 
 // 3. Liberar puertos si quedaron tomados por procesos anteriores
 function freePortIfBusy(port) {
@@ -102,11 +144,11 @@ freePortIfBusy(BACKEND_PORT);
 
 // Intentar agregar regla de firewall de Windows (si tiene permisos)
 try {
-    exec('netsh advfirewall firewall add rule name="PRUEBAS CCG (Puerto 3600)" dir=in action=allow protocol=TCP localport=3600', () => {});
+    exec(`netsh advfirewall firewall add rule name="${APP_TITLE} (Puerto ${PORT})" dir=in action=allow protocol=TCP localport=${PORT}`, () => {});
 } catch (e) {}
 
 log('===============================================================');
-log('   Iniciando PRUEBAS CCG (Puerto 3600 - Colegio Cerro Grande)');
+log(`   Iniciando ${APP_TITLE} (Puerto ${PORT})`);
 log('===============================================================');
 log(`- Acceso en este equipo:  http://localhost:${PORT}`);
 log(`- Acceso Red Local (LAN): http://${localIp}:${PORT}`);
@@ -342,7 +384,7 @@ process.on('exit', () => {
 
 // 9. Inicializar Bandeja del Sistema (Tray Icon)
 try {
-    initTray(PORT, localIp, shutdown);
+    initTray(PORT, localIp, shutdown, APP_TITLE);
     log('[Tray] Icono de bandeja del sistema activo.');
 } catch (err) {
     log(`[Tray Advertencia]: ${err.message}`);

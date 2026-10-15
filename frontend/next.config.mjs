@@ -1,5 +1,5 @@
-/** @type {import('next').NextConfig} */
-const API_TARGET = process.env.API_INTERNAL_URL || 'http://127.0.0.1:3601';
+const defaultBackendPort = process.env.PORT === '3600' ? '3601' : '3001';
+const API_TARGET = process.env.API_INTERNAL_URL || `http://127.0.0.1:${process.env.BACKEND_PORT || defaultBackendPort}`;
 
 const nextConfig = {
   experimental: {

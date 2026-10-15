@@ -1,7 +1,7 @@
 {
-  "name": "pruebas-ccg-plataforma-ensayos",
+  "name": "local-ccg-plataforma-ensayos",
   "version": "1.0.0",
-  "description": "Plataforma de Ensayos SIMCE - Entorno de Pruebas CCG (Puerto 3600)",
+  "description": "Plataforma de Ensayos SIMCE - Servidor Local Colegio Cerro Grande (Produccion :3300 y Pruebas :3600)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
