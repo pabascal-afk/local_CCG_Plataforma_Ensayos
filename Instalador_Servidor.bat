@@ -117,17 +117,27 @@ echo ==========================================================
 echo   [2/3] Instalando y compilando Frontend (Next.js)...
 echo ==========================================================
 cd frontend
-IF NOT EXIST "node_modules" (
-    echo [INFO] Instalando modulos de frontend...
+IF NOT EXIST "node_modules\qrcode" (
+    echo [INFO] Instalando dependencias de frontend (qrcode, jsqr, etc)...
     call npm install --no-audit
+) ELSE (
+    IF NOT EXIST "node_modules" (
+        echo [INFO] Instalando modulos de frontend...
+        call npm install --no-audit
+    )
 )
 echo [INFO] Generando build optimizado para produccion en puerto %APP_PORT%...
 node node_modules\next\dist\bin\next build
 IF ERRORLEVEL 1 (
-    color 0C
-    echo [ERROR] Fallo la compilacion del Frontend Next.js.
-    pause
-    exit /b
+    echo [AVISO] Fallo la compilacion. Reinstalando dependencias de frontend...
+    call npm install --no-audit
+    node node_modules\next\dist\bin\next build
+    IF ERRORLEVEL 1 (
+        color 0C
+        echo [ERROR] Fallo la compilacion del Frontend Next.js.
+        pause
+        exit /b
+    )
 )
 cd ..
 

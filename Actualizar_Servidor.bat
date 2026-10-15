@@ -45,14 +45,23 @@ node node_modules\prisma\build\index.js generate
 cd ..
 
 echo.
-echo [4/4] Compilando Frontend Next.js para produccion en puerto %APP_PORT%...
+echo [4/4] Verificando dependencias y compilando Frontend Next.js para produccion en puerto %APP_PORT%...
 cd frontend
+IF NOT EXIST "node_modules\qrcode" (
+    echo [INFO] Instalando dependencias faltantes en frontend (qrcode, jsqr, etc)...
+    call npm install --no-audit
+)
 node node_modules\next\dist\bin\next build
 IF ERRORLEVEL 1 (
-    color 0C
-    echo [ERROR] Fallo la compilacion de Next.js.
-    pause
-    exit /b
+    echo [AVISO] Fallo la compilacion. Reinstalando dependencias completas...
+    call npm install --no-audit
+    node node_modules\next\dist\bin\next build
+    IF ERRORLEVEL 1 (
+        color 0C
+        echo [ERROR] Fallo la compilacion de Next.js.
+        pause
+        exit /b
+    )
 )
 cd ..
 

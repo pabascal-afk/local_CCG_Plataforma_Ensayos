@@ -234,10 +234,14 @@ try {
 
 // 5. Auto-verificación de Frontend (dependencias y build de producción en .next)
 const frontendNodeModules = path.join(frontendDir, 'node_modules');
-if (!fs.existsSync(frontendNodeModules)) {
-    log('[Frontend] Instalando dependencias en frontend...');
+const qrcodeMod = path.join(frontendNodeModules, 'qrcode');
+const jsqrMod = path.join(frontendNodeModules, 'jsqr');
+
+if (!fs.existsSync(frontendNodeModules) || !fs.existsSync(qrcodeMod) || !fs.existsSync(jsqrMod)) {
+    log('[Frontend] Instalando dependencias faltantes en frontend (qrcode, jsqr, etc)...');
     try {
         runNpm(['install', '--no-audit'], frontendDir);
+        log('[Frontend] Dependencias instaladas correctamente.');
     } catch (e) {
         log(`[Frontend Error] Falló npm install en frontend: ${e.message}`);
     }
@@ -267,32 +271,63 @@ function isFrontendBuildStale() {
         };
         const srcDir = path.join(frontendDir, 'src');
         const nextConfig = path.join(frontendDir, 'next.config.mjs');
+        const packageJson = path.join(frontendDir, 'package.json');
         if (fs.existsSync(nextConfig) && fs.statSync(nextConfig).mtimeMs > buildTime) return true;
+        if (fs.existsSync(packageJson) && fs.statSync(packageJson).mtimeMs > buildTime) return true;
         return checkNewer(srcDir);
     } catch (e) {
         return false;
     }
 }
 
-if (isFrontendBuildStale() && fs.existsSync(nextBin)) {
+function buildFrontend() {
+    if (!fs.existsSync(nextBin)) return false;
     log('========================================================================');
     log(' [AVISO] Compilando frontend Next.js para producción...');
     log(' (Detectados cambios o primera compilación. Por favor espere 1 minuto)');
     log('========================================================================');
     try {
-        const buildRes = spawnSync(nodeExe, [nextBin, 'build'], {
+        let buildRes = spawnSync(nodeExe, [nextBin, 'build'], {
             cwd: frontendDir,
             stdio: 'inherit',
             env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' }
         });
         if (buildRes.status === 0) {
             log('[Frontend] Compilación finalizada exitosamente.');
-        } else {
-            log(`[Frontend Error] La compilación falló con código ${buildRes.status}`);
+            return true;
         }
+
+        // Auto-recuperación si falló por módulos faltantes
+        log('[Frontend] La compilación falló. Intentando ejecutar npm install para recuperar módulos faltantes...');
+        runNpm(['install', '--no-audit'], frontendDir);
+        log('[Frontend] Reintentando compilación tras npm install...');
+        buildRes = spawnSync(nodeExe, [nextBin, 'build'], {
+            cwd: frontendDir,
+            stdio: 'inherit',
+            env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' }
+        });
+        if (buildRes.status === 0) {
+            log('[Frontend] Compilación finalizada exitosamente tras instalar dependencias.');
+            return true;
+        }
+        log(`[Frontend Error] La compilación falló con código ${buildRes.status}`);
+        return false;
     } catch (e) {
         log(`[Frontend Error] Error crítico compilando Next.js: ${e.message}`);
+        return false;
     }
+}
+
+if (isFrontendBuildStale()) {
+    buildFrontend();
+}
+
+if (!fs.existsSync(frontendBuildId)) {
+    log('========================================================================');
+    log('[ERROR CRITICO] No existe una compilación válida en frontend/.next');
+    log('Ejecuta "Actualizar_Servidor.bat" o "cd frontend && npm install && npm run build".');
+    log('========================================================================');
+    process.exit(1);
 }
 
 let isShuttingDown = false;

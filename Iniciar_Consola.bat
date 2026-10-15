@@ -13,8 +13,8 @@ if %errorlevel% equ 0 (
     echo ===============================================================
 )
 
-IF NOT EXIST "frontend\node_modules\next" (
-    echo [INFO] Instalando modulos de frontend por primera vez...
+IF NOT EXIST "frontend\node_modules\qrcode" (
+    echo [INFO] Instalando modulos de frontend (qrcode, jsqr, etc)...
     cd frontend
     call npm install --no-audit
     cd ..
