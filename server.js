@@ -290,7 +290,13 @@ function buildFrontend() {
         let buildRes = spawnSync(nodeExe, [nextBin, 'build'], {
             cwd: frontendDir,
             stdio: 'inherit',
-            env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' }
+            env: { 
+                ...process.env, 
+                PORT: String(PORT),
+                BACKEND_PORT: String(BACKEND_PORT),
+                API_INTERNAL_URL: `http://127.0.0.1:${BACKEND_PORT}`,
+                NEXT_TELEMETRY_DISABLED: '1' 
+            }
         });
         if (buildRes.status === 0) {
             log('[Frontend] Compilación finalizada exitosamente.');
@@ -304,7 +310,13 @@ function buildFrontend() {
         buildRes = spawnSync(nodeExe, [nextBin, 'build'], {
             cwd: frontendDir,
             stdio: 'inherit',
-            env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' }
+            env: { 
+                ...process.env, 
+                PORT: String(PORT),
+                BACKEND_PORT: String(BACKEND_PORT),
+                API_INTERNAL_URL: `http://127.0.0.1:${BACKEND_PORT}`,
+                NEXT_TELEMETRY_DISABLED: '1' 
+            }
         });
         if (buildRes.status === 0) {
             log('[Frontend] Compilación finalizada exitosamente tras instalar dependencias.');
@@ -330,9 +342,30 @@ if (!fs.existsSync(frontendBuildId)) {
     process.exit(1);
 }
 
+// Sincronizar destino de rewrites de Next.js al puerto exacto del backend (3001 vs 3601)
+function syncNextRewrites(targetBackendPort) {
+    const filesToSync = [
+        path.join(frontendDir, '.next', 'routes-manifest.json'),
+        path.join(frontendDir, '.next', 'required-server-files.json')
+    ];
+    for (const f of filesToSync) {
+        if (!fs.existsSync(f)) continue;
+        try {
+            const raw = fs.readFileSync(f, 'utf8');
+            const updated = raw.replace(/http:\/\/127\.0\.0\.1:\d+\/api\//g, `http://127.0.0.1:${targetBackendPort}/api/`);
+            if (updated !== raw) {
+                fs.writeFileSync(f, updated, 'utf8');
+                log(`[Frontend] Proxy de API sincronizado hacia Backend :${targetBackendPort} (${path.basename(f)})`);
+            }
+        } catch (e) {
+            log(`[Frontend Advertencia] Error ajustando proxy en ${path.basename(f)}: ${e.message}`);
+        }
+    }
+}
+
 let isShuttingDown = false;
 
-// 6. Iniciar Backend (Express en puerto 3001)
+// 6. Iniciar Backend (Express en puerto 3001 o 3601)
 const backendProc = spawn(nodeExe, ['src/index.js'], {
     cwd: backendDir,
     env: { 
@@ -359,7 +392,8 @@ backendProc.on('exit', (code) => {
     }
 });
 
-// 7. Iniciar Frontend (Next.js en producción en el puerto 3300, escuchando en 0.0.0.0)
+// 7. Iniciar Frontend (Next.js en producción en el puerto 3300 o 3600, escuchando en 0.0.0.0)
+syncNextRewrites(BACKEND_PORT);
 const frontendProc = spawn(nodeExe, [nextBin, 'start', '-p', String(PORT), '-H', '0.0.0.0'], {
     cwd: frontendDir,
     env: { 

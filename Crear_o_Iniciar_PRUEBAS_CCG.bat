@@ -45,17 +45,17 @@ if exist "frontend\node_modules" (
 )
 
 echo.
-echo [3/5] Clonando base de datos SQLite y cuadernillos para pruebas aisladas...
+echo [3/5] Configurando base de datos aislada para PRUEBAS CCG...
 if not exist "%DEST_DIR%\backend\prisma" mkdir "%DEST_DIR%\backend\prisma"
 if exist "backend\prisma\simce.db" (
     copy "backend\prisma\simce.db*" "%DEST_DIR%\backend\prisma\" >nul 2>&1
-    echo      Base de datos SQLite de pruebas copiada con exito.
+    echo      Base de datos SQLite de usuarios y cursos copiada.
+    if exist "%DEST_DIR%\backend\cleanPruebasData.js" (
+        node "%DEST_DIR%\backend\cleanPruebasData.js" >nul 2>&1
+        echo      Ensayos y resultados previos limpiados para garantizar total independencia.
+    )
 )
 if not exist "%DEST_DIR%\backend\uploads" mkdir "%DEST_DIR%\backend\uploads"
-if exist "backend\uploads" (
-    copy "backend\uploads\*" "%DEST_DIR%\backend\uploads\" >nul 2>&1
-    echo      Cuadernillos de prueba copiados.
-)
 
 echo.
 echo [4/5] Configurando backend en puerto 3601 (Frontend en puerto 3600)...
