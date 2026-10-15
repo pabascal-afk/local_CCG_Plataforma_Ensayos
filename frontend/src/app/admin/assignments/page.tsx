@@ -7,7 +7,8 @@ import {
   User, Tag, Download, Upload, FileSpreadsheet, X, Search, Filter, 
   Timer, KeyRound, RotateCcw, Sparkles, CheckCircle2, ChevronRight,
   ShieldCheck, AlertTriangle, Layers, Copy, Inbox, CheckSquare,
-  XCircle, MessageSquare, AlertCircle, Bot, ChevronDown, ChevronUp
+  XCircle, MessageSquare, AlertCircle, Bot, ChevronDown, ChevronUp,
+  Printer, ScanLine
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -1757,16 +1758,35 @@ export default function AssignmentsDashboard() {
                               <span>{new Date(a.opensAt).toLocaleDateString()} ({new Date(a.opensAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - {new Date(a.closesAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})</span>
                             </div>
 
-                            <div className="mt-2.5 pt-2 border-t border-dashed border-gray-100">
+                            <div className="mt-2.5 pt-2 border-t border-dashed border-gray-100 flex items-center justify-between gap-2">
                               {a.assignedTeacher ? (
-                                <div className="flex items-center text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-1 rounded">
-                                  <Check className="w-3 h-3 mr-1 text-emerald-600" /> Docente: {a.assignedTeacher.name}
+                                <div className="flex items-center text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-1 rounded truncate">
+                                  <Check className="w-3 h-3 mr-1 text-emerald-600 shrink-0" /> {a.assignedTeacher.name}
                                 </div>
                               ) : (
-                                <div className="flex items-center justify-center text-[10px] font-medium text-gray-400 italic bg-gray-50 border border-dashed border-gray-200 rounded py-1">
-                                  Arrastra un docente aquí
+                                <div className="flex items-center justify-center text-[10px] font-medium text-gray-400 italic bg-gray-50 border border-dashed border-gray-200 rounded py-1 px-2">
+                                  Arrastra docente
                                 </div>
                               )}
+
+                              <div className="flex items-center gap-1 shrink-0">
+                                <Link
+                                  href={`/teacher/assignments/${a.id}/print-sheets`}
+                                  target="_blank"
+                                  className="text-gray-400 hover:text-indigo-600 p-1 rounded hover:bg-indigo-50 transition"
+                                  title="Imprimir hojas de respuestas (PDF)"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </Link>
+                                <Link
+                                  href={`/teacher/assignments/${a.id}`}
+                                  target="_blank"
+                                  className="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition"
+                                  title="Digitalizar respuestas / Ver curso"
+                                >
+                                  <ScanLine className="w-3.5 h-3.5" />
+                                </Link>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -2076,6 +2096,31 @@ export default function AssignmentsDashboard() {
                                     {t}
                                   </button>
                                 ))}
+                              </div>
+
+                              {/* Barra de Acciones Rápidas OMR / Impresión */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-200/60">
+                                <span className="text-[10px] text-gray-500 font-medium">
+                                  Hojas de respuestas y escaneo:
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <Link
+                                    href={`/teacher/assignments/${a.id}/print-sheets`}
+                                    target="_blank"
+                                    className="text-[11px] font-bold text-indigo-700 bg-white hover:bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm transition"
+                                  >
+                                    <Printer className="w-3.5 h-3.5 text-indigo-600" />
+                                    Imprimir Hojas (PDF)
+                                  </Link>
+                                  <Link
+                                    href={`/teacher/assignments/${a.id}`}
+                                    target="_blank"
+                                    className="text-[11px] font-bold text-blue-700 bg-white hover:bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm transition"
+                                  >
+                                    <ScanLine className="w-3.5 h-3.5 text-blue-600" />
+                                    Digitalizar / Escanear OMR
+                                  </Link>
+                                </div>
                               </div>
                             </div>
                           )}

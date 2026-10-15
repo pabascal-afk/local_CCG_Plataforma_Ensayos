@@ -1170,11 +1170,163 @@ router.get('/assignments/:id/evolution', async (req, res, next) => {
 });
 
 // ==========================================
-// Plantilla de Respuestas para Escáner / Papel (.xlsx)
+// Datos para Impresión de Hojas de Respuestas Personalizadas
+// ==========================================
+router.get('/assignments/:id/printable-sheet-data', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const assignment = await prisma.examAssignment.findUnique({
+      where: { id },
+      include: {
+        exam: {
+          include: {
+            questions: {
+              orderBy: { questionNumber: 'asc' },
+              select: { id: true, questionNumber: true, correctAnswer: true }
+            }
+          }
+        },
+        course: {
+          include: {
+            students: {
+              where: { role: 'STUDENT', isActive: true },
+              orderBy: { name: 'asc' },
+              select: { rut: true, name: true }
+            }
+          }
+        }
+      }
+    });
+    if (!assignment) return res.status(404).json({ error: 'Asignación no encontrada' });
+
+    const allowedCourses = await getAllowedCourseIds(req.user);
+    if (allowedCourses && !allowedCourses.includes(assignment.courseId)) {
+      return res.status(403).json({ error: 'No tienes acceso a este curso' });
+    }
+
+    const cLvl = (assignment.course.level || '').replace('B', '° Básico').replace('M', '° Medio');
+    const courseFullName = `${cLvl} ${assignment.course.letter} (${assignment.course.year})`;
+
+    return res.json({
+      assignment: {
+        id: assignment.id,
+        opensAt: assignment.opensAt,
+        closesAt: assignment.closesAt,
+        dynamicPassword: assignment.dynamicPassword
+      },
+      exam: {
+        id: assignment.exam.id,
+        title: assignment.exam.title,
+        subject: assignment.exam.subject,
+        level: assignment.exam.level,
+        optionsCount: assignment.exam.optionsCount || 4,
+        questionCount: assignment.exam.questions.length,
+        questions: assignment.exam.questions
+      },
+      course: {
+        id: assignment.course.id,
+        level: assignment.course.level,
+        letter: assignment.course.letter,
+        year: assignment.course.year,
+        fullName: courseFullName
+      },
+      students: assignment.course?.students || []
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+// Plantilla de Respuestas para Escáner / Papel (.xlsx) Prellenada
 // ==========================================
 router.get('/assignments/:id/template-answers.xlsx', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
+    const assignment = await prisma.examAssignment.findUnique({
+      where: { id },
+      include: {
+        exam: {
+          include: {
+            questions: { orderBy: { questionNumber: 'asc' } }
+          }
+        },
+        course: {
+          include: {
+            students: {
+              where: { role: 'STUDENT', isActive: true },
+              orderBy: { name: 'asc' }
+            }
+          }
+        }
+      }
+    });
+    if (!assignment) return res.status(404).json({ error: 'Asignación no encontrada' });
+
+    const allowedCourses = await getAllowedCourseIds(req.user);
+    if (allowedCourses && !allowedCourses.includes(assignment.courseId)) {
+      return res.status(403).json({ error: 'No tienes acceso a este curso' });
+    }
+
+    const workbook = new exceljs.Workbook();
+    workbook.creator = 'Colegio Cerro Grande';
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet(`Respuestas_${assignment.id}`);
+
+    const columns = [
+      { header: 'RUT', key: 'rut', width: 16 },
+      { header: 'Nombre', key: 'name', width: 34 }
+    ];
+
+    assignment.exam.questions.forEach(q => {
+      columns.push({
+        header: `P${q.questionNumber}`,
+        key: `p${q.questionNumber}`,
+        width: 8
+      });
+    });
+
+    sheet.columns = columns;
+
+    // Estilo encabezado
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E40AF' } // Azul corporativo CCG
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    // Agregar filas con los estudiantes matriculados en el curso
+    const students = assignment.course?.students || [];
+    students.forEach(st => {
+      sheet.addRow({
+        rut: st.rut,
+        name: st.name
+      });
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Formato_Respuestas_Ensayo_${assignment.id}.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+// Carga Masiva OMR / Escáner y Digitación Rápida (JSON)
+// ==========================================
+router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { submissions } = req.body;
+    if (!Array.isArray(submissions) || submissions.length === 0) {
+      return res.status(400).json({ error: 'No se recibieron entregas para procesar' });
+    }
+
     const assignment = await prisma.examAssignment.findUnique({
       where: { id },
       include: {
@@ -1193,23 +1345,131 @@ router.get('/assignments/:id/template-answers.xlsx', async (req, res, next) => {
       return res.status(403).json({ error: 'No tienes acceso a este curso' });
     }
 
-    const columns = [
-      { header: 'RUT', key: 'rut', width: 16 },
-      { header: 'Nombre', key: 'name', width: 30 }
-    ];
-
-    assignment.exam.questions.forEach(q => {
-      columns.push({
-        header: `P${q.questionNumber}`,
-        key: `p${q.questionNumber}`,
-        width: 8
-      });
+    const questions = assignment.exam.questions;
+    const questionsByNum = {};
+    const questionsById = {};
+    questions.forEach(q => {
+      questionsByNum[q.questionNumber] = q;
+      questionsById[q.id] = q;
     });
 
-    const buffer = await createEmptyTemplate(columns, `Respuestas_${assignment.id}`);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="Formato_Respuestas_Ensayo_${assignment.id}.xlsx"`);
-    res.send(buffer);
+    const results = { imported: 0, updated: 0, errors: [] };
+
+    for (const subItem of submissions) {
+      const rawRut = subItem.studentRut;
+      if (!rawRut) {
+        results.errors.push({ error: 'RUT de estudiante no especificado' });
+        continue;
+      }
+      const rut = normalizeRut(rawRut);
+      if (rut.length < 3) {
+        results.errors.push({ rut: rawRut, error: 'RUT inválido' });
+        continue;
+      }
+
+      try {
+        let student = await prisma.user.findUnique({ where: { rut } });
+        if (!student) {
+          const studentName = subItem.studentName || `Estudiante ${rut}`;
+          const password = rut.split('-')[0].slice(0, 6);
+          const hash = await bcrypt.hash(password, 10);
+          student = await prisma.user.create({
+            data: {
+              rut,
+              name: studentName,
+              role: 'STUDENT',
+              courseId: assignment.courseId,
+              passwordHash: hash,
+              mustChangePassword: true
+            }
+          });
+        }
+
+        const incomingAnswers = subItem.answers || {};
+        const answersMap = {};
+
+        for (const [key, rawVal] of Object.entries(incomingAnswers)) {
+          const val = String(rawVal || '').trim().toUpperCase();
+          if (!val || val === '-' || val === 'BLANCO' || val === 'DOBLE_MARCA') continue;
+
+          if (questionsByNum[key]) {
+            answersMap[questionsByNum[key].id] = val;
+          } else if (questionsById[key]) {
+            answersMap[key] = val;
+          }
+        }
+
+        let submission = await prisma.submission.findUnique({
+          where: { studentRut_assignmentId: { studentRut: rut, assignmentId: assignment.id } }
+        });
+
+        const isNew = !submission;
+        if (!submission) {
+          submission = await prisma.submission.create({
+            data: {
+              studentRut: rut,
+              assignmentId: assignment.id,
+              startedAt: new Date(),
+              status: 'IN_PROGRESS'
+            }
+          });
+        }
+
+        for (const q of questions) {
+          const selected = answersMap[q.id] || null;
+          if (selected) {
+            const isCorrect = selected === q.correctAnswer;
+            await prisma.submissionAnswer.upsert({
+              where: {
+                submissionId_questionId: {
+                  submissionId: submission.id,
+                  questionId: q.id
+                }
+              },
+              update: { selectedAnswer: selected, isCorrect },
+              create: {
+                submissionId: submission.id,
+                questionId: q.id,
+                selectedAnswer: selected,
+                isCorrect
+              }
+            });
+          } else {
+            await prisma.submissionAnswer.deleteMany({
+              where: {
+                submissionId: submission.id,
+                questionId: q.id
+              }
+            });
+          }
+        }
+
+        const computed = computeResults(questions, answersMap, assignment.exam);
+
+        await prisma.submission.update({
+          where: { id: submission.id },
+          data: {
+            status: 'SUBMITTED',
+            submittedAt: new Date(),
+            autoSubmitted: false,
+            correctCount: computed.correctCount,
+            percent: computed.percent,
+            grade: computed.grade,
+            achievementLevel: computed.achievementLevel,
+            simceScore: computed.simceScore,
+            theta: computed.theta,
+            seTheta: computed.seTheta
+          }
+        });
+
+        if (isNew) results.imported++;
+        else results.updated++;
+      } catch (err) {
+        results.errors.push({ rut, error: err.message });
+      }
+    }
+
+    return res.json(results);
   } catch (error) {
     next(error);
   }

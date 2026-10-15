@@ -2,13 +2,26 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/session";
 import Link from "next/link";
-import { ChevronRight, Upload, FileSpreadsheet, Download } from "lucide-react";
+import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles } from "lucide-react";
+import OmrScannerModal from "@/components/OmrScannerModal";
+import FastDigitizerModal from "@/components/FastDigitizerModal";
 
 export default function StudentsTab({ id }: { id: number }) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [answerFile, setAnswerFile] = useState<File | null>(null);
   const [importingAnswers, setImportingAnswers] = useState(false);
+  const [showOmrModal, setShowOmrModal] = useState(false);
+  const [showDigitizerModal, setShowDigitizerModal] = useState(false);
+
+  const refreshData = async () => {
+    try {
+      const refreshed = await apiFetch(`/teacher/assignments/${id}/live`);
+      setData(refreshed);
+    } catch (err: any) {
+      console.error("Error al refrescar datos:", err);
+    }
+  };
 
   useEffect(() => {
     apiFetch(`/teacher/assignments/${id}/live`)
@@ -37,8 +50,7 @@ export default function StudentsTab({ id }: { id: number }) {
 
       alert(`Respuestas procesadas y corregidas con éxito: ${resData.imported} alumnos. Errores: ${resData.errors.length}`);
       setAnswerFile(null);
-      const refreshed = await apiFetch(`/teacher/assignments/${id}/live`);
-      setData(refreshed);
+      await refreshData();
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -54,42 +66,103 @@ export default function StudentsTab({ id }: { id: number }) {
 
   return (
     <div>
-      {/* Bloque Carga Masiva Escáner / Papel */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 mb-8 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h4 className="text-base font-bold text-blue-900 flex items-center gap-2 mb-1">
-              <FileSpreadsheet className="w-5 h-5 text-blue-600" />
-              Carga Masiva de Respuestas (Papel / Escáner OMR)
+      {/* Modales OMR y Digitador */}
+      <OmrScannerModal
+        assignmentId={id}
+        isOpen={showOmrModal}
+        onClose={() => setShowOmrModal(false)}
+        onSuccess={refreshData}
+      />
+      <FastDigitizerModal
+        assignmentId={id}
+        isOpen={showDigitizerModal}
+        onClose={() => setShowDigitizerModal(false)}
+        onSuccess={refreshData}
+      />
+
+      {/* Bloque Aplicación Impresa y Carga Masiva OMR */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white rounded-2xl p-5 mb-8 shadow-md border border-indigo-900">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                Evaluación Híbrida / Papel
+              </span>
+              <span className="text-xs text-indigo-300 font-medium flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Corrección instantánea con TRI SIMCE
+              </span>
+            </div>
+            <h4 className="text-base font-bold text-white flex items-center gap-2">
+              Impresión y Digitalización de Hojas de Respuestas
             </h4>
-            <p className="text-xs text-blue-700 max-w-xl">
-              Si aplicaste este ensayo en papel o con hojas de respuestas ópticas, sube la planilla con las respuestas de cada alumno para corregir y estimar los puntajes SIMCE automáticamente.
+            <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+              Imprime las hojas con QR personalizado por alumno y luego digitalízalas escaneando el documento, tomando fotos con tu celular, usando el digitador ultra-rápido de teclado o subiendo la planilla Excel del curso.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Botón Imprimir Hojas */}
+            <Link
+              href={`/teacher/assignments/${id}/print-sheets`}
+              target="_blank"
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold shadow transition"
+              title="Generar e imprimir hojas de respuestas personalizadas con QR y lista del curso"
+            >
+              <Printer className="w-4 h-4 text-indigo-200" /> Imprimir Hojas (PDF)
+            </Link>
+
+            {/* Botón Escanear OMR */}
+            <button
+              type="button"
+              onClick={() => setShowOmrModal(true)}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold shadow transition"
+              title="Subir archivo PDF escaneado o fotografías para corrección automática por burbujas"
+            >
+              <ScanLine className="w-4 h-4 text-blue-200" /> Escanear OMR (PDF/Fotos)
+            </button>
+
+            {/* Botón Digitador Rápido */}
+            <button
+              type="button"
+              onClick={() => setShowDigitizerModal(true)}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold shadow transition"
+              title="Digitar respuestas rápidamente con las teclas A, B, C, D del teclado físico"
+            >
+              <Keyboard className="w-4 h-4 text-purple-200" /> Digitador Teclado
+            </button>
+          </div>
+        </div>
+
+        {/* Sub-barra: Planilla Excel con lista precargada */}
+        <div className="mt-4 pt-4 border-t border-indigo-900/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 text-slate-300">
+            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+            <span>¿Prefieres Excel? Descarga la planilla con la lista oficial del curso o sube tus respuestas tabuladas:</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
             <a
               href={`/api/teacher/assignments/${id}/template-answers.xlsx?token=${typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : ""}`}
-              download={`Formato_Respuestas_Ensayo_${id}.xlsx`}
-              className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3.5 py-2 rounded-lg text-xs font-semibold shadow-sm transition-colors whitespace-nowrap"
-              title="Descargar plantilla Excel vacía con las columnas P1 a Pn de este ensayo"
+              download={`Plantilla_Alumnos_Ensayo_${id}.xlsx`}
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold transition"
+              title="Descargar planilla Excel con la lista de alumnos precargada"
             >
-              <Download className="w-4 h-4 text-emerald-600" /> Formato Vacío (.xlsx)
+              <Download className="w-3.5 h-3.5 text-emerald-400" /> Descargar Planilla Curso (.xlsx)
             </a>
 
-            <form onSubmit={handleImportAnswers} className="flex items-center gap-2 bg-white p-1.5 border border-blue-200 rounded-lg shadow-sm">
+            <form onSubmit={handleImportAnswers} className="flex items-center gap-1.5 bg-slate-800 p-1 border border-slate-700 rounded-lg">
               <input 
                 type="file" 
                 accept=".xlsx,.csv" 
                 onChange={e => setAnswerFile(e.target.files?.[0] || null)}
-                className="text-xs max-w-[180px]"
+                className="text-[11px] max-w-[170px] text-slate-300 file:mr-2 file:py-0.5 file:px-2 file:rounded file:border-0 file:text-[10px] file:bg-slate-700 file:text-white"
               />
               <button 
                 type="submit" 
                 disabled={!answerFile || importingAnswers}
-                className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50 transition-colors whitespace-nowrap"
+                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded text-xs font-bold disabled:opacity-40 transition whitespace-nowrap"
               >
-                <Upload className="w-3.5 h-3.5" /> {importingAnswers ? "Procesando..." : "Cargar y Corregir"}
+                <Upload className="w-3 h-3" /> {importingAnswers ? "Cargando..." : "Cargar Excel"}
               </button>
             </form>
           </div>
