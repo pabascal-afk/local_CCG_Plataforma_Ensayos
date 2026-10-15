@@ -214,7 +214,15 @@ export default function AssignmentsDashboard() {
   const [isSubmittingFocus, setIsSubmittingFocus] = useState(false);
   const [focusSuccessNotice, setFocusSuccessNotice] = useState<string | null>(null);
 
-  // Drag over states para feedback visual
+  // Estados para Drag and Drop reactivo y robusto
+  const [draggedExam, setDraggedExam] = useState<Exam | null>(null);
+  const [draggedTimer, setDraggedTimer] = useState<TimerPreset | null>(null);
+  const [draggedDate, setDraggedDate] = useState<DatePreset | null>(null);
+  const [draggedTeacher, setDraggedTeacher] = useState<Teacher | null>(null);
+  const [draggedPin, setDraggedPin] = useState(false);
+  const [dragOverCourseId, setDragOverCourseId] = useState<number | null>(null);
+  const [dragOverAssignmentId, setDragOverAssignmentId] = useState<number | null>(null);
+  const [assigningExamId, setAssigningExamId] = useState<number | null>(null);
   const [dragOverZone, setDragOverZone] = useState<string | null>(null);
 
   // Import Modal state
@@ -560,60 +568,14 @@ export default function AssignmentsDashboard() {
 
   // ================= DRAG & DROP HANDLERS =================
 
-  // 1. Arrastrar Examen desde la izquierda
-  const handleExamDragStart = (e: React.DragEvent, exam: Exam) => {
-    e.dataTransfer.setData("type", "EXAM");
-    e.dataTransfer.setData("examId", exam.id.toString());
-    e.dataTransfer.setData("application/json", JSON.stringify(exam));
-  };
-
-  // 2. Arrastrar Cronómetro desde el Toolbox
-  const handleTimerDragStart = (e: React.DragEvent, preset: TimerPreset) => {
-    e.dataTransfer.setData("type", "TIMER");
-    e.dataTransfer.setData("minutes", preset.minutes !== null ? preset.minutes.toString() : "0");
-  };
-
-  // 3. Arrastrar Fecha desde el Toolbox
-  const handleDateDragStart = (e: React.DragEvent, preset: DatePreset) => {
-    const range = preset.getDateRange();
-    e.dataTransfer.setData("type", "DATETIME");
-    e.dataTransfer.setData("dateStr", range.dateStr);
-    e.dataTransfer.setData("startTime", range.startTime);
-    e.dataTransfer.setData("endTime", range.endTime);
-  };
-
-  // 4. Arrastrar Profesor desde el Toolbox
-  const handleTeacherDragStart = (e: React.DragEvent, teacher: Teacher) => {
-    e.dataTransfer.setData("type", "TEACHER");
-    e.dataTransfer.setData("rut", teacher.rut);
-    e.dataTransfer.setData("teacherName", teacher.name);
-  };
-
-  // 5. Arrastrar PIN dinámico desde el Toolbox
-  const handlePinDragStart = (e: React.DragEvent) => {
-    e.dataTransfer.setData("type", "PIN");
-    e.dataTransfer.setData("activate", "true");
-  };
-
-  const allowDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  // ================= SOLTAR EN UN CURSO (INICIA MODO ENFOQUE) =================
-  const handleCourseDrop = (e: React.DragEvent, course: Course) => {
-    e.preventDefault();
-    const type = e.dataTransfer.getData("type");
-    if (type !== "EXAM") return;
-
-    const examId = parseInt(e.dataTransfer.getData("examId"), 10);
-    const exam = exams.find(ex => ex.id === examId);
-    if (!exam) return;
-
-    // Entramos al MODO ENFOQUE: DESAPARECEN TODOS LOS DEMÁS CURSOS
+  // Función unificada para entrar al Modo Enfoque con curso y examen
+  const startFocusMode = (course: Course, exam: Exam) => {
     setFocusedCourse(course);
     setStagedExam(exam);
     setIsFocusMode(true);
     setFocusSuccessNotice(null);
+    setAssigningExamId(null);
+    setDragOverCourseId(null);
 
     // Inicializar valores sugeridos basados en el examen
     const initialDuration = exam.durationMinutes !== undefined && exam.durationMinutes !== null 
@@ -635,64 +597,242 @@ export default function AssignmentsDashboard() {
     setStagedDynamicPinActive(false);
   };
 
+  // 1. Arrastrar Examen desde la izquierda
+  const handleExamDragStart = (e: React.DragEvent, exam: Exam) => {
+    setDraggedExam(exam);
+    e.dataTransfer.effectAllowed = "copyMove";
+    const payload = JSON.stringify({ type: "EXAM", examId: exam.id });
+    e.dataTransfer.setData("text/plain", payload);
+    e.dataTransfer.setData("application/json", payload);
+    try {
+      e.dataTransfer.setData("type", "EXAM");
+      e.dataTransfer.setData("examId", exam.id.toString());
+    } catch {}
+  };
+
+  // 2. Arrastrar Cronómetro desde el Toolbox
+  const handleTimerDragStart = (e: React.DragEvent, preset: TimerPreset) => {
+    setDraggedTimer(preset);
+    e.dataTransfer.effectAllowed = "copyMove";
+    const payload = JSON.stringify({ type: "TIMER", minutes: preset.minutes });
+    e.dataTransfer.setData("text/plain", payload);
+    try {
+      e.dataTransfer.setData("type", "TIMER");
+      e.dataTransfer.setData("minutes", preset.minutes !== null ? preset.minutes.toString() : "0");
+    } catch {}
+  };
+
+  // 3. Arrastrar Fecha desde el Toolbox
+  const handleDateDragStart = (e: React.DragEvent, preset: DatePreset) => {
+    setDraggedDate(preset);
+    const range = preset.getDateRange();
+    e.dataTransfer.effectAllowed = "copyMove";
+    const payload = JSON.stringify({ type: "DATETIME", ...range });
+    e.dataTransfer.setData("text/plain", payload);
+    try {
+      e.dataTransfer.setData("type", "DATETIME");
+      e.dataTransfer.setData("dateStr", range.dateStr);
+      e.dataTransfer.setData("startTime", range.startTime);
+      e.dataTransfer.setData("endTime", range.endTime);
+    } catch {}
+  };
+
+  // 4. Arrastrar Profesor desde el Toolbox
+  const handleTeacherDragStart = (e: React.DragEvent, teacher: Teacher) => {
+    setDraggedTeacher(teacher);
+    e.dataTransfer.effectAllowed = "copyMove";
+    const payload = JSON.stringify({ type: "TEACHER", rut: teacher.rut, teacherName: teacher.name });
+    e.dataTransfer.setData("text/plain", payload);
+    try {
+      e.dataTransfer.setData("type", "TEACHER");
+      e.dataTransfer.setData("rut", teacher.rut);
+      e.dataTransfer.setData("teacherName", teacher.name);
+    } catch {}
+  };
+
+  // 5. Arrastrar PIN dinámico desde el Toolbox
+  const handlePinDragStart = (e: React.DragEvent) => {
+    setDraggedPin(true);
+    e.dataTransfer.effectAllowed = "copyMove";
+    const payload = JSON.stringify({ type: "PIN", activate: true });
+    e.dataTransfer.setData("text/plain", payload);
+    try {
+      e.dataTransfer.setData("type", "PIN");
+      e.dataTransfer.setData("activate", "true");
+    } catch {}
+  };
+
+  const allowDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  // ================= SOLTAR EN UN CURSO (INICIA MODO ENFOQUE) =================
+  const handleCourseDrop = (e: React.DragEvent, course: Course) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCourseId(null);
+
+    let examToAssign: Exam | null = draggedExam;
+
+    if (!examToAssign) {
+      try {
+        const examIdStr = e.dataTransfer.getData("examId");
+        if (examIdStr) {
+          const id = parseInt(examIdStr, 10);
+          examToAssign = exams.find(ex => ex.id === id) || null;
+        }
+      } catch {}
+    }
+
+    if (!examToAssign) {
+      try {
+        const raw = e.dataTransfer.getData("text/plain") || e.dataTransfer.getData("application/json");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.examId) {
+            const id = parseInt(parsed.examId, 10);
+            examToAssign = exams.find(ex => ex.id === id) || null;
+          }
+        }
+      } catch {}
+    }
+
+    if (!examToAssign) return;
+
+    setDraggedExam(null);
+    startFocusMode(course, examToAssign);
+  };
+
   // ================= SOLTAR DENTRO DEL MODO ENFOQUE (DROP ZONES) =================
 
   // Drop Cronómetro
   const handleTimerDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOverZone(null);
-    const type = e.dataTransfer.getData("type");
-    if (type === "TIMER") {
-      const minStr = e.dataTransfer.getData("minutes");
-      const mins = parseInt(minStr, 10);
-      setStagedDuration(mins > 0 ? mins : null);
+
+    if (draggedTimer) {
+      setStagedDuration(draggedTimer.minutes);
+      setDraggedTimer(null);
+      return;
     }
+
+    try {
+      const minStr = e.dataTransfer.getData("minutes");
+      if (minStr) {
+        const mins = parseInt(minStr, 10);
+        setStagedDuration(mins > 0 ? mins : null);
+        return;
+      }
+      const raw = e.dataTransfer.getData("text/plain");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.type === "TIMER") {
+          setStagedDuration(parsed.minutes !== null ? Number(parsed.minutes) : null);
+        }
+      }
+    } catch {}
   };
 
   // Drop Fecha/Horario
   const handleDateDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOverZone(null);
-    const type = e.dataTransfer.getData("type");
-    if (type === "DATETIME") {
+
+    if (draggedDate) {
+      const r = draggedDate.getDateRange();
+      setStagedDate(r.dateStr);
+      setStagedStartTime(r.startTime);
+      setStagedEndTime(r.endTime);
+      setDraggedDate(null);
+      return;
+    }
+
+    try {
       const d = e.dataTransfer.getData("dateStr");
       const st = e.dataTransfer.getData("startTime");
       const et = e.dataTransfer.getData("endTime");
       if (d) setStagedDate(d);
       if (st) setStagedStartTime(st);
       if (et) setStagedEndTime(et);
-    }
+      if (!d) {
+        const raw = e.dataTransfer.getData("text/plain");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.type === "DATETIME") {
+            if (parsed.dateStr) setStagedDate(parsed.dateStr);
+            if (parsed.startTime) setStagedStartTime(parsed.startTime);
+            if (parsed.endTime) setStagedEndTime(parsed.endTime);
+          }
+        }
+      }
+    } catch {}
   };
 
   // Drop Profesor
   const handleTeacherDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOverZone(null);
-    const type = e.dataTransfer.getData("type");
-    if (type === "TEACHER") {
+
+    if (draggedTeacher) {
+      setStagedTeacher(draggedTeacher);
+      setDraggedTeacher(null);
+      return;
+    }
+
+    try {
       const rut = e.dataTransfer.getData("rut");
-      const teacher = teachers.find(t => t.rut === rut);
+      let teacher = rut ? teachers.find(t => t.rut === rut) : null;
+      if (!teacher) {
+        const raw = e.dataTransfer.getData("text/plain");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.type === "TEACHER" && parsed.rut) {
+            teacher = teachers.find(t => t.rut === parsed.rut) || null;
+          }
+        }
+      }
       if (teacher) {
         setStagedTeacher(teacher);
       }
-    }
+    } catch {}
   };
 
   // Drop PIN
   const handlePinDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOverZone(null);
-    const type = e.dataTransfer.getData("type");
-    if (type === "PIN") {
-      setStagedDynamicPinActive(true);
-    }
+    setStagedDynamicPinActive(true);
+    setDraggedPin(false);
   };
 
   // ================= ASIGNACIÓN SOBRE ASIGNACIÓN EXISTENTE (DELEGAR PROFESOR) =================
   const handleAssignmentTeacherDrop = async (e: React.DragEvent, assignmentId: number) => {
     e.preventDefault();
-    if (e.dataTransfer.getData("type") !== "TEACHER") return;
-    const rut = e.dataTransfer.getData("rut");
+    e.stopPropagation();
+    setDragOverAssignmentId(null);
+
+    let rut = draggedTeacher?.rut;
+    if (!rut) {
+      try {
+        rut = e.dataTransfer.getData("rut");
+        if (!rut) {
+          const raw = e.dataTransfer.getData("text/plain");
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed.type === "TEACHER" && parsed.rut) rut = parsed.rut;
+          }
+        }
+      } catch {}
+    }
+
+    setDraggedTeacher(null);
+
     if (rut) {
       try {
         await apiFetch(`/admin/assignments/${assignmentId}/teacher`, {
@@ -1083,6 +1223,7 @@ export default function AssignmentsDashboard() {
                       key={e.id}
                       draggable
                       onDragStart={(evt) => handleExamDragStart(evt, e)}
+                      onDragEnd={() => { setDraggedExam(null); setDragOverCourseId(null); }}
                       className={`bg-white border rounded-xl p-3 cursor-grab active:cursor-grabbing hover:border-blue-500 hover:shadow-md transition-all group select-none ${
                         stagedExam?.id === e.id && isFocusMode 
                           ? "ring-2 ring-blue-500 border-blue-500 bg-blue-50/40" 
@@ -1113,12 +1254,62 @@ export default function AssignmentsDashboard() {
                       {selectedCourseForFilter && (
                         <button
                           type="button"
-                          onClick={() => handleCourseDrop({ preventDefault: () => {}, dataTransfer: { getData: (k: string) => k === "type" ? "EXAM" : e.id.toString() } } as any, selectedCourseForFilter)}
-                          className="mt-2.5 w-full py-1.5 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-lg font-extrabold text-[11px] border border-indigo-200 transition flex items-center justify-center gap-1 shadow-xs"
+                          onClick={() => startFocusMode(selectedCourseForFilter, e)}
+                          className="mt-2.5 w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-extrabold text-[11px] transition flex items-center justify-center gap-1 shadow-xs"
                         >
                           <span>Asignar a {formatCourseName(selectedCourseForFilter)}</span>
                           <ChevronRight className="w-3 h-3" />
                         </button>
+                      )}
+
+                      {/* Si no hay curso preseleccionado: Botón con selector rápido */}
+                      {!selectedCourseForFilter && (
+                        <div className="mt-2 pt-2 border-t border-gray-100">
+                          {assigningExamId === e.id ? (
+                            <div className="bg-slate-50 p-2 rounded-xl border border-indigo-200 space-y-1.5 animate-in fade-in zoom-in-95">
+                              <div className="flex items-center justify-between text-[10px] font-black text-indigo-900">
+                                <span>Selecciona el curso:</span>
+                                <button
+                                  type="button"
+                                  onClick={(ev) => { ev.stopPropagation(); setAssigningExamId(null); }}
+                                  className="text-gray-400 hover:text-gray-700 font-bold px-1"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1 max-h-32 overflow-y-auto pt-0.5">
+                                {visibleCourses.map(c => (
+                                  <button
+                                    key={c.id}
+                                    type="button"
+                                    onClick={(ev) => {
+                                      ev.stopPropagation();
+                                      startFocusMode(c, e);
+                                    }}
+                                    className="text-[10px] font-extrabold bg-white hover:bg-indigo-600 hover:text-white text-indigo-800 border border-indigo-200 rounded px-1.5 py-1 text-center truncate transition shadow-2xs"
+                                    title={`Asignar este ensayo a ${formatCourseName(c)}`}
+                                  >
+                                    {formatCourseName(c)}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between gap-1 text-[10px] text-gray-500">
+                              <span className="italic text-[10px]">Arrastra a un curso o:</span>
+                              <button
+                                type="button"
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  setAssigningExamId(e.id);
+                                }}
+                                className="font-extrabold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded-md transition"
+                              >
+                                Asignar a...
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   ))}
@@ -1176,6 +1367,7 @@ export default function AssignmentsDashboard() {
                       {visibleCourses.map(c => {
                         const courseAssignments = assignments.filter(a => a.courseId === c.id);
                         const isSelectedCourse = selectedCourseForFilter?.id === c.id;
+                        const isDragOverThisCourse = dragOverCourseId === c.id;
 
                         return (
                           <div 
@@ -1187,44 +1379,73 @@ export default function AssignmentsDashboard() {
                                 setSelectedCourseForFilter(c);
                               }
                             }}
-                            onDragOver={allowDrop}
-                            onDrop={(evt) => handleCourseDrop(evt, c)}
+                            onDragOver={(e) => {
+                              allowDrop(e);
+                              if (dragOverCourseId !== c.id) setDragOverCourseId(c.id);
+                            }}
+                            onDragEnter={(e) => {
+                              allowDrop(e);
+                              setDragOverCourseId(c.id);
+                            }}
+                            onDragLeave={(e) => {
+                              if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                              setDragOverCourseId(null);
+                            }}
+                            onDrop={(evt) => {
+                              setDragOverCourseId(null);
+                              handleCourseDrop(evt, c);
+                            }}
                             className={`rounded-2xl p-5 transition-all flex flex-col items-center justify-center min-h-[160px] text-center group cursor-pointer shadow-sm hover:shadow relative ${
-                              isSelectedCourse 
-                                ? "bg-indigo-50/90 border-2 border-indigo-600 ring-4 ring-indigo-200/80 shadow-md" 
-                                : "bg-white border-2 border-dashed border-gray-300 hover:border-blue-500 hover:bg-blue-50/60"
+                              isDragOverThisCourse 
+                                ? "bg-indigo-100 border-2 border-indigo-600 ring-4 ring-indigo-300 shadow-xl scale-[1.03] border-solid" 
+                                : isSelectedCourse 
+                                  ? "bg-indigo-50/90 border-2 border-indigo-600 ring-4 ring-indigo-200/80 shadow-md" 
+                                  : draggedExam
+                                    ? "bg-indigo-50/40 border-2 border-dashed border-indigo-400 hover:border-indigo-600 hover:bg-indigo-100/60"
+                                    : "bg-white border-2 border-dashed border-gray-300 hover:border-blue-500 hover:bg-blue-50/60"
                             }`}
                           >
-                            {isSelectedCourse && (
-                              <div className="absolute top-2.5 right-2.5 bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                            {/* Overlay de Soltar Ensayo cuando se arrastra por encima */}
+                            {isDragOverThisCourse && (
+                              <div className="absolute inset-0 bg-indigo-700 text-white rounded-2xl flex flex-col items-center justify-center p-4 z-20 animate-in fade-in zoom-in-95 pointer-events-none shadow-2xl">
+                                <Sparkles className="w-8 h-8 text-amber-300 mb-1.5 animate-bounce" />
+                                <span className="font-black text-sm uppercase tracking-wide">¡Suelta para Asignar!</span>
+                                <span className="text-[11px] text-indigo-200 font-medium mt-0.5">Configurar en {formatCourseName(c)}</span>
+                              </div>
+                            )}
+
+                            {isSelectedCourse && !isDragOverThisCourse && (
+                              <div className="absolute top-2.5 right-2.5 bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs pointer-events-none">
                                 <Check className="w-2.5 h-2.5" /> Filtrando Ensayos
                               </div>
                             )}
 
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm mb-2 transition ${
-                              isSelectedCourse 
-                                ? "bg-indigo-600 text-white" 
-                                : "bg-slate-100 group-hover:bg-blue-100 text-slate-700 group-hover:text-blue-700"
-                            }`}>
-                              <BookOpen className="w-5 h-5" />
-                            </div>
-                            <h3 className={`font-black text-xl transition ${
-                              isSelectedCourse ? "text-indigo-950" : "text-gray-900 group-hover:text-blue-700"
-                            }`}>
-                              {formatCourseName(c)}
-                            </h3>
-                            <p className={`text-xs font-semibold mt-1 ${
-                              isSelectedCourse ? "text-indigo-700" : "text-gray-500"
-                            }`}>
-                              {courseAssignments.length === 1 ? "1 asignación activa" : `${courseAssignments.length} asignaciones activas`}
-                            </p>
-                            <div className={`mt-3 inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full transition ${
-                              isSelectedCourse 
-                                ? "bg-indigo-600 text-white shadow-xs" 
-                                : "text-blue-600 bg-blue-50 group-hover:bg-blue-600 group-hover:text-white"
-                            }`}>
-                              <span>{isSelectedCourse ? "✓ Curso Activo (Soltar Ensayo)" : "Clic para Filtrar / Soltar Ensayo"}</span>
-                              <ChevronRight className="w-3 h-3" />
+                            <div className="flex flex-col items-center justify-center pointer-events-none select-none">
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm mb-2 transition ${
+                                isSelectedCourse 
+                                  ? "bg-indigo-600 text-white" 
+                                  : "bg-slate-100 group-hover:bg-blue-100 text-slate-700 group-hover:text-blue-700"
+                              }`}>
+                                <BookOpen className="w-5 h-5" />
+                              </div>
+                              <h3 className={`font-black text-xl transition ${
+                                isSelectedCourse ? "text-indigo-950" : "text-gray-900 group-hover:text-blue-700"
+                              }`}>
+                                {formatCourseName(c)}
+                              </h3>
+                              <p className={`text-xs font-semibold mt-1 ${
+                                isSelectedCourse ? "text-indigo-700" : "text-gray-500"
+                              }`}>
+                                {courseAssignments.length === 1 ? "1 asignación activa" : `${courseAssignments.length} asignaciones activas`}
+                              </p>
+                              <div className={`mt-3 inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full transition ${
+                                isSelectedCourse 
+                                  ? "bg-indigo-600 text-white shadow-xs" 
+                                  : "text-blue-600 bg-blue-50 group-hover:bg-blue-600 group-hover:text-white"
+                              }`}>
+                                <span>{isSelectedCourse ? "✓ Curso Activo (Soltar Ensayo)" : "Clic para Filtrar / Soltar Ensayo"}</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </div>
                             </div>
                           </div>
                         );
@@ -1726,12 +1947,29 @@ export default function AssignmentsDashboard() {
                       </div>
 
                       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-                        {assignments.map(a => (
+                        {assignments.map(a => {
+                          const isDragOverAssignment = dragOverAssignmentId === a.id;
+                          return (
                           <div 
                             key={a.id}
-                            onDragOver={allowDrop}
+                            onDragOver={(e) => {
+                              allowDrop(e);
+                              if (dragOverAssignmentId !== a.id) setDragOverAssignmentId(a.id);
+                            }}
+                            onDragEnter={(e) => {
+                              allowDrop(e);
+                              setDragOverAssignmentId(a.id);
+                            }}
+                            onDragLeave={(e) => {
+                              if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                              setDragOverAssignmentId(null);
+                            }}
                             onDrop={(evt) => handleAssignmentTeacherDrop(evt, a.id)}
-                            className="bg-white border-l-4 border-l-indigo-600 border border-gray-200 rounded-xl p-3 shadow-sm hover:shadow transition"
+                            className={`border-l-4 border-l-indigo-600 rounded-xl p-3 shadow-sm hover:shadow transition relative ${
+                              isDragOverAssignment
+                                ? "bg-purple-100 border-2 border-purple-500 ring-2 ring-purple-200"
+                                : "bg-white border border-gray-200"
+                            }`}
                           >
                             <div className="flex justify-between items-start mb-1.5">
                               <div className="flex gap-1.5 items-center flex-wrap">
@@ -1789,7 +2027,8 @@ export default function AssignmentsDashboard() {
                               </div>
                             </div>
                           </div>
-                        ))}
+                        );
+                      })}
 
                         {assignments.length === 0 && (
                           <div className="text-center py-8 text-gray-400 text-xs font-semibold">
@@ -1811,6 +2050,7 @@ export default function AssignmentsDashboard() {
                             key={t.rut}
                             draggable
                             onDragStart={(evt) => handleTeacherDragStart(evt, t)}
+                            onDragEnd={() => { setDraggedTeacher(null); setDragOverAssignmentId(null); }}
                             className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 flex items-center gap-2 cursor-grab active:cursor-grabbing hover:border-purple-400 hover:bg-purple-50/50 transition-colors select-none"
                           >
                             <GripVertical className="w-3.5 h-3.5 text-gray-300" />
