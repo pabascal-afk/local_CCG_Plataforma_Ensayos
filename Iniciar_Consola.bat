@@ -1,8 +1,8 @@
 @echo off
 cd /d "%~dp0"
-title Servidor Plataforma Ensayos SIMCE - Puerto 3300
+title Servidor PRUEBAS CCG - Puerto 3600
 echo ===============================================================
-echo   Iniciando Plataforma de Ensayos SIMCE (Colegio Cerro Grande)
+echo   Iniciando PRUEBAS CCG (Puerto 3600 - Colegio Cerro Grande)
 echo ===============================================================
 
 IF NOT EXIST "frontend\node_modules\next" (

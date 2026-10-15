@@ -56,7 +56,8 @@ export default function AppShell({ user, children }: { user: SessionUser; childr
       <aside className="w-64 bg-white border-r flex flex-col">
         <div className="h-16 flex items-center px-5 border-b">
           <img src="/CCG-logo-300x300.png" alt="CCG" className="w-8 h-8 object-contain mr-2" />
-          <span className="font-extrabold text-gray-800 text-lg tracking-tight">ENSAYOS CCG</span>
+          <span className="font-extrabold text-amber-600 text-lg tracking-tight">PRUEBAS CCG</span>
+          <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 rounded border border-amber-300">TEST :3600</span>
         </div>
 
         {user.role !== "STUDENT" && (

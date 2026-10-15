@@ -25,8 +25,8 @@ function initTray(port, localIp, onExit) {
     const systray = new SysTray({
         menu: {
             icon: icon,
-            title: "Plataforma Ensayos SIMCE",
-            tooltip: `Servidor SIMCE activo en http://${localIp}:${port}`,
+            title: "PRUEBAS CCG",
+            tooltip: `PRUEBAS CCG activo en http://${localIp}:${port}`,
             items: [
                 {
                     title: "🌐 Abrir en este PC",
@@ -47,8 +47,8 @@ function initTray(port, localIp, onExit) {
                     enabled: true
                 },
                 {
-                    title: "❌ Detener Servidor",
-                    tooltip: "Apaga el servidor y cierra la aplicación",
+                    title: "❌ Detener Servidor PRUEBAS CCG",
+                    tooltip: "Apaga el servidor de pruebas y cierra la aplicación",
                     checked: false,
                     enabled: true
                 }
@@ -59,7 +59,7 @@ function initTray(port, localIp, onExit) {
     });
 
     systray.onClick(action => {
-        if (action.item.title === '❌ Detener Servidor') {
+        if (action.item.title === '❌ Detener Servidor PRUEBAS CCG' || action.item.title === '❌ Detener Servidor') {
             try { systray.kill(); } catch (e) {}
             if (onExit) onExit();
             else process.exit(0);

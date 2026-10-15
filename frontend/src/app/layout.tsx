@@ -14,8 +14,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "ENSAYOS CCG",
-  description: "Plataforma de ensayos SIMCE con autocorrección e informes de desempeño",
+  title: "PRUEBAS CCG (Puerto 3600)",
+  description: "Entorno de Pruebas Regulares - Plataforma de Ensayos SIMCE Colegio Cerro Grande",
 };
 
 import { SchoolYearProvider } from "@/context/SchoolYearContext";

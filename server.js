@@ -85,8 +85,8 @@ function getLocalIp() {
     return candidateIps[0] || '127.0.0.1';
 }
 
-const PORT = parseInt(process.env.PORT, 10) || 3300;
-const BACKEND_PORT = parseInt(process.env.BACKEND_PORT, 10) || 3001;
+const PORT = parseInt(process.env.PORT, 10) || 3600;
+const BACKEND_PORT = parseInt(process.env.BACKEND_PORT, 10) || 3601;
 const localIp = getLocalIp();
 
 // 3. Liberar puertos si quedaron tomados por procesos anteriores
@@ -102,11 +102,11 @@ freePortIfBusy(BACKEND_PORT);
 
 // Intentar agregar regla de firewall de Windows (si tiene permisos)
 try {
-    exec('netsh advfirewall firewall add rule name="Plataforma Ensayos SIMCE (Puerto 3300)" dir=in action=allow protocol=TCP localport=3300', () => {});
+    exec('netsh advfirewall firewall add rule name="PRUEBAS CCG (Puerto 3600)" dir=in action=allow protocol=TCP localport=3600', () => {});
 } catch (e) {}
 
 log('===============================================================');
-log('   Iniciando Plataforma de Ensayos SIMCE (Colegio Cerro Grande)');
+log('   Iniciando PRUEBAS CCG (Puerto 3600 - Colegio Cerro Grande)');
 log('===============================================================');
 log(`- Acceso en este equipo:  http://localhost:${PORT}`);
 log(`- Acceso Red Local (LAN): http://${localIp}:${PORT}`);

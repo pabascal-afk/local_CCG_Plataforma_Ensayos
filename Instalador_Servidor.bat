@@ -1,6 +1,6 @@
 @echo off
 color 0B
-title Instalador / Actualizador - Plataforma Ensayos SIMCE (Colegio Cerro Grande)
+title Instalador / Actualizador - PRUEBAS CCG (Puerto 3600)
 
 :: 0. Auto-elevación a permisos de Administrador (indispensable para Firewall de Windows y servicios)
 net session >nul 2>&1
@@ -13,8 +13,8 @@ if %errorLevel% neq 0 (
 cd /d "%~dp0"
 
 echo ==========================================================
-echo    Instalador / Actualizador - Plataforma Ensayos SIMCE
-echo              Colegio Cerro Grande (Red Local)
+echo    Instalador / Actualizador - PRUEBAS CCG
+echo              Colegio Cerro Grande (Puerto 3600)
 echo ==========================================================
 echo.
 
@@ -41,21 +41,9 @@ git config --global http.sslVerify false >nul 2>&1
 
 :: 3. Revisar si ya esta clonado
 IF EXIST ".git" (
-    echo [INFO] Detectado como repositorio existente.
-    echo [INFO] Deteniendo servidores y liberando puerto 3300 si estaba ocupado...
-    powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 3300 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
-    echo [INFO] Obteniendo actualizaciones desde GitHub...
-    git pull origin main
-) ELSE (
-    echo [INFO] Iniciando instalacion por primera vez...
-    echo [INFO] Clonando repositorio desde GitHub...
-    git clone https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git .
-    IF ERRORLEVEL 1 (
-        color 0C
-        echo [ERROR] Hubo un problema al clonar el repositorio.
-        pause
-        exit /b
-    )
+    echo [INFO] Repositorio detectado.
+    echo [INFO] Deteniendo servidores de pruebas y liberando puertos 3600 y 3601...
+    powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 3600,3601 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 )
 
 echo.
@@ -70,8 +58,14 @@ echo   [2/4] Configurando Backend y Base de Datos SQLite...
 echo ==========================================================
 cd backend
 IF NOT EXIST ".env" (
-    echo [INFO] Creando archivo backend\.env desde plantilla...
-    copy ".env.example" ".env" >nul
+    echo [INFO] Creando archivo backend\.env para PRUEBAS CCG...
+    (
+        echo DATABASE_URL="file:./simce.db?connection_limit=1&socket_timeout=10"
+        echo JWT_SECRET="5deea0503538dd87b4faa6afada5765cc96ca39dbb0167ccf0ac52566b73284686ceb9ff631020786a4aaae74ef95c74"
+        echo PORT=3601
+        echo HOST=127.0.0.1
+        echo UPLOADS_DIR=./uploads
+    ) > .env
 )
 call npm install --no-audit
 echo [INFO] Sincronizando esquema de base de datos...
@@ -93,7 +87,7 @@ echo   [3/4] Instalando y compilando Frontend (Next.js)...
 echo ==========================================================
 cd frontend
 call npm install --no-audit
-echo [INFO] Generando build optimizado para produccion en puerto 3300...
+echo [INFO] Generando build optimizado para produccion en puerto 3600...
 node node_modules\next\dist\bin\next build
 IF ERRORLEVEL 1 (
     color 0C
@@ -107,23 +101,25 @@ echo.
 echo ==========================================================
 echo   [4/4] Configurando Firewall y Acceso de Red Local (LAN)...
 echo ==========================================================
-echo [INFO] Creando/Actualizando regla de Firewall para puerto 3300 (LAN)...
-netsh advfirewall firewall delete rule name="Plataforma Ensayos SIMCE (Puerto 3300)" >nul 2>&1
-netsh advfirewall firewall add rule name="Plataforma Ensayos SIMCE (Puerto 3300)" dir=in action=allow protocol=TCP localport=3300 >nul 2>&1
+echo [INFO] Creando/Actualizando reglas de Firewall para puertos 3600 y 3601 (LAN)...
+netsh advfirewall firewall delete rule name="PRUEBAS CCG (Puerto 3600)" >nul 2>&1
+netsh advfirewall firewall add rule name="PRUEBAS CCG (Puerto 3600)" dir=in action=allow protocol=TCP localport=3600 >nul 2>&1
+netsh advfirewall firewall delete rule name="PRUEBAS CCG Backend (Puerto 3601)" >nul 2>&1
+netsh advfirewall firewall add rule name="PRUEBAS CCG Backend (Puerto 3601)" dir=in action=allow protocol=TCP localport=3601 >nul 2>&1
 
 :: Crear acceso directo en el Escritorio
 echo [INFO] Creando accesos directos en el Escritorio...
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'Plataforma Ensayos SIMCE (Segundo Plano).lnk')); $s.TargetPath = [System.IO.Path]::Combine((Get-Location).Path, 'Iniciar_Plataforma.vbs'); $s.WorkingDirectory = (Get-Location).Path; $s.Description = 'Iniciar Plataforma SIMCE en Segundo Plano'; if (Test-Path 'app.ico') { $s.IconLocation = (Join-Path (Get-Location).Path 'app.ico') }; $s.Save()" >nul 2>&1
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'Plataforma Ensayos SIMCE (Consola).lnk')); $s.TargetPath = [System.IO.Path]::Combine((Get-Location).Path, 'Iniciar_Consola.bat'); $s.WorkingDirectory = (Get-Location).Path; $s.Description = 'Iniciar Plataforma SIMCE en Consola'; if (Test-Path 'app.ico') { $s.IconLocation = (Join-Path (Get-Location).Path 'app.ico') }; $s.Save()" >nul 2>&1
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'PRUEBAS CCG (Segundo Plano).lnk')); $s.TargetPath = [System.IO.Path]::Combine((Get-Location).Path, 'Iniciar_Plataforma.vbs'); $s.WorkingDirectory = (Get-Location).Path; $s.Description = 'Iniciar PRUEBAS CCG en Segundo Plano (Puerto 3600)'; if (Test-Path 'app.ico') { $s.IconLocation = (Join-Path (Get-Location).Path 'app.ico') }; $s.Save()" >nul 2>&1
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'PRUEBAS CCG (Consola).lnk')); $s.TargetPath = [System.IO.Path]::Combine((Get-Location).Path, 'Iniciar_Consola.bat'); $s.WorkingDirectory = (Get-Location).Path; $s.Description = 'Iniciar PRUEBAS CCG en Consola (Puerto 3600)'; if (Test-Path 'app.ico') { $s.IconLocation = (Join-Path (Get-Location).Path 'app.ico') }; $s.Save()" >nul 2>&1
 
 echo.
 color 0A
 echo ==========================================================
 echo   [EXITO] Instalacion y configuracion completada con exito.
-echo   La plataforma esta lista en el puerto 3300.
+echo   El servidor PRUEBAS CCG esta listo en el puerto 3600.
 echo ==========================================================
 echo.
-echo Arrancando el servidor...
+echo Arrancando el servidor PRUEBAS CCG...
 start "" "Iniciar_Plataforma.vbs"
 timeout /t 4 >nul
 exit /b
