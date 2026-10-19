@@ -1855,21 +1855,69 @@ router.post('/assignments', checkAdmin, async (req, res, next) => {
   try {
     const { examId, courseId, opensAt, closesAt, assignedTeacherRut, durationMinutes, dynamicPassword, dynamicPasswordActive, applicationMode } = req.body;
     
+    const parsedExamId = parseInt(examId, 10);
+    const parsedCourseId = parseInt(courseId, 10);
+
+    if (isNaN(parsedExamId) || isNaN(parsedCourseId)) {
+      return res.status(400).json({ error: 'Debe especificar una prueba y un curso válidos.' });
+    }
+
+    if (!opensAt || !closesAt) {
+      return res.status(400).json({ error: 'Debe especificar fecha y hora de inicio y término válidas.' });
+    }
+
+    const opensDate = new Date(opensAt);
+    const closesDate = new Date(closesAt);
+
+    if (isNaN(opensDate.getTime()) || isNaN(closesDate.getTime())) {
+      return res.status(400).json({ error: 'Las fechas u horas especificadas no son válidas.' });
+    }
+
+    // Verificar si ya existe asignación de este examen a este curso
+    const existing = await prisma.examAssignment.findUnique({
+      where: {
+        examId_courseId: {
+          examId: parsedExamId,
+          courseId: parsedCourseId
+        }
+      }
+    });
+
+    if (existing) {
+      return res.status(400).json({ 
+        error: 'Esta evaluación ya está asignada a este curso. Puedes modificar las fechas o la modalidad en la lista de asignaciones.' 
+      });
+    }
+
+    // Verificar profesor si se proporcionó RUT
+    let validTeacherRut = null;
+    if (assignedTeacherRut && String(assignedTeacherRut).trim()) {
+      const cleanRut = String(assignedTeacherRut).trim();
+      const teacher = await prisma.user.findUnique({ where: { rut: cleanRut } });
+      if (teacher) {
+        validTeacherRut = teacher.rut;
+      }
+    }
+
     if (durationMinutes !== undefined && durationMinutes !== null) {
       const dur = parseInt(durationMinutes, 10);
-      await prisma.exam.update({
-        where: { id: parseInt(examId, 10) },
-        data: { durationMinutes: !isNaN(dur) && dur > 0 ? dur : null }
-      });
+      try {
+        await prisma.exam.update({
+          where: { id: parsedExamId },
+          data: { durationMinutes: !isNaN(dur) && dur > 0 ? dur : null }
+        });
+      } catch (examErr) {
+        console.warn('No se pudo actualizar duración del examen:', examErr.message);
+      }
     }
 
     const assignment = await prisma.examAssignment.create({
       data: {
-        examId: parseInt(examId, 10),
-        courseId: parseInt(courseId, 10),
-        opensAt: new Date(opensAt),
-        closesAt: new Date(closesAt),
-        assignedTeacherRut: assignedTeacherRut || null,
+        examId: parsedExamId,
+        courseId: parsedCourseId,
+        opensAt: opensDate,
+        closesAt: closesDate,
+        assignedTeacherRut: validTeacherRut,
         dynamicPassword: dynamicPassword ? String(dynamicPassword).trim().toUpperCase() : null,
         dynamicPasswordActive: Boolean(dynamicPasswordActive),
         applicationMode: applicationMode === 'PRINTED' ? 'PRINTED' : 'DIGITAL',
@@ -1882,7 +1930,18 @@ router.post('/assignments', checkAdmin, async (req, res, next) => {
     });
     res.json(assignment);
   } catch (error) {
-    next(error);
+    if (error.code === 'P2002') {
+      return res.status(400).json({ 
+        error: 'Esta evaluación ya está asignada a este curso.' 
+      });
+    }
+    if (error.code === 'P2003') {
+      return res.status(400).json({
+        error: 'La prueba o el curso seleccionado no existe en el sistema.'
+      });
+    }
+    console.error('[admin/assignments error]:', error);
+    res.status(500).json({ error: error.message || 'Error al guardar la asignación.' });
   }
 });
 
