@@ -484,24 +484,52 @@ namespace CCGServerManager
                 Padding = new Padding(12, 8, 12, 8)
             };
 
+            // Server Logo Icon (36x36)
+            PictureBox picLogo = new PictureBox
+            {
+                Location = new Point(12, 8),
+                Size = new Size(36, 36),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                BackColor = Color.Transparent
+            };
+            try
+            {
+                string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+                string icoName = srv.Id == "SIMCE" ? "app_simce.ico" : (srv.Id == "PRUEBAS" ? "app_pruebas.ico" : "app.ico");
+                string icoFull = Path.Combine(exeDir, icoName);
+                if (!File.Exists(icoFull) && !string.IsNullOrEmpty(srv.FolderPath))
+                    icoFull = Path.Combine(srv.FolderPath, icoName);
+                if (!File.Exists(icoFull))
+                    icoFull = Path.Combine(exeDir, "app.ico");
+                if (File.Exists(icoFull))
+                {
+                    using (Icon ic = new Icon(icoFull, 48, 48))
+                    {
+                        picLogo.Image = ic.ToBitmap();
+                    }
+                }
+            }
+            catch { }
+
             // Title & Subtitle
             Label lblTitle = new Label
             {
                 Text = srv.Title,
-                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 10.2F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(15, 23, 42),
-                Location = new Point(12, 8),
+                Location = new Point(54, 7),
                 AutoSize = true
             };
 
             Label lblSub = new Label
             {
                 Text = srv.Subtitle,
-                Font = new Font("Segoe UI", 8.2F, FontStyle.Regular),
+                Font = new Font("Segoe UI", 8.0F, FontStyle.Regular),
                 ForeColor = Color.FromArgb(100, 116, 139),
-                Location = new Point(12, 30),
+                Location = new Point(54, 29),
                 AutoSize = true
             };
+            body.Controls.Add(picLogo);
 
             // Status Badge
             Label badge = new Label

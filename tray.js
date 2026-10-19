@@ -4,9 +4,18 @@ const fs = require('fs');
 const path = require('path');
 
 function getIconBase64(port, appName) {
-    const isSimce = (port === 3300) || (appName && appName.toLowerCase().includes('simce') && port !== 3600);
+    const isPruebas = (port === 3600) || (appName && appName.toLowerCase().includes('pruebas')) || __dirname.toLowerCase().includes('pruebas');
     try {
-        if (isSimce) {
+        if (isPruebas) {
+            const pruebasTxt = path.join(__dirname, 'icon_pruebas.txt');
+            if (fs.existsSync(pruebasTxt)) {
+                return fs.readFileSync(pruebasTxt, 'utf8').trim();
+            }
+            const pruebasIco = path.join(__dirname, 'app_pruebas.ico');
+            if (fs.existsSync(pruebasIco)) {
+                return fs.readFileSync(pruebasIco).toString('base64');
+            }
+        } else {
             const simceTxt = path.join(__dirname, 'icon_simce.txt');
             if (fs.existsSync(simceTxt)) {
                 return fs.readFileSync(simceTxt, 'utf8').trim();
@@ -27,7 +36,7 @@ function getIconBase64(port, appName) {
     } catch (e) {
         // Fallback below
     }
-    return "AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAADIMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+    return "AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAADIMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/yDIy/8gyMv/IMjL/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 }
 
 function initTray(port, localIp, onExit, appName = "Plataforma Ensayos SIMCE") {
