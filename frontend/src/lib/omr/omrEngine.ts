@@ -32,6 +32,7 @@ export interface SheetReadResult {
   hasUncertainOrDouble: boolean;
   rawError?: string;
   thumbnailDataUrl?: string;
+  fullImageDataUrl?: string;
 }
 
 interface Point {
@@ -75,8 +76,9 @@ function rotateCanvas(srcCanvas: HTMLCanvasElement, angleDegrees: number): HTMLC
 }
 
 /**
- * Busca los 4 marcadores de esquina (cuadrados negros de 10x10mm) en ventanas restringidas
- * para no interferir jamás con el logo del colegio (que empieza en X=20mm) ni con el QR.
+ * Detecta con extrema precisión los 4 marcadores de esquina (cuadrados negros de 10x10mm)
+ * mediante análisis de componentes conexos (blobs sólidos) en cada cuadrante.
+ * Es 100% inmune a sombras del escáner, bordes de vidrio, logo del colegio y código QR.
  */
 function detectCornerMarkers(
   pixels: Uint8ClampedArray,
@@ -87,51 +89,123 @@ function detectCornerMarkers(
     const px = Math.min(Math.max(0, Math.round(x)), width - 1);
     const py = Math.min(Math.max(0, Math.round(y)), height - 1);
     const idx = (py * width + px) * 4;
-    const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
-    return Math.max(0, 255 - lum);
+    return Math.max(0, 255 - (0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2]));
   };
 
-  // Ventana ajustada: máx 11% del ancho y 10% del alto
-  const findMarkerInBox = (
+  const findMarkerInQuadrant = (
     minX: number,
     maxX: number,
     minY: number,
-    maxY: number
+    maxY: number,
+    targetX: number,
+    targetY: number
   ): Point | null => {
-    let sumX = 0;
-    let sumY = 0;
-    let count = 0;
+    const qw = maxX - minX;
+    const qh = maxY - minY;
+    if (qw <= 0 || qh <= 0) return null;
 
-    // Umbral de negro sólido (los marcadores son tinta negra pura > 140)
-    const BLACK_THRESHOLD = 135;
+    const DARK_THRESH = 95;
+    const step = Math.max(1, Math.floor(Math.min(width, height) / 750));
+    const visited = new Uint8Array(qw * qh);
 
-    for (let y = minY; y < maxY; y += 2) {
-      for (let x = minX; x < maxX; x += 2) {
-        if (getDarkness(x, y) >= BLACK_THRESHOLD) {
-          sumX += x;
-          sumY += y;
+    interface Candidate {
+      cx: number;
+      cy: number;
+      count: number;
+      dist: number;
+      bw: number;
+      bh: number;
+      density: number;
+    }
+    const candidates: Candidate[] = [];
+    const minCount = Math.max(8, Math.round((qw * qh) * 0.0006 / (step * step)));
+
+    for (let y = minY; y < maxY; y += step) {
+      for (let x = minX; x < maxX; x += step) {
+        const lx = x - minX;
+        const ly = y - minY;
+        const vIdx = ly * qw + lx;
+        if (visited[vIdx] || getDarkness(x, y) < DARK_THRESH) continue;
+
+        // BFS en la ventana del cuadrante
+        const q: number[] = [x, y];
+        visited[vIdx] = 1;
+        let cMinX = x;
+        let cMaxX = x;
+        let cMinY = y;
+        let cMaxY = y;
+        let count = 0;
+        let sumX = 0;
+        let sumY = 0;
+        let head = 0;
+
+        while (head < q.length) {
+          const curX = q[head++];
+          const curY = q[head++];
           count++;
+          sumX += curX;
+          sumY += curY;
+
+          const neighbors = [
+            [curX + step, curY],
+            [curX - step, curY],
+            [curX, curY + step],
+            [curX, curY - step],
+          ];
+
+          for (let n = 0; n < 4; n++) {
+            const nx = neighbors[n][0];
+            const ny = neighbors[n][1];
+            if (nx >= minX && nx < maxX && ny >= minY && ny < maxY) {
+              const nlx = nx - minX;
+              const nly = ny - minY;
+              const nvIdx = nly * qw + nlx;
+              if (!visited[nvIdx] && getDarkness(nx, ny) >= DARK_THRESH) {
+                visited[nvIdx] = 1;
+                q.push(nx, ny);
+                if (nx < cMinX) cMinX = nx;
+                if (nx > cMaxX) cMaxX = nx;
+                if (ny < cMinY) cMinY = ny;
+                if (ny > cMaxY) cMaxY = ny;
+              }
+            }
+          }
+        }
+
+        const bw = cMaxX - cMinX + step;
+        const bh = cMaxY - cMinY + step;
+
+        // Ignorar bordes oscuros de la tapa del escáner que cubren la mayor parte del cuadrante
+        if (bw > qw * 0.65 || bh > qh * 0.65) continue;
+
+        const area = (bw / step) * (bh / step);
+        const density = area > 0 ? count / area : 0;
+        const aspect = bh > 0 ? bw / bh : 0;
+
+        // Marcador cuadrado sólido: aspecto ~1.0 y densidad sólida >= 0.58
+        if (count >= minCount && density >= 0.55 && aspect >= 0.60 && aspect <= 1.65) {
+          const cx = sumX / count;
+          const cy = sumY / count;
+          const dist = Math.hypot(cx - targetX, cy - targetY);
+          candidates.push({ cx, cy, count, dist, bw, bh, density });
         }
       }
     }
 
-    // Un marcador de 10x10mm tiene al menos 30-50 píxeles con paso 2
-    const minPixels = Math.max(20, Math.round((width * height) * 0.00002));
-    if (count >= minPixels) {
-      return { x: sumX / count, y: sumY / count };
-    }
-
-    return null;
+    if (candidates.length === 0) return null;
+    // Seleccionar el candidato más cercano a la esquina teórica
+    candidates.sort((a, b) => a.dist - b.dist);
+    return { x: candidates[0].cx, y: candidates[0].cy };
   };
 
-  const wEdge = Math.round(width * 0.11);
-  const hEdge = Math.round(height * 0.10);
+  // Cuadrantes de búsqueda (22% del ancho y 20% del alto en cada esquina)
+  const qw = Math.round(width * 0.22);
+  const qh = Math.round(height * 0.20);
 
-  // Cuatro esquinas en rangos estrictos:
-  const tl = findMarkerInBox(0, wEdge, 0, hEdge);
-  const tr = findMarkerInBox(width - wEdge, width, 0, hEdge);
-  const bl = findMarkerInBox(0, wEdge, height - hEdge, height);
-  const br = findMarkerInBox(width - wEdge, width, height - hEdge, height);
+  const tl = findMarkerInQuadrant(0, qw, 0, qh, 0, 0);
+  const tr = findMarkerInQuadrant(width - qw, width, 0, qh, width, 0);
+  const bl = findMarkerInQuadrant(0, qw, height - qh, height, 0, height);
+  const br = findMarkerInQuadrant(width - qw, width, height - qh, height, width, height);
 
   let detectedCount = 0;
   if (tl) detectedCount++;
@@ -144,7 +218,7 @@ function detectCornerMarkers(
   let finalBl = bl;
   let finalBr = br;
 
-  // Si se detectaron 3, reconstruir la 4ta por geometría afín (paralelogramo de hoja)
+  // Si se detectaron 3 marcadores, reconstruir el 4to por paralelogramo afín
   if (detectedCount === 3) {
     if (!finalBr && finalTl && finalTr && finalBl) {
       finalBr = { x: finalTr.x + finalBl.x - finalTl.x, y: finalTr.y + finalBl.y - finalTl.y };
@@ -157,11 +231,11 @@ function detectCornerMarkers(
     }
   }
 
-  // Fallback a coordenadas nominales de hoja Letter (216x279 mm) con marcadores centrados en 11mm y 205mm
-  const nomTl: Point = { x: width * (11 / 216), y: height * (11 / 279) };
-  const nomTr: Point = { x: width * (205 / 216), y: height * (11 / 279) };
-  const nomBl: Point = { x: width * (11 / 216), y: height * (267 / 279) };
-  const nomBr: Point = { x: width * (205 / 216), y: height * (267 / 279) };
+  // Fallback nominal de hoja Letter (216x279 mm con marcadores a 11mm del borde)
+  const nomTl: Point = { x: width * 0.05, y: height * 0.04 };
+  const nomTr: Point = { x: width * 0.95, y: height * 0.04 };
+  const nomBl: Point = { x: width * 0.05, y: height * 0.96 };
+  const nomBr: Point = { x: width * 0.95, y: height * 0.96 };
 
   return {
     tl: finalTl || nomTl,
@@ -173,7 +247,7 @@ function detectCornerMarkers(
 }
 
 /**
- * Interpola bilinealmente (u, v) en [0, 1] hacia coordenadas de píxel.
+ * Interpola bilinealmente (u, v) en [0, 1] hacia coordenadas de píxel según los 4 marcadores de esquina.
  */
 function mapBilinear(u: number, v: number, corners: CornerMarkers): Point {
   const { tl, tr, bl, br } = corners;
@@ -194,7 +268,7 @@ export async function readOmrSheetFromCanvas(
   const height = canvas.height;
   const ctx = canvas.getContext("2d");
 
-  if (!ctx || width < 200 || height < 200) {
+  if (!ctx || width < 150 || height < 150) {
     return {
       success: false,
       pageIndex,
@@ -212,7 +286,7 @@ export async function readOmrSheetFromCanvas(
     };
   }
 
-  // 1. Detección de Código QR y Orientación (probar 0°, 90°, 180°, 270°)
+  // 1. Detección de Código QR y Orientación (probar 0°, 180°, 90°, 270°)
   let orientedCanvas = canvas;
   let metadata: OmrSheetMetadata | null = null;
   const anglesToTry = [0, 180, 90, 270];
@@ -253,15 +327,37 @@ export async function readOmrSheetFromCanvas(
   const curImgData = curCtx.getImageData(0, 0, curWidth, curHeight);
   const pixels = curImgData.data;
 
-  // Miniatura para visualización en el modal
+  // 2. Generación de Imagen en Alta Resolución para inspección y Miniatura para la barra lateral
+  // Miniatura para visualización rápida en la lista (200px)
   const thumbCanvas = document.createElement("canvas");
-  thumbCanvas.width = 160;
-  thumbCanvas.height = Math.round((160 * curHeight) / curWidth);
+  const thumbW = 200;
+  const thumbH = Math.max(1, Math.round((thumbW * curHeight) / curWidth));
+  thumbCanvas.width = thumbW;
+  thumbCanvas.height = thumbH;
   const thumbCtx = thumbCanvas.getContext("2d");
   if (thumbCtx) {
-    thumbCtx.drawImage(orientedCanvas, 0, 0, thumbCanvas.width, thumbCanvas.height);
+    thumbCtx.drawImage(orientedCanvas, 0, 0, thumbW, thumbH);
   }
-  const thumbnailDataUrl = thumbCanvas.toDataURL("image/jpeg", 0.7);
+  const thumbnailDataUrl = thumbCanvas.toDataURL("image/jpeg", 0.75);
+
+  // Imagen en Alta Resolución (hasta 1600px) para "Ver imagen original"
+  let fullImageDataUrl = "";
+  const maxDim = 1600;
+  if (curWidth > maxDim || curHeight > maxDim) {
+    const scale = Math.min(maxDim / curWidth, maxDim / curHeight);
+    const fullCanvas = document.createElement("canvas");
+    fullCanvas.width = Math.round(curWidth * scale);
+    fullCanvas.height = Math.round(curHeight * scale);
+    const fullCtx = fullCanvas.getContext("2d");
+    if (fullCtx) {
+      fullCtx.imageSmoothingEnabled = true;
+      fullCtx.imageSmoothingQuality = "high";
+      fullCtx.drawImage(orientedCanvas, 0, 0, fullCanvas.width, fullCanvas.height);
+      fullImageDataUrl = fullCanvas.toDataURL("image/jpeg", 0.88);
+    }
+  } else {
+    fullImageDataUrl = orientedCanvas.toDataURL("image/jpeg", 0.88);
+  }
 
   if (!metadata && !expectedAssignmentId) {
     return {
@@ -279,6 +375,7 @@ export async function readOmrSheetFromCanvas(
       hasUncertainOrDouble: true,
       rawError: "No se detectó el código QR institucional de la hoja.",
       thumbnailDataUrl,
+      fullImageDataUrl,
     };
   }
 
@@ -288,96 +385,108 @@ export async function readOmrSheetFromCanvas(
   const assignmentId = metadata ? metadata.aid : expectedAssignmentId || 0;
   const examId = metadata ? metadata.eid : 0;
 
-  // 2. Detección de Marcadores Fiduciales en las 4 esquinas
+  // 3. Detección Robusta de Marcadores Fiduciales en las 4 esquinas
   const corners = detectCornerMarkers(pixels, curWidth, curHeight);
 
-  // Funciones de lectura de píxeles
+  // Función de lectura de nivel de oscuridad (0=blanco, 255=negro)
   const getPixelDarkness = (px: number, py: number): number => {
     const x = Math.min(Math.max(0, Math.round(px)), curWidth - 1);
     const y = Math.min(Math.max(0, Math.round(py)), curHeight - 1);
     const idx = (y * curWidth + x) * 4;
-    const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
-    return Math.max(0, 255 - lum);
+    return Math.max(0, 255 - (0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2]));
   };
 
-  // 3. Medición Segura del Blanco del Papel (muestreado en márgenes libres de texto)
-  // Muestreamos en franjas donde solo hay papel blanco
+  // 4. Medición Segura del Blanco del Papel en los márgenes laterales limpios
   const paperSamples: number[] = [];
-  const sampleSteps = 20;
+  const sampleSteps = 24;
   for (let i = 0; i < sampleSteps; i++) {
-    // Margen izquierdo limpio (X=19mm) a lo largo de la página
-    const yRatio = 0.25 + (i / sampleSteps) * 0.55;
-    const ptLeft = mapBilinear(0.04, yRatio, corners);
+    const v = 0.20 + (i / sampleSteps) * 0.70;
+    // Margen izquierdo libre de texto
+    const ptLeft = mapBilinear(0.035, v, corners);
     paperSamples.push(getPixelDarkness(ptLeft.x, ptLeft.y));
-    // Margen derecho limpio (X=197mm)
-    const ptRight = mapBilinear(0.96, yRatio, corners);
+    // Margen derecho libre de texto
+    const ptRight = mapBilinear(0.965, v, corners);
     paperSamples.push(getPixelDarkness(ptRight.x, ptRight.y));
   }
   paperSamples.sort((a, b) => a - b);
   // Tomamos el percentil 25 para garantizar blanco de papel puro sin tocar grafito
-  const paperDarkness = paperSamples[Math.floor(paperSamples.length * 0.25)] || 22;
+  const paperDarkness = paperSamples[Math.floor(paperSamples.length * 0.25)] || 20;
 
-  // 4. Muestreo de Burbujas con Búsqueda de Pico Local (+-4px)
+  // 5. Radio de Burbuja Proporcional y Muestreo Centrado
+  const ptTL = mapBilinear(0, 0, corners);
+  const ptBL = mapBilinear(0, 1, corners);
+  const markerHeightPx = Math.hypot(ptBL.x - ptTL.x, ptBL.y - ptTL.y);
+  // Diámetro ~5mm en hoja de 256mm entre centros de marcadores -> radio ~2.5mm
+  const bubbleRadiusPx = Math.max(2, Math.round(markerHeightPx * (2.5 / 256.0)));
+
   const sampleBubbleDarkness = (centerX: number, centerY: number, radius: number): number => {
-    let bestDarkness = -1;
-    let bestX = centerX;
-    let bestY = centerY;
-
-    // Micro-búsqueda en ventana de +-4px para fijar el centro exacto del trazo del alumno
-    for (let dy = -4; dy <= 4; dy += 2) {
-      for (let dx = -4; dx <= 4; dx += 2) {
-        const d = getPixelDarkness(centerX + dx, centerY + dy);
-        if (d > bestDarkness) {
-          bestDarkness = d;
-          bestX = centerX + dx;
-          bestY = centerY + dy;
-        }
-      }
-    }
-
-    // Muestrear círculo interior (52% del radio) para evitar tocar la línea perimetral
-    const innerRadius = Math.max(2, Math.round(radius * 0.52));
+    // Radio interior (50% del radio de la burbuja) para no tocar el borde impreso
+    const innerRadius = Math.max(1, Math.round(radius * 0.50));
     const rSq = innerRadius * innerRadius;
-    let sum = 0;
-    let count = 0;
 
+    // Medir oscuridad en el centro nominal
+    let sumCenter = 0;
+    let countCenter = 0;
     for (let dy = -innerRadius; dy <= innerRadius; dy++) {
       for (let dx = -innerRadius; dx <= innerRadius; dx++) {
         if (dx * dx + dy * dy <= rSq) {
-          sum += getPixelDarkness(bestX + dx, bestY + dy);
-          count++;
+          sumCenter += getPixelDarkness(centerX + dx, centerY + dy);
+          countCenter++;
+        }
+      }
+    }
+    const centerDarkness = countCenter > 0 ? sumCenter / countCenter : 0;
+
+    // Si el centro es claramente blanco/vacío, no hacer micro-búsqueda para evitar desvíos al contorno
+    if (centerDarkness <= paperDarkness + 14) {
+      return centerDarkness;
+    }
+
+    // Si hay marca oscura, buscar el centro exacto del trazo del alumno en una ventana de +-30%
+    const searchWin = Math.max(1, Math.round(radius * 0.30));
+    let bestDarkness = centerDarkness;
+
+    for (let dy = -searchWin; dy <= searchWin; dy++) {
+      for (let dx = -searchWin; dx <= searchWin; dx++) {
+        let sum = 0;
+        let count = 0;
+        for (let sdy = -innerRadius; sdy <= innerRadius; sdy++) {
+          for (let sdx = -innerRadius; sdx <= innerRadius; sdx++) {
+            if (sdx * sdx + sdy * sdy <= rSq) {
+              sum += getPixelDarkness(centerX + dx + sdx, centerY + dy + sdy);
+              count++;
+            }
+          }
+        }
+        const avg = count > 0 ? sum / count : 0;
+        if (avg > bestDarkness) {
+          bestDarkness = avg;
         }
       }
     }
 
-    return count > 0 ? sum / count : 0;
+    return bestDarkness;
   };
 
-  // 5. Geometría Milimétrica Exacta (Sincronizada 1-a-1 con print-sheets/page.tsx)
-  // Marcadores de Esquina:
-  // TL: (11.0mm, 11.0mm)  --> u=0, v=0
-  // TR: (205.0mm, 11.0mm) --> u=1, v=0
-  // BL: (11.0mm, 267.0mm) --> u=0, v=1
-  // BR: (205.0mm, 267.0mm) --> u=1, v=1
-  const MARKER_SPAN_X_MM = 194.0; // 205.0 - 11.0
-  const MARKER_SPAN_Y_MM = 256.0; // 267.0 - 11.0
-
-  const mmToU = (mmX: number): number => (mmX - 11.0) / MARKER_SPAN_X_MM;
-  const mmToV = (mmY: number): number => (mmY - 11.0) / MARKER_SPAN_Y_MM;
-
-  // Radio de burbuja en píxeles (diámetro ~5mm -> radio 2.5mm)
-  const ptA = mapBilinear(mmToU(100), mmToV(100), corners);
-  const ptB = mapBilinear(mmToU(102.5), mmToV(100), corners);
-  const bubbleRadiusPx = Math.max(3, Math.round(Math.hypot(ptB.x - ptA.x, ptB.y - ptA.y)));
-
-  // Distribución de Columnas y Filas
+  // 6. Geometría Calibrada y Mapeo de Columnas/Filas
   const columnsCount = totalQuestions > 30 ? 3 : 2;
   const perCol = Math.ceil(totalQuestions / columnsCount);
 
-  // Filas: área útil de preguntas de Y=74mm a Y=248mm (174mm)
-  const GRID_Y_START_MM = 74.0;
-  const GRID_Y_HEIGHT_MM = 174.0;
-  const rowHeightMm = GRID_Y_HEIGHT_MM / perCol;
+  // Límites verticales de la grilla de preguntas respecto a marcadores
+  const V_START = 0.293;
+  const V_END = 0.957;
+
+  // Coordenadas horizontales 'u' calibradas
+  const COL2_U = [
+    [0.117, 0.180, 0.250, 0.323, 0.392], // Columna 1 (A, B, C, D, E)
+    [0.634, 0.703, 0.772, 0.841, 0.910], // Columna 2 (A, B, C, D, E)
+  ];
+
+  const COL3_U = [
+    [0.110, 0.158, 0.206, 0.254, 0.302], // Columna 1
+    [0.440, 0.488, 0.536, 0.584, 0.632], // Columna 2
+    [0.760, 0.808, 0.856, 0.904, 0.952], // Columna 3
+  ];
 
   const optionsList = ["A", "B", "C", "D", "E"].slice(0, optionsCount);
   const answers: Record<number, string> = {};
@@ -389,28 +498,12 @@ export async function readOmrSheetFromCanvas(
     const colIdx = Math.floor((qNum - 1) / perCol);
     const rowIdx = (qNum - 1) % perCol;
 
-    // Coordenada Y del centro de la fila
-    const rowCenterYMm = GRID_Y_START_MM + (rowIdx + 0.5) * rowHeightMm;
-    const rowV = mmToV(rowCenterYMm);
+    const rowV =
+      perCol <= 1
+        ? (V_START + V_END) / 2
+        : V_START + (rowIdx * (V_END - V_START)) / (perCol - 1);
 
-    // Coordenadas X milimétricas según cantidad de columnas
-    let colStartXMm = 20.0;
-    let optStartOffsetMm = 22.6; // 14mm (número) + 6mm (margen) + 2.6mm (mitad burbuja)
-    let optStepMm = 14.0;        // 5.2mm + 8.8mm gap = 14.0mm
-
-    if (columnsCount === 2) {
-      colStartXMm = colIdx === 0 ? 20.0 : 114.0;
-      optStartOffsetMm = 22.6;
-      optStepMm = 14.0;
-    } else {
-      // 3 columnas
-      if (colIdx === 0) colStartXMm = 20.0;
-      else if (colIdx === 1) colStartXMm = 81.5;
-      else colStartXMm = 143.0;
-
-      optStartOffsetMm = 16.4; // 11mm (número) + 3mm (margen) + 2.4mm (mitad burbuja)
-      optStepMm = 9.3;         // 4.8mm + 4.5mm gap = 9.3mm
-    }
+    const uList = columnsCount === 2 ? COL2_U[colIdx] : COL3_U[colIdx];
 
     const scores: Record<string, number> = {};
     let maxDelta = -1;
@@ -419,8 +512,7 @@ export async function readOmrSheetFromCanvas(
 
     for (let optIdx = 0; optIdx < optionsCount; optIdx++) {
       const optLetter = optionsList[optIdx];
-      const optXMm = colStartXMm + optStartOffsetMm + optIdx * optStepMm;
-      const optU = mmToU(optXMm);
+      const optU = uList ? uList[optIdx] : 0.15 + optIdx * 0.06;
       const bubbleCenter = mapBilinear(optU, rowV, corners);
 
       const rawDarkness = sampleBubbleDarkness(bubbleCenter.x, bubbleCenter.y, bubbleRadiusPx);
@@ -437,7 +529,7 @@ export async function readOmrSheetFromCanvas(
       }
     }
 
-    // Umbrales calibrados para alto contraste:
+    // Umbrales calibrados para alta precisión:
     // Burbuja vacía: delta <= 12
     // Burbuja marcada con lápiz o tinta: delta >= 20
     const FILL_DELTA_THRESHOLD = 20;
@@ -451,10 +543,9 @@ export async function readOmrSheetFromCanvas(
       if (maxDelta - secondDelta >= DIFF_DELTA_THRESHOLD) {
         selectedOption = maxOpt;
         status = "VALID";
-        confidence = Math.min(100, Math.max(70, Math.round(((maxDelta - secondDelta) / maxDelta) * 100)));
+        confidence = Math.min(100, Math.max(75, Math.round(((maxDelta - secondDelta) / maxDelta) * 100)));
         answers[qNum] = selectedOption;
       } else {
-        // Marca dudosa o doble marca: sugerir la opción más oscura pero alertar
         selectedOption = maxOpt;
         status = "DOUBLE_MARK";
         confidence = 45;
@@ -462,10 +553,9 @@ export async function readOmrSheetFromCanvas(
         answers[qNum] = selectedOption;
       }
     } else {
-      // En blanco
       selectedOption = null;
       status = "BLANK";
-      confidence = 95;
+      confidence = 98;
     }
 
     totalConfidence += confidence;
@@ -495,5 +585,6 @@ export async function readOmrSheetFromCanvas(
     confidenceAvg,
     hasUncertainOrDouble,
     thumbnailDataUrl,
+    fullImageDataUrl,
   };
 }

@@ -18,6 +18,7 @@ import {
   UserCheck,
   Camera,
   Sparkles,
+  ExternalLink,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { readOmrSheetFromCanvas, SheetReadResult } from "@/lib/omr/omrEngine";
@@ -73,6 +74,7 @@ export default function OmrScannerModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [viewingFullImage, setViewingFullImage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
@@ -788,19 +790,33 @@ export default function OmrScannerModal({
                 </div>
 
                 {/* Footer de la columna derecha con miniatura de la hoja completa */}
-                {activeSheet.result.thumbnailDataUrl && (
-                  <div className="p-3 bg-slate-50 border-t border-gray-200 flex items-center justify-between text-xs text-gray-500">
+                {(activeSheet.result.fullImageDataUrl || activeSheet.result.thumbnailDataUrl) && (
+                  <div className="p-3 bg-slate-50 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
                     <span className="text-[11px]">
                       Hoja escaneada #{activeSheet.pageIndex} procesada automáticamente con OMR.
                     </span>
-                    <a
-                      href={activeSheet.result.thumbnailDataUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 hover:underline font-semibold flex items-center gap-1"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> Ver imagen original
-                    </a>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setViewingFullImage(
+                            activeSheet.result.fullImageDataUrl || activeSheet.result.thumbnailDataUrl || null
+                          )
+                        }
+                        className="text-blue-600 hover:text-blue-800 hover:underline font-bold flex items-center gap-1.5 cursor-pointer bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> Ver imagen original (Alta Resolución)
+                      </button>
+                      <a
+                        href={activeSheet.result.fullImageDataUrl || activeSheet.result.thumbnailDataUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-slate-500 hover:text-slate-800 font-medium flex items-center gap-1 text-[11px]"
+                        title="Abrir en pestaña nueva del navegador"
+                      >
+                        <ExternalLink className="w-3 h-3" /> Nueva pestaña
+                      </a>
+                    </div>
                   </div>
                 )}
               </div>
@@ -849,6 +865,49 @@ export default function OmrScannerModal({
             </button>
           </div>
         </div>
+
+        {/* Modal Lightbox de Vista en Alta Resolución */}
+        {viewingFullImage && (
+          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex flex-col items-center justify-center p-3 sm:p-6 animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-gray-200">
+              <div className="p-3 px-4 bg-slate-100 border-b border-gray-200 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-blue-600" />
+                  <span className="text-xs font-bold text-gray-800">
+                    Vista en Alta Resolución &bull; Hoja #{activeSheet?.pageIndex}{" "}
+                    {activeSheet?.studentName ? `(${activeSheet.studentName})` : ""}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={viewingFullImage}
+                    target="_blank"
+                    rel="noreferrer"
+                    download={`hoja_omr_p${activeSheet?.pageIndex || 1}.jpg`}
+                    className="text-xs font-semibold bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 flex items-center gap-1.5 transition"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Abrir / Descargar
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setViewingFullImage(null)}
+                    className="p-1 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-200 transition cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-900/5 min-h-[400px]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={viewingFullImage}
+                  alt="Hoja OMR original en alta resolución"
+                  className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-md border border-gray-300 bg-white"
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
