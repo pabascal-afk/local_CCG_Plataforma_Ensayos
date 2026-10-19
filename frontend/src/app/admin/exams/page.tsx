@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal from "@/components/AiPromptModal";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type CourseItem = {
   id: number;
@@ -50,6 +51,7 @@ export default function ExamsPage() {
   const [orderRangePreset, setOrderRangePreset] = useState<"TODOS" | "1-3" | "4-6" | "7-10" | "CUSTOM">("TODOS");
   const [selectedOrderNumbers, setSelectedOrderNumbers] = useState<number[]>([]);
   const [showAiModal, setShowAiModal] = useState(false);
+  const isPruebas = useIsPruebas();
 
   // Tarjetas compactas por defecto (disclosure progresivo)
   const [expandedExams, setExpandedExams] = useState<Set<number>>(new Set());
@@ -246,9 +248,7 @@ export default function ExamsPage() {
                 </Link>
                 <div className="flex items-center gap-3">
                   <h1 className="text-2xl font-black text-gray-900 tracking-tight">
-                    {typeof window !== "undefined" && (window.location.port === "3600" || window.location.hostname.includes("pruebas"))
-                      ? "Gestión de Pruebas Regulares"
-                      : "Gestión de Ensayos"}
+                    {isPruebas ? "Gestión de Pruebas Regulares" : "Gestión de Ensayos"}
                   </h1>
                   <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-0.5 rounded-full">
                     {exams.length} en catálogo
@@ -304,7 +304,7 @@ export default function ExamsPage() {
                   href="/admin/exams/new" 
                   className="flex items-center gap-1.5 bg-blue-600 text-white px-3.5 py-2 rounded-lg hover:bg-blue-700 text-xs font-bold shadow-xs transition-colors"
                 >
-                  <Plus className="w-4 h-4" /> {typeof window !== "undefined" && (window.location.port === "3600" || window.location.hostname.includes("pruebas")) ? "Nueva Prueba" : "Nuevo Ensayo"}
+                  <Plus className="w-4 h-4" /> {isPruebas ? "Nueva Prueba" : "Nuevo Ensayo"}
                 </Link>
               </div>
             </div>

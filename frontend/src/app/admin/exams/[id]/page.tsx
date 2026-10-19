@@ -28,6 +28,27 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const [pasteText, setPasteText] = useState("");
   const [showPaste, setShowPaste] = useState(false);
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const token = getToken();
+      const res = await fetch("/api/admin/templates/exam_questions.xlsx", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Error al descargar plantilla");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Formato_Pauta_Ensayo.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+  };
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -190,13 +211,13 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                     >
                       <Upload className="w-3.5 h-3.5" /> {importing ? "Importando Pauta..." : "Importar Pauta"}
                     </button>
-                    <a
-                      href={`/api/admin/templates/exam_questions.xlsx?token=${typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : ""}`}
-                      download="Formato_Pauta_Ensayo.xlsx"
-                      className="block text-center text-xs text-blue-700 hover:underline pt-1 font-medium"
+                    <button
+                      type="button"
+                      onClick={handleDownloadTemplate}
+                      className="block w-full text-center text-xs text-blue-700 hover:underline pt-1 font-medium cursor-pointer"
                     >
                       Descargar Formato Pauta (.xlsx)
-                    </a>
+                    </button>
 
                     <div className="pt-2 border-t border-emerald-200">
                       <button

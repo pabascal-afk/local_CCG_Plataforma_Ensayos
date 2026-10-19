@@ -7,6 +7,7 @@ import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import AiPromptModal from "@/components/AiPromptModal";
 import { getToken } from "@/lib/session";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function NewExamPage() {
   const router = useRouter();
@@ -68,7 +69,7 @@ export default function NewExamPage() {
     }
   };
 
-  const isPruebas = typeof window !== "undefined" && (window.location.port === "3600" || window.location.hostname.includes("pruebas"));
+  const isPruebas = useIsPruebas();
 
   return (
     <RequireRole roles={["ADMIN", "DIRECTOR"]}>

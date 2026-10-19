@@ -1082,9 +1082,19 @@ router.delete('/users/:rut', checkAdmin, async (req, res, next) => {
   }
 });
 
-// Importar Usuarios desde Excel o CSV
-router.post('/users/import', checkAdmin, uploadMemory.single('file'), async (req, res, next) => {
-  if (!req.file) return res.status(400).json({ error: 'No se envió ningún archivo para importar' });
+// Importar Usuarios desde Excel o CSV (Robusto, dinámico y de alto rendimiento)
+router.post('/users/import', checkAdmin, (req, res, next) => {
+  uploadMemory.single('file')(req, res, (err) => {
+    if (err) {
+      console.error('[Error de subida de archivo Multer]:', err);
+      return res.status(400).json({ error: 'Error al subir el archivo: ' + (err.message || 'Archivo inválido o excede tamaño permitido') });
+    }
+    next();
+  });
+}, async (req, res) => {
+  if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+    return res.status(400).json({ error: 'No se envió ningún archivo o el archivo está vacío' });
+  }
 
   let worksheet;
   try {
@@ -1094,91 +1104,245 @@ router.post('/users/import', checkAdmin, uploadMemory.single('file'), async (req
     return res.status(400).json({ error: parseErr.message || 'No se pudo leer el archivo Excel o CSV' });
   }
 
+  if (!worksheet || worksheet.rowCount <= 1) {
+    return res.status(400).json({ 
+      error: 'El archivo Excel no contiene filas con datos de estudiantes (solo encabezados o está vacío). Agrega los datos e inténtalo de nuevo.' 
+    });
+  }
+
   try {
     const results = { imported: 0, errors: [] };
+
+    // Helper robusto para leer texto de celda sin fallos por formato o fórmulas
+    const getCleanCell = (cell) => {
+      if (!cell) return '';
+      if (cell.text !== undefined && cell.text !== null && String(cell.text).trim() !== '') {
+        return String(cell.text).trim();
+      }
+      const val = cell.value;
+      if (val === undefined || val === null) return '';
+      if (typeof val === 'object') {
+        if (val.result !== undefined && val.result !== null) return String(val.result).trim();
+        if (val.text !== undefined && val.text !== null) return String(val.text).trim();
+        if (Array.isArray(val.richText)) return val.richText.map(r => r.text || '').join('').trim();
+      }
+      return String(val).trim();
+    };
+
+    // Detección inteligente de columnas por nombre en la fila 1
+    const normalizeHeader = (s) => String(s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+    const headerRow = worksheet.getRow(1);
+    const colMap = {};
+
+    for (let c = 1; c <= Math.min(worksheet.columnCount || 20, 25); c++) {
+      const hRaw = getCleanCell(headerRow.getCell(c));
+      if (!hRaw) continue;
+      const h = normalizeHeader(hRaw);
+      if (!colMap.rut && (h.includes('rut') || h.includes('run') || h.includes('dni') || h.includes('identificador'))) {
+        colMap.rut = c;
+      } else if (!colMap.name && (h.includes('nombre') || h.includes('alumno') || h.includes('estudiante') || h.includes('name'))) {
+        colMap.name = c;
+      } else if (!colMap.course && (h === 'curso' || h === 'cursoid' || h === 'grado')) {
+        colMap.course = c;
+      } else if (!colMap.level && (h.includes('nivel') || h.includes('grado'))) {
+        colMap.level = c;
+      } else if (!colMap.teaching && (h.includes('ensenanza') || h.includes('tipo'))) {
+        colMap.teaching = c;
+      } else if (!colMap.letter && (h.includes('letra') || h.includes('seccion') || h.includes('seccion'))) {
+        colMap.letter = c;
+      } else if (!colMap.year && (h.includes('ano') || h.includes('year') || h.includes('periodo'))) {
+        colMap.year = c;
+      } else if (!colMap.role && (h.includes('rol') || h.includes('role'))) {
+        colMap.role = c;
+      }
+    }
+
+    // Helper para interpretar cadenas de curso
+    const parseCourseText = (str, defYear) => {
+      if (!str) return null;
+      const clean = str.trim().toUpperCase();
+      const currentYear = defYear || new Date().getFullYear();
+
+      // Patrón: "1° Básico A", "1 BÁSICA A", "2° MEDIO B", "2 MEDIA - A"
+      const m1 = clean.match(/(\d+)\s*°?\s*(BAS|BÁS|MED)\w*\s*[-–]?\s*([A-Z])/i);
+      if (m1) {
+        const ens = m1[2].toUpperCase().startsWith('MED') ? 'M' : 'B';
+        return { level: `${m1[1]}${ens}`, letter: m1[3].toUpperCase(), year: currentYear };
+      }
+
+      // Patrón: "1B A", "2M B", "1BA", "2MB"
+      const m2 = clean.match(/(\d+)\s*([BM])\s*[-–]?\s*([A-Z])/i);
+      if (m2) {
+        return { level: `${m2[1]}${m2[2].toUpperCase()}`, letter: m2[3].toUpperCase(), year: currentYear };
+      }
+
+      // Patrón: "1A", "2B", "3C", "4D"
+      const m3 = clean.match(/^(\d+)\s*([A-Z])$/i);
+      if (m3) {
+        const num = parseInt(m3[1], 10);
+        const ens = num > 8 ? 'M' : 'B';
+        const lvlNum = num > 8 ? (num - 8) : num;
+        return { level: `${lvlNum}${ens}`, letter: m3[2].toUpperCase(), year: currentYear };
+      }
+
+      return null;
+    };
+
+    // Pre-cargar cursos y usuarios existentes para optimización máxima
+    const [allCourses, allUsers] = await Promise.all([
+      prisma.course.findMany(),
+      prisma.user.findMany({ select: { rut: true } })
+    ]);
+
+    const courseCache = new Map();
+    for (const c of allCourses) {
+      courseCache.set(`${c.level}_${c.letter}_${c.year}`, c.id);
+    }
+
+    const existingRuts = new Set(allUsers.map(u => u.rut));
+    const passwordHashCache = new Map();
+
+    const getHash = async (pwd) => {
+      if (passwordHashCache.has(pwd)) return passwordHashCache.get(pwd);
+      const h = await bcrypt.hash(pwd, 10);
+      passwordHashCache.set(pwd, h);
+      return h;
+    };
+
+    const currentYear = new Date().getFullYear();
 
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
       try {
         const row = worksheet.getRow(rowNumber);
-        const col1 = String(row.getCell(1).text || row.getCell(1).value || '').trim();
-        const col2 = String(row.getCell(2).text || row.getCell(2).value || '').trim();
-        const col3 = String(row.getCell(3).text || row.getCell(3).value || '').trim();
-        const col4 = String(row.getCell(4).text || row.getCell(4).value || '').trim();
-        const col5 = String(row.getCell(5).text || row.getCell(5).value || '').trim();
-        const col6 = String(row.getCell(6).text || row.getCell(6).value || '').trim();
-        const col7 = String(row.getCell(7).text || row.getCell(7).value || '').trim();
 
-        let rut = normalizeRut(col1);
-        let name = col2;
+        // Si tenemos colMap detectado, usarlo; de lo contrario usar posiciones por defecto
+        const rawCol1 = getCleanCell(row.getCell(colMap.rut || 1));
+        const rawCol2 = getCleanCell(row.getCell(colMap.name || 2));
+        
+        let rut = normalizeRut(rawCol1);
+        let name = rawCol2;
+        if (!rut || rut.length < 3 || !name) {
+          // Si la fila está completamente vacía, ignorar silenciosamente
+          continue;
+        }
+
         let level = '';
         let letter = '';
-        let year = new Date().getFullYear();
+        let year = currentYear;
         let role = 'STUDENT';
 
-        if (!rut || rut.length < 3 || !name) continue;
+        // 1. Extraer Rol si existe
+        if (colMap.role) {
+          role = normalizeRole(getCleanCell(row.getCell(colMap.role)));
+        }
 
-        if (col6) {
-          // Formato 6 o 7 columnas: RUT, Nombre, Nivel, Enseñanza, Letra, Año, [Rol]
-          const nivelNum = col3.replace(/[^0-9]/g, '');
-          const ens = col4.toUpperCase().includes('M') ? 'M' : 'B';
-          level = `${nivelNum}${ens}`;
-          letter = col5.toUpperCase().replace(/[^A-Z]/g, '');
-          year = parseInt(col6, 10) || new Date().getFullYear();
-          if (col7) role = normalizeRole(col7);
-        } else if (col5 && /^\d{4}$/.test(col4)) {
-          // Formato 5 columnas: RUT, Nombre, Curso, Año, Rol
-          let courseString = col3.toUpperCase();
-          year = parseInt(col4, 10) || new Date().getFullYear();
-          role = normalizeRole(col5);
-          const match = courseString.match(/^(\d+)([BM]?)\s*([A-Z])$/);
-          if (match) {
-            level = match[1] + (match[2] || "B");
-            letter = match[3];
-          } else if (courseString.length >= 2) {
-            level = courseString.slice(0, -1);
-            if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
-            letter = courseString.slice(-1);
+        // 2. Extraer Año si existe
+        if (colMap.year) {
+          const yVal = parseInt(getCleanCell(row.getCell(colMap.year)), 10);
+          if (yVal && yVal >= 2000 && yVal <= 2100) year = yVal;
+        }
+
+        // 3. Resolver Curso
+        if (colMap.level && colMap.letter) {
+          // Desglose por Nivel, Enseñanza, Letra
+          const rawLvl = getCleanCell(row.getCell(colMap.level));
+          const rawEns = colMap.teaching ? getCleanCell(row.getCell(colMap.teaching)) : '';
+          const rawLet = getCleanCell(row.getCell(colMap.letter));
+
+          const nivelNum = rawLvl.replace(/[^0-9]/g, '');
+          const ens = (rawEns.toUpperCase().includes('M') || rawLvl.toUpperCase().includes('M')) ? 'M' : 'B';
+          if (nivelNum) level = `${nivelNum}${ens}`;
+          letter = rawLet.toUpperCase().replace(/[^A-Z]/g, '');
+        } else if (colMap.course) {
+          // Columna Curso único
+          const rawCourse = getCleanCell(row.getCell(colMap.course));
+          const parsed = parseCourseText(rawCourse, year);
+          if (parsed) {
+            level = parsed.level;
+            letter = parsed.letter;
+            year = parsed.year;
           }
         } else {
-          // Formato anterior: RUT, Nombre, Curso, Rol
-          let courseString = col3.toUpperCase();
-          if (col4) role = normalizeRole(col4);
-          const match = courseString.match(/^(\d+)([BM]?)\s*([A-Z])$/);
-          if (match) {
-            level = match[1] + (match[2] || "B");
-            letter = match[3];
-          } else if (courseString.length >= 2) {
-            level = courseString.slice(0, -1);
-            if (!level.endsWith('B') && !level.endsWith('M')) level += 'B';
-            letter = courseString.slice(-1);
+          // Fallback a columnas posicionales
+          const col3 = getCleanCell(row.getCell(3));
+          const col4 = getCleanCell(row.getCell(4));
+          const col5 = getCleanCell(row.getCell(5));
+          const col6 = getCleanCell(row.getCell(6));
+          const col7 = getCleanCell(row.getCell(7));
+
+          if (col6) {
+            // Formato plantilla oficial 7 cols: RUT, Nombre, Nivel, Enseñanza, Letra, Año, [Rol]
+            const nivelNum = col3.replace(/[^0-9]/g, '');
+            const ens = col4.toUpperCase().includes('M') ? 'M' : 'B';
+            level = nivelNum ? `${nivelNum}${ens}` : '';
+            letter = col5.toUpperCase().replace(/[^A-Z]/g, '');
+            year = parseInt(col6, 10) || currentYear;
+            if (col7) role = normalizeRole(col7);
+          } else {
+            // Formato 4 cols: RUT, Nombre, Curso, Rol
+            if (col4) role = normalizeRole(col4);
+            const parsed = parseCourseText(col3, year);
+            if (parsed) {
+              level = parsed.level;
+              letter = parsed.letter;
+              year = parsed.year;
+            }
           }
         }
 
+        // 4. Vincular o Crear Curso en memoria/BD
         let courseId = null;
         if (role === 'STUDENT' && level && letter) {
-          let course = await prisma.course.upsert({
-            where: {
-              level_letter_year: { level, letter, year }
-            },
-            update: {},
-            create: { level, letter, year }
-          });
-          courseId = course.id;
+          const cacheKey = `${level}_${letter}_${year}`;
+          if (courseCache.has(cacheKey)) {
+            courseId = courseCache.get(cacheKey);
+          } else {
+            const course = await prisma.course.upsert({
+              where: { level_letter_year: { level, letter, year } },
+              update: {},
+              create: { level, letter, year }
+            });
+            courseId = course.id;
+            courseCache.set(cacheKey, courseId);
+          }
         }
 
-        const rawDigits = rut.replace(/[^0-9]/g, '');
-        const password = rawDigits.length >= 4 ? rawDigits.slice(0, 6) : 'simce123';
-        const hash = await bcrypt.hash(password, 10);
+        // 5. Crear o Actualizar Usuario
+        if (existingRuts.has(rut)) {
+          // Usuario existente: actualización rápida sin rehashear contraseña
+          await prisma.user.update({
+            where: { rut },
+            data: { name, role, courseId }
+          });
+        } else {
+          // Usuario nuevo: contraseña por defecto con hashing en caché
+          const rawDigits = rut.replace(/[^0-9]/g, '');
+          const password = rawDigits.length >= 4 ? rawDigits.slice(0, 6) : 'simce123';
+          const hash = await getHash(password);
 
-        await prisma.user.upsert({
-          where: { rut },
-          update: { name, role, courseId },
-          create: { rut, name, role, courseId, passwordHash: hash, mustChangePassword: true }
-        });
+          await prisma.user.create({
+            data: {
+              rut,
+              name,
+              role,
+              courseId,
+              passwordHash: hash,
+              mustChangePassword: true
+            }
+          });
+          existingRuts.add(rut);
+        }
+
         results.imported++;
       } catch (err) {
         results.errors.push({ row: rowNumber, error: err.message });
       }
+    }
+
+    if (results.imported === 0 && results.errors.length === 0) {
+      return res.status(400).json({ 
+        error: 'No se encontraron filas válidas para importar. Revisa que el archivo contenga RUT y Nombre de los estudiantes.' 
+      });
     }
 
     return res.json(results);

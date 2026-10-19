@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { clearSession, ROLE_LABEL, type Role, type SessionUser } from "@/lib/session";
 import { useSchoolYear } from "@/context/SchoolYearContext";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type NavItem = { href: string; label: string; icon: React.ElementType };
 
@@ -51,7 +52,7 @@ export default function AppShell({ user, children }: { user: SessionUser; childr
     router.replace("/login");
   };
 
-  const isTestEnv = typeof window !== "undefined" && window.location.port === "3600";
+  const isTestEnv = useIsPruebas();
 
   return (
     <div className="min-h-screen flex bg-gray-50">

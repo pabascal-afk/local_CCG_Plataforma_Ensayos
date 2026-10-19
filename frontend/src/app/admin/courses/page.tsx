@@ -52,6 +52,48 @@ export default function CoursesPage() {
     loadCourses();
   }, [selectedYear]);
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const token = getToken();
+      const res = await fetch("/api/admin/templates/courses.xlsx", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Error al descargar plantilla");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Formato_Cursos.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+  };
+
+  const handleExportCourses = async () => {
+    try {
+      const token = getToken();
+      const res = await fetch("/api/admin/courses/export.xlsx", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Error al exportar cursos");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Cursos_CCG.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+  };
+
   // Vista previa en vivo del curso formateado
   const previewCourseName = useMemo(() => {
     return `${nivelNum}° ${ensenanza} ${letter} ${courseYear}`;
@@ -142,21 +184,18 @@ export default function CoursesPage() {
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 items-center">
-                <a
-                  href={`/api/admin/templates/courses.xlsx?token=${typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : ""}`}
-                  download="Formato_Cursos.xlsx"
-                  className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg transition-colors shadow-xs inline-flex items-center"
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg transition-colors shadow-xs inline-flex items-center cursor-pointer"
                   title="Descargar plantilla Excel vacía (.xlsx)"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                </a>
+                </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    const token = typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : "";
-                    window.location.href = `/api/admin/courses/export.xlsx?token=${token}`;
-                  }}
-                  className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs transition-colors"
+                  onClick={handleExportCourses}
+                  className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs transition-colors cursor-pointer"
                   title="Exportar Cursos a Excel (.xlsx)"
                 >
                   <Download className="w-4 h-4" />
@@ -281,13 +320,13 @@ export default function CoursesPage() {
                     >
                       <Upload className="w-4 h-4" /> {importing ? "Importando Cursos..." : "Importar Cursos"}
                     </button>
-                    <a
-                      href={`/api/admin/templates/courses.xlsx?token=${typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : ""}`}
-                      download="Formato_Cursos.xlsx"
-                      className="block text-center text-xs text-blue-600 hover:underline pt-1 font-medium"
+                    <button
+                      type="button"
+                      onClick={handleDownloadTemplate}
+                      className="block w-full text-center text-xs text-blue-600 hover:underline pt-1 font-medium cursor-pointer"
                     >
                       Descargar Plantilla Oficial (.xlsx)
-                    </a>
+                    </button>
                   </form>
                 </div>
               </div>

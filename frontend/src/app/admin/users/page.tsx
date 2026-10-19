@@ -80,6 +80,56 @@ export default function UsersPage() {
   const [formName, setFormName] = useState("");
   const [formRole, setFormRole] = useState("STUDENT");
   const [formCourseId, setFormCourseId] = useState("");
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
+  const [exportingUsers, setExportingUsers] = useState(false);
+
+  const handleDownloadTemplate = async () => {
+    try {
+      setDownloadingTemplate(true);
+      const token = getToken();
+      const res = await fetch("/api/admin/templates/users.xlsx", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Error al descargar la plantilla de usuarios");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Formato_Usuarios.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  };
+
+  const handleExportUsers = async () => {
+    try {
+      setExportingUsers(true);
+      const token = getToken();
+      const res = await fetch("/api/admin/users/export.xlsx", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Error al exportar la lista de usuarios");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Usuarios_CCG.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setExportingUsers(false);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -274,22 +324,21 @@ export default function UsersPage() {
                   </button>
                 </form>
 
-                <a 
-                  href={`/api/admin/templates/users.xlsx?token=${typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : ""}`}
-                  download="Formato_Usuarios.xlsx"
-                  className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg transition-colors shadow-xs inline-flex items-center"
+                <button 
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  disabled={downloadingTemplate}
+                  className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg transition-colors shadow-xs inline-flex items-center disabled:opacity-50 cursor-pointer"
                   title="Descargar plantilla Excel vacía (.xlsx)"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                </a>
+                </button>
 
                 <button 
                   type="button"
-                  onClick={() => {
-                    const token = typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : "";
-                    window.location.href = `/api/admin/users/export.xlsx?token=${token}`;
-                  }}
-                  className="p-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg shadow-xs transition-colors"
+                  onClick={handleExportUsers}
+                  disabled={exportingUsers}
+                  className="p-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
                   title="Exportar usuarios a Excel (.xlsx)"
                 >
                   <Download className="w-4 h-4" />

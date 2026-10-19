@@ -238,6 +238,27 @@ export default function AssignmentsDashboard() {
 
   // Import Modal state
   const [showImportModal, setShowImportModal] = useState(false);
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const token = getToken();
+      const res = await fetch("/api/admin/templates/assignments.xlsx", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Error al descargar plantilla");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Formato_Asignaciones.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+  };
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
 
@@ -1097,14 +1118,14 @@ export default function AssignmentsDashboard() {
                 </button>
 
                 {/* BOTÓN: DESCARGAR PLANTILLA (.XLSX) (ICONO CON TOOLTIP) */}
-                <a
-                  href={`/api/admin/templates/assignments.xlsx?token=${typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : ""}`}
-                  download="Formato_Asignaciones.xlsx"
-                  className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg transition-colors inline-flex items-center"
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg transition-colors inline-flex items-center cursor-pointer"
                   title="Descargar plantilla Excel vacía (.xlsx)"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                </a>
+                </button>
 
                 {/* BOTÓN: EXPORTAR (.XLSX) (ICONO CON TOOLTIP) */}
                 <button
@@ -3143,13 +3164,13 @@ export default function AssignmentsDashboard() {
 
                   <div className="pt-1 flex items-center justify-between text-xs">
                     <span className="text-gray-500">¿No tienes el formato?</span>
-                    <a
-                      href={`/api/admin/templates/assignments.xlsx?token=${typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : ""}`}
-                      download="Formato_Asignaciones.xlsx"
-                      className="text-blue-600 hover:underline font-semibold flex items-center gap-1"
+                    <button
+                      type="button"
+                      onClick={handleDownloadTemplate}
+                      className="text-blue-600 hover:underline font-semibold flex items-center gap-1 cursor-pointer"
                     >
                       <Download className="w-3.5 h-3.5" /> Descargar Formato Vacío (.xlsx)
-                    </a>
+                    </button>
                   </div>
 
                   <div className="flex gap-3 pt-3">

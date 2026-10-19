@@ -6,6 +6,7 @@ import { BookOpen, AlertCircle, Info, Users, Search, KeyRound, CheckCircle2 } fr
 import { apiFetch, ApiError } from "@/lib/api";
 import { homeForRole, saveSession, type SessionUser } from "@/lib/session";
 import StudentSearchModal from "@/components/StudentSearchModal";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 function formatRutInput(val: string): string {
   const trimmed = val.trim();
@@ -63,7 +64,7 @@ export default function LoginPage() {
     }
   };
 
-  const isTestEnv = typeof window !== "undefined" && window.location.port === "3600";
+  const isTestEnv = useIsPruebas();
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">

@@ -16,6 +16,27 @@ export default function StudentsTab({ id }: { id: number }) {
   const [showModeConfirmModal, setShowModeConfirmModal] = useState(false);
   const [isUpdatingMode, setIsUpdatingMode] = useState(false);
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const token = getToken();
+      const res = await fetch(`/api/teacher/assignments/${id}/template-answers.xlsx`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Error al descargar planilla del curso");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Plantilla_Alumnos_Ensayo_${id}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+  };
+
   const refreshData = async () => {
     try {
       const refreshed = await apiFetch(`/teacher/assignments/${id}/live`);
@@ -247,14 +268,14 @@ export default function StudentsTab({ id }: { id: number }) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <a
-              href={`/api/teacher/assignments/${id}/template-answers.xlsx?token=${typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : ""}`}
-              download={`Plantilla_Alumnos_Ensayo_${id}.xlsx`}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold transition"
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer"
               title="Descargar planilla Excel con la lista de alumnos precargada"
             >
               <Download className="w-3.5 h-3.5 text-emerald-400" /> Descargar Planilla Curso (.xlsx)
-            </a>
+            </button>
 
             <form onSubmit={handleImportAnswers} className="flex items-center gap-1.5 bg-slate-800 p-1 border border-slate-700 rounded-lg">
               <input 

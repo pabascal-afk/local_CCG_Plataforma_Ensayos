@@ -31,7 +31,11 @@ app.use('/api', (req, res) => {
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('[API Error no controlado]:', err);
-  const status = typeof err.status === 'number' ? err.status : 500;
+  let status = 500;
+  if (typeof err.status === 'number') status = err.status;
+  else if (typeof err.statusCode === 'number') status = err.statusCode;
+  else if (err.name === 'MulterError') status = 400;
+
   res.status(status).json({
     error: err.message || 'Error interno del servidor',
   });

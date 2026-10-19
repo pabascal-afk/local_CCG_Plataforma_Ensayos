@@ -7,6 +7,7 @@ import {
   Bot, HelpCircle, CheckCircle2, SlidersHorizontal, 
   FileText, Lightbulb, ChevronRight, BookOpen, Layers
 } from "lucide-react";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export type AiPromptMode = "EXAM_XLSX" | "REMEDIAL" | "UTP_REPORT" | "CLASS_WORKSHOP";
 
@@ -34,7 +35,7 @@ export default function AiPromptModal({
   isPruebasMode
 }: AiPromptModalProps) {
   // Detección inteligente de entorno (Puerto 3600 = PRUEBAS CCG, Puerto 3300 = SIMCE)
-  const isPruebas = isPruebasMode ?? (typeof window !== "undefined" && (window.location.port === "3600" || window.location.hostname.includes("pruebas")));
+  const isPruebas = useIsPruebas(isPruebasMode);
 
   const [activeTab, setActiveTab] = useState<AiPromptMode>(defaultMode);
 
@@ -61,6 +62,27 @@ export default function AiPromptModal({
 
   // Estado de copiado
   const [copied, setCopied] = useState(false);
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : "";
+      const res = await fetch("/api/admin/templates/exam_questions.xlsx", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Error al descargar plantilla");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Formato_Pauta_Ensayo.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+  };
 
   // Sincronizar si cambian props externas al abrir
   useEffect(() => {
@@ -810,13 +832,13 @@ Entrega todo el material listo para imprimir o proyectar en clase.`;
               
               <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
                 <span className="text-[10px] text-gray-400 font-semibold">Plantilla oficial vacía:</span>
-                <a
-                  href={`/api/admin/templates/exam_questions.xlsx?token=${typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : ""}`}
-                  download="Formato_Pauta_Ensayo.xlsx"
-                  className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 hover:underline"
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 hover:underline cursor-pointer"
                 >
                   <Download className="w-3 h-3 text-emerald-600" /> Descargar .xlsx
-                </a>
+                </button>
               </div>
             </div>
           </div>
