@@ -227,7 +227,7 @@ export default function ExamsPage() {
     if (t === "REMEDIAL") return <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">REMEDIAL</span>;
     if (t === "DIAGNOSTICO") return <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">DIAGNÓSTICO</span>;
     if (t === "ENSAYO_LARGO") return <span className="bg-rose-100 text-rose-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">EXTENDIDO</span>;
-    return <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">ENSAYO</span>;
+    return <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">{isPruebas ? "PRUEBA" : "ENSAYO"}</span>;
   };
 
   const formatLevelName = (lvl: string) => {
@@ -368,11 +368,11 @@ export default function ExamsPage() {
                     className="w-full text-xs bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-2 font-semibold text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="TODOS">Todos los tipos</option>
-                    <option value="ENSAYO">Ensayo SIMCE</option>
+                    <option value="ENSAYO">{isPruebas ? "Prueba / Evaluación Sumativa" : "Ensayo SIMCE"}</option>
                     <option value="QUIZ">Quiz / Evaluación Rápida</option>
                     <option value="REMEDIAL">Remedial</option>
                     <option value="DIAGNOSTICO">Diagnóstico</option>
-                    <option value="ENSAYO_LARGO">Ensayo Largo</option>
+                    <option value="ENSAYO_LARGO">{isPruebas ? "Evaluación Extendida / Semestral" : "Ensayo Largo"}</option>
                   </select>
                 </div>
 
@@ -425,11 +425,11 @@ export default function ExamsPage() {
 
               </div>
 
-              {/* Fila 2: Segmentación por Ensayos (Rango o Números puntuales) */}
+              {/* Fila 2: Segmentación por Ensayos/Pruebas (Rango o Números puntuales) */}
               <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mr-1">
-                    Ensayos:
+                    {isPruebas ? "Pruebas:" : "Ensayos:"}
                   </span>
                   
                   {/* Presets de rango */}
@@ -443,12 +443,12 @@ export default function ExamsPage() {
                           : "bg-gray-100 hover:bg-gray-200 text-gray-700"
                       }`}
                     >
-                      {p === "TODOS" ? "Todos" : `Ensayos ${p}`}
+                      {p === "TODOS" ? "Todos" : `${isPruebas ? "Pruebas" : "Ensayos"} ${p}`}
                     </button>
                   ))}
                 </div>
 
-                {/* Chips de Ensayos puntuales (ej: 1, 3, 7) */}
+                {/* Chips puntuales (ej: 1, 3, 7) */}
                 {availableOrderNumbers.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1 text-xs">
                     <span className="text-[10px] font-semibold text-gray-400 mr-1">Puntuales:</span>
@@ -463,7 +463,7 @@ export default function ExamsPage() {
                               ? "bg-indigo-600 text-white shadow-sm" 
                               : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                           }`}
-                          title={`Filtrar solo Ensayo #${num}`}
+                          title={`Filtrar solo ${isPruebas ? "Prueba" : "Ensayo"} #${num}`}
                         >
                           {num}
                         </button>

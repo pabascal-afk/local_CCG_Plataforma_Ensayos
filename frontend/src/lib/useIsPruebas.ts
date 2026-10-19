@@ -25,6 +25,9 @@ export function useIsPruebas(override?: boolean): boolean {
         window.location.hostname.toLowerCase().includes("pruebas") ||
         window.location.pathname.toLowerCase().includes("/pruebas"));
     setIsPruebas(detected);
+    if (detected && typeof document !== "undefined") {
+      document.title = "PRUEBAS CCG — Colegio Cerro Grande";
+    }
   }, [override]);
 
   return isPruebas;

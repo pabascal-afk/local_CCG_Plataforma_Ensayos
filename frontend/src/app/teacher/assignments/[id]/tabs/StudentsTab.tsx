@@ -5,8 +5,10 @@ import Link from "next/link";
 import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check } from "lucide-react";
 import OmrScannerModal from "@/components/OmrScannerModal";
 import FastDigitizerModal from "@/components/FastDigitizerModal";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function StudentsTab({ id }: { id: number }) {
+  const isPruebas = useIsPruebas();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
   const [answerFile, setAnswerFile] = useState<File | null>(null);
@@ -216,7 +218,7 @@ export default function StudentsTab({ id }: { id: number }) {
               </button>
 
               <span className="text-xs text-indigo-300 font-medium flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Corrección instantánea con TRI SIMCE
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" /> {isPruebas ? "Corrección instantánea automatizada" : "Corrección instantánea con TRI SIMCE"}
               </span>
             </div>
             <h4 className="text-base font-bold text-white flex items-center gap-2">
@@ -304,7 +306,7 @@ export default function StudentsTab({ id }: { id: number }) {
               <th className="p-4">RUT</th>
               <th className="p-4">Nombre</th>
               <th className="p-4 text-center">Nota</th>
-              <th className="p-4 text-center">Puntaje SIMCE</th>
+              <th className="p-4 text-center">{isPruebas ? "Puntaje" : "Puntaje SIMCE"}</th>
               <th className="p-4">Nivel de Logro</th>
               <th className="p-4">Entrega</th>
               <th className="p-4"></th>

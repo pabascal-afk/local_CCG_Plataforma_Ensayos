@@ -7,9 +7,11 @@ import { apiFetch, ApiError } from "@/lib/api";
 import Link from "next/link";
 import { ArrowLeft, Award, TrendingUp, CheckCircle, Target, BarChart2 } from "lucide-react";
 import { useParams } from "next/navigation";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function ResultsPage() {
   const { submissionId } = useParams();
+  const isPruebas = useIsPruebas();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -30,7 +32,7 @@ export default function ResultsPage() {
           <div className="p-8 max-w-4xl mx-auto">
             <div className="mb-6">
               <Link href="/student" className="text-blue-600 hover:underline flex items-center gap-1 inline-flex">
-                <ArrowLeft className="w-4 h-4" /> Volver a mis ensayos
+                <ArrowLeft className="w-4 h-4" /> {isPruebas ? "Volver a mis pruebas" : "Volver a mis ensayos"}
               </Link>
             </div>
 
@@ -49,10 +51,12 @@ export default function ResultsPage() {
                         <span className="text-xs font-semibold uppercase tracking-wider text-blue-200">Resultado Oficial Estandarizado</span>
                         <div className="flex items-baseline gap-2 mt-1">
                           <span className="text-4xl font-extrabold">{data.simceScore}</span>
-                          <span className="text-lg font-medium text-blue-200">puntos SIMCE</span>
+                          <span className="text-lg font-medium text-blue-200">{isPruebas ? "puntos" : "puntos SIMCE"}</span>
                         </div>
                         <p className="text-xs text-blue-100 mt-1">
-                          Escala oficial nacional (100 a 400 puntos) basada en Teoría de Respuesta al Ítem (TRI).
+                          {isPruebas
+                            ? "Puntaje estandarizado basado en Teoría de Respuesta al Ítem (TRI)."
+                            : "Escala oficial nacional (100 a 400 puntos) basada en Teoría de Respuesta al Ítem (TRI)."}
                         </p>
                       </div>
                       <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl px-5 py-3 text-center">
@@ -151,7 +155,7 @@ export default function ResultsPage() {
                 </div>
 
                 <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
-                  <strong>Nota sobre la pauta:</strong> Para evitar filtraciones mientras otros cursos rinden el mismo ensayo, no se muestra el detalle pregunta a pregunta ni la pauta correcta. Si tienes dudas, consulta con tu profesor.
+                  <strong>Nota sobre la pauta:</strong> Para evitar filtraciones mientras otros cursos rinden {isPruebas ? "la misma evaluación" : "el mismo ensayo"}, no se muestra el detalle pregunta a pregunta ni la pauta correcta. Si tienes dudas, consulta con tu profesor.
                 </div>
               </div>
             ) : null}

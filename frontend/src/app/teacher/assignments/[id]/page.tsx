@@ -25,6 +25,7 @@ import { apiFetch } from "@/lib/api";
 import { copyToClipboard as safeCopyToClipboard } from "@/lib/clipboard";
 import { useParams } from "next/navigation";
 import AiPromptModal from "@/components/AiPromptModal";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 // Sub-components for tabs
 import LiveTab from "./tabs/LiveTab";
@@ -37,6 +38,7 @@ import EvolutionTab from "./tabs/EvolutionTab";
 
 export default function TeacherAssignmentPage() {
   const { id } = useParams();
+  const isPruebas = useIsPruebas();
   const [activeTab, setActiveTab] = useState("live");
   const [assignment, setAssignment] = useState<any>(null);
   const [error, setError] = useState("");
@@ -107,7 +109,7 @@ export default function TeacherAssignmentPage() {
     const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
     const num = Math.floor(100 + Math.random() * 900);
     const letter = letters[Math.floor(Math.random() * letters.length)];
-    const generated = `SIMCE-${num}${letter}`;
+    const generated = `${isPruebas ? "PRUEBA" : "SIMCE"}-${num}${letter}`;
     setDynamicPassword(generated);
     handleSaveDynamicPassword(true, generated);
   };
@@ -211,7 +213,7 @@ export default function TeacherAssignmentPage() {
                   <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-amber-300 shadow-inner">
                     <input
                       type="text"
-                      placeholder="Ej: SIMCE2026"
+                      placeholder={isPruebas ? "Ej: PRUEBA2026" : "Ej: SIMCE2026"}
                       value={dynamicPassword}
                       onChange={(e) => setDynamicPassword(e.target.value.toUpperCase())}
                       className="text-sm font-mono font-bold text-gray-800 tracking-wider uppercase w-32 focus:outline-none"
@@ -268,7 +270,7 @@ export default function TeacherAssignmentPage() {
                     <KeyRound className="w-8 h-8" />
                   </div>
                   <h2 className="text-2xl font-extrabold text-gray-800 uppercase tracking-wide">
-                    Acceso al Ensayo SIMCE
+                    {isPruebas ? "Acceso a la Evaluación" : "Acceso al Ensayo SIMCE"}
                   </h2>
                   <p className="text-gray-600 mt-2 text-base">
                     Si olvidaste tu contraseña personal, ingresa con tu RUT y la siguiente clave:
@@ -284,7 +286,9 @@ export default function TeacherAssignmentPage() {
                   </div>
 
                   <p className="text-xs text-gray-500 mb-6">
-                    Esta clave es válida únicamente durante la rendición de este ensayo.
+                    {isPruebas
+                      ? "Esta clave es válida únicamente durante la rendición de esta evaluación."
+                      : "Esta clave es válida únicamente durante la rendición de este ensayo."}
                   </p>
 
                   <button

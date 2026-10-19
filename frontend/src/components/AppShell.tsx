@@ -20,27 +20,29 @@ import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type NavItem = { href: string; label: string; icon: React.ElementType };
 
-const NAV: Record<Role, NavItem[]> = {
-  STUDENT: [{ href: "/student", label: "Mis ensayos", icon: ClipboardList }],
-  TEACHER: [
-    { href: "/teacher", label: "Mis cursos", icon: BarChart3 },
-    { href: "/admin/calendar", label: "Calendario SIMCE", icon: Calendar }
-  ],
-  ADMIN: [
-    { href: "/admin/dashboard", label: "Dashboard Global", icon: LayoutDashboard },
-    { href: "/admin/calendar", label: "Calendario SIMCE", icon: Calendar },
-    { href: "/admin/courses", label: "Cursos", icon: School },
-    { href: "/admin/users", label: "Usuarios", icon: Users },
-    { href: "/admin/exams", label: "Ensayos", icon: FileText },
-    { href: "/admin/assignments", label: "Asignaciones", icon: ClipboardList },
-    { href: "/teacher", label: "Reportes / En vivo", icon: BarChart3 },
-  ],
-  DIRECTOR: [
-    { href: "/admin/dashboard", label: "Dashboard Global", icon: LayoutDashboard },
-    { href: "/admin/calendar", label: "Calendario SIMCE", icon: Calendar },
-    { href: "/teacher", label: "Reportes Generales", icon: BarChart3 }
-  ],
-};
+function getNav(isPruebas: boolean): Record<Role, NavItem[]> {
+  return {
+    STUDENT: [{ href: "/student", label: isPruebas ? "Mis Pruebas" : "Mis ensayos", icon: ClipboardList }],
+    TEACHER: [
+      { href: "/teacher", label: "Mis cursos", icon: BarChart3 },
+      { href: "/admin/calendar", label: isPruebas ? "Calendario Pruebas" : "Calendario SIMCE", icon: Calendar }
+    ],
+    ADMIN: [
+      { href: "/admin/dashboard", label: "Dashboard Global", icon: LayoutDashboard },
+      { href: "/admin/calendar", label: isPruebas ? "Calendario Pruebas" : "Calendario SIMCE", icon: Calendar },
+      { href: "/admin/courses", label: "Cursos", icon: School },
+      { href: "/admin/users", label: "Usuarios", icon: Users },
+      { href: "/admin/exams", label: isPruebas ? "Pruebas" : "Ensayos", icon: FileText },
+      { href: "/admin/assignments", label: "Asignaciones", icon: ClipboardList },
+      { href: "/teacher", label: "Reportes / En vivo", icon: BarChart3 },
+    ],
+    DIRECTOR: [
+      { href: "/admin/dashboard", label: "Dashboard Global", icon: LayoutDashboard },
+      { href: "/admin/calendar", label: isPruebas ? "Calendario Pruebas" : "Calendario SIMCE", icon: Calendar },
+      { href: "/teacher", label: "Reportes Generales", icon: BarChart3 }
+    ],
+  };
+}
 
 export default function AppShell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
   const pathname = usePathname();
@@ -52,21 +54,17 @@ export default function AppShell({ user, children }: { user: SessionUser; childr
     router.replace("/login");
   };
 
-  const isTestEnv = useIsPruebas();
+  const isPruebas = useIsPruebas();
+  const navItems = getNav(isPruebas);
 
   return (
     <div className="min-h-screen flex bg-gray-50">
       <aside className="w-64 bg-white border-r flex flex-col">
         <div className="h-16 flex items-center px-5 border-b">
           <img src="/CCG-logo-300x300.png" alt="CCG" className="w-8 h-8 object-contain mr-2" />
-          <span className={`font-extrabold text-lg tracking-tight ${isTestEnv ? "text-amber-600" : "text-gray-800"}`}>
-            {isTestEnv ? "PRUEBAS CCG" : "ENSAYOS CCG"}
+          <span className={`font-extrabold text-lg tracking-tight ${isPruebas ? "text-purple-700" : "text-gray-800"}`}>
+            {isPruebas ? "PRUEBAS CCG" : "ENSAYOS CCG"}
           </span>
-          {isTestEnv && (
-            <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 rounded border border-amber-300">
-              TEST :3600
-            </span>
-          )}
         </div>
 
         {user.role !== "STUDENT" && (
@@ -90,7 +88,7 @@ export default function AppShell({ user, children }: { user: SessionUser; childr
         )}
 
         <nav className="flex-1 p-3 space-y-1">
-          {NAV[user.role].map((item) => {
+          {navItems[user.role].map((item) => {
             const active = item.href === pathname || (item.href !== "/admin" && pathname.startsWith(item.href + "/"));
             const Icon = item.icon;
             return (

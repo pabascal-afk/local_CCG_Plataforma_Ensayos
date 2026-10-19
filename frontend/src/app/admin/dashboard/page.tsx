@@ -26,10 +26,12 @@ import {
   ChevronUp
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 import AiPromptModal from "@/components/AiPromptModal";
 
 export default function AdminDashboardPage() {
   const { selectedYear } = useSchoolYear();
+  const isPruebas = useIsPruebas();
   const [data, setData] = useState<any>(null);
   const [multiannualData, setMultiannualData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -408,7 +410,7 @@ export default function AdminDashboardPage() {
                           onChange={(e) => setSelectedExamType(e.target.value)}
                           className="w-full border rounded-lg px-3 py-2 text-xs bg-white font-medium focus:outline-blue-500"
                         >
-                          <option value="ENSAYO">Ensayos Oficiales SIMCE (Predeterminado)</option>
+                          <option value="ENSAYO">{isPruebas ? "Pruebas / Evaluaciones Sumativas (Predeterminado)" : "Ensayos Oficiales SIMCE (Predeterminado)"}</option>
                           <option value="TODOS">Todos los tipos (Mixto)</option>
                           <option value="QUIZ">Quizzes / Pruebas Cortas</option>
                           <option value="REMEDIAL">Evaluaciones Remediales (Formativo)</option>
@@ -432,10 +434,10 @@ export default function AdminDashboardPage() {
                       </div>
                     </div>
 
-                    {/* Selector Rápido y Personalizado de Ensayos */}
+                    {/* Selector Rápido y Personalizado de Ensayos/Pruebas */}
                     <div className="pt-2 border-t border-gray-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-gray-700">Ensayos a Graficar:</span>
+                        <span className="text-xs font-semibold text-gray-700">{isPruebas ? "Pruebas a Graficar:" : "Ensayos a Graficar:"}</span>
                         <div className="flex flex-wrap items-center gap-1.5">
                           <button
                             type="button"
@@ -577,7 +579,7 @@ export default function AdminDashboardPage() {
                         Trayectoria Histórica del Nivel {selectedLevel} ({selectedYear})
                       </h3>
                       <p className="text-xs text-gray-500 mt-0.5">
-                        Promedio SIMCE y desglose por cursos paralelos en cada evaluación.
+                        {isPruebas ? "Puntaje promedio y desglose por cursos paralelos en cada evaluación." : "Promedio SIMCE y desglose por cursos paralelos en cada evaluación."}
                       </p>
                     </div>
                     {selectedCourseFilter !== "TODOS" && (
@@ -599,7 +601,7 @@ export default function AdminDashboardPage() {
                             <th className="px-5 py-3.5">Evaluación</th>
                             <th className="px-4 py-3.5">Tipo</th>
                             <th className="px-4 py-3.5">Fecha</th>
-                            <th className="px-4 py-3.5 text-center">Prom. SIMCE Nivel</th>
+                            <th className="px-4 py-3.5 text-center">{isPruebas ? "Puntaje Nivel" : "Prom. SIMCE Nivel"}</th>
                             {courses.map(c => (
                               <th key={c} className="px-4 py-3.5 text-center">{c}</th>
                             ))}
@@ -620,7 +622,7 @@ export default function AdminDashboardPage() {
                                   item.examType === 'REMEDIAL' ? 'bg-amber-100 text-amber-800' :
                                   'bg-blue-100 text-blue-800'
                                 }`}>
-                                  {item.examType || 'ENSAYO'}
+                                  {(!item.examType || item.examType === 'ENSAYO') ? (isPruebas ? 'PRUEBA' : 'ENSAYO') : item.examType}
                                 </span>
                               </td>
                               <td className="px-4 py-3.5 text-gray-500 font-mono">
@@ -671,10 +673,26 @@ export default function AdminDashboardPage() {
                         onChange={(e) => setMultiLevel(e.target.value)}
                         className="border rounded-lg px-3 py-2 text-xs bg-gray-50 font-bold text-gray-800 focus:outline-indigo-500"
                       >
+                        {isPruebas && (
+                          <>
+                            <option value="1B">1° Básico</option>
+                            <option value="2B">2° Básico</option>
+                            <option value="3B">3° Básico</option>
+                          </>
+                        )}
                         <option value="4B">4° Básico</option>
+                        {isPruebas && <option value="5B">5° Básico</option>}
                         <option value="6B">6° Básico</option>
+                        {isPruebas && <option value="7B">7° Básico</option>}
                         <option value="8B">8° Básico</option>
+                        {isPruebas && <option value="1M">1° Medio</option>}
                         <option value="2M">2° Medio</option>
+                        {isPruebas && (
+                          <>
+                            <option value="3M">3° Medio</option>
+                            <option value="4M">4° Medio</option>
+                          </>
+                        )}
                         <option value="TODOS">Todos los niveles</option>
                       </select>
                     </div>
@@ -701,7 +719,7 @@ export default function AdminDashboardPage() {
                         onChange={(e) => setMultiExamType(e.target.value)}
                         className="border rounded-lg px-3 py-2 text-xs bg-gray-50 font-medium focus:outline-indigo-500"
                       >
-                        <option value="ENSAYO">Ensayos Oficiales SIMCE (Predeterminado)</option>
+                        <option value="ENSAYO">{isPruebas ? "Pruebas / Evaluaciones Sumativas (Predeterminado)" : "Ensayos Oficiales SIMCE (Predeterminado)"}</option>
                         <option value="TODOS">Todos los tipos</option>
                         <option value="QUIZ">Quizzes</option>
                         <option value="REMEDIAL">Remediales</option>
@@ -718,7 +736,7 @@ export default function AdminDashboardPage() {
                       <div>
                         <div className="text-[11px] text-indigo-700 font-semibold uppercase tracking-wider">Crecimiento Histórico</div>
                         <div className="text-base font-black text-indigo-950">
-                          {multiannualData.deltaSimce >= 0 ? `+${multiannualData.deltaSimce}` : multiannualData.deltaSimce} ptos SIMCE
+                          {multiannualData.deltaSimce >= 0 ? `+${multiannualData.deltaSimce}` : multiannualData.deltaSimce} {isPruebas ? "ptos" : "ptos SIMCE"}
                           <span className="text-xs font-normal text-indigo-600 ml-1">
                             ({multiannualData.yearsCount} años evaluados)
                           </span>
@@ -746,7 +764,7 @@ export default function AdminDashboardPage() {
                           Trayectoria Interanual {multiLevel !== "TODOS" ? formatLevelName(multiLevel) : "Institucional"}
                         </h3>
                         <p className="text-xs text-gray-500 mt-0.5">
-                          Evolución del puntaje SIMCE promedio cohorte a cohorte a lo largo de los años escolares.
+                          {isPruebas ? "Evolución del puntaje promedio cohorte a cohorte a lo largo de los años escolares." : "Evolución del puntaje SIMCE promedio cohorte a cohorte a lo largo de los años escolares."}
                         </p>
                       </div>
                     </div>
@@ -770,7 +788,7 @@ export default function AdminDashboardPage() {
                             </div>
 
                             <div className="space-y-1 text-center py-2">
-                              <span className="text-xs text-slate-500 font-semibold block uppercase tracking-wider">Promedio SIMCE</span>
+                              <span className="text-xs text-slate-500 font-semibold block uppercase tracking-wider">{isPruebas ? "Puntaje Promedio" : "Promedio SIMCE"}</span>
                               <span className="text-3xl font-black text-indigo-700 tracking-tight">
                                 {y.avgSimce} ptos
                               </span>
@@ -827,7 +845,7 @@ export default function AdminDashboardPage() {
                             <th className="px-5 py-3.5">Año Escolar</th>
                             <th className="px-4 py-3.5 text-center">Evaluados</th>
                             <th className="px-4 py-3.5 text-center">Entregas</th>
-                            <th className="px-4 py-3.5 text-center">Promedio SIMCE</th>
+                            <th className="px-4 py-3.5 text-center">{isPruebas ? "Puntaje Promedio" : "Promedio SIMCE"}</th>
                             <th className="px-4 py-3.5 text-center">Nota Promedio</th>
                             <th className="px-4 py-3.5 text-center">% Logro</th>
                             <th className="px-4 py-3.5 text-center">Distribución de Niveles</th>

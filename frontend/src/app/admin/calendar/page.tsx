@@ -5,6 +5,7 @@ import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
 import { useSchoolYear } from "@/context/SchoolYearContext";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 import { 
   Calendar as CalendarIcon, 
   ChevronLeft, 
@@ -64,6 +65,7 @@ const WEEKDAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
 export default function AdminCalendarPage() {
   const { selectedYear } = useSchoolYear();
+  const isPruebas = useIsPruebas();
 
   // Fecha visible en el calendario (año y mes)
   const [currentDate, setCurrentDate] = useState(() => {
@@ -363,7 +365,7 @@ export default function AdminCalendarPage() {
               <div>
                 <h1 className="text-2xl font-black text-gray-900 flex items-center gap-2">
                   <CalendarIcon className="w-7 h-7 text-blue-600" />
-                  Calendario de Ensayos e Hitos SIMCE
+                  {isPruebas ? "Calendario de Pruebas e Hitos Académicos" : "Calendario de Ensayos e Hitos SIMCE"}
                 </h1>
                 <p className="text-xs text-gray-500 mt-1">
                   Planificación oficial, fechas de evaluaciones por curso y seguimiento de estados en tiempo real.
@@ -379,13 +381,13 @@ export default function AdminCalendarPage() {
                     }}
                     className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg text-xs font-bold shadow-sm transition-colors"
                   >
-                    <Flag className="w-3.5 h-3.5" /> Programar Hito SIMCE Oficial
+                    <Flag className="w-3.5 h-3.5" /> {isPruebas ? "Programar Hito Académico" : "Programar Hito SIMCE Oficial"}
                   </button>
                 )}
               </div>
             </div>
 
-            {/* Banners de Cuenta Regresiva de Hitos Oficiales SIMCE */}
+            {/* Banners de Cuenta Regresiva de Hitos Oficiales */}
             {upcomingMilestones.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {upcomingMilestones.slice(0, 3).map((m) => {
@@ -466,10 +468,26 @@ export default function AdminCalendarPage() {
                     className="text-xs border rounded-lg px-2.5 py-1.5 bg-gray-50 text-gray-700 font-medium focus:outline-blue-500"
                   >
                     <option value="TODOS">Todos los niveles</option>
+                    {isPruebas && (
+                      <>
+                        <option value="1B">1° Básico</option>
+                        <option value="2B">2° Básico</option>
+                        <option value="3B">3° Básico</option>
+                      </>
+                    )}
                     <option value="4B">4° Básico</option>
+                    {isPruebas && <option value="5B">5° Básico</option>}
                     <option value="6B">6° Básico</option>
+                    {isPruebas && <option value="7B">7° Básico</option>}
                     <option value="8B">8° Básico</option>
+                    {isPruebas && <option value="1M">1° Medio</option>}
                     <option value="2M">2° Medio</option>
+                    {isPruebas && (
+                      <>
+                        <option value="3M">3° Medio</option>
+                        <option value="4M">4° Medio</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
@@ -486,7 +504,7 @@ export default function AdminCalendarPage() {
                     <option value="COMPLETED">Rendida</option>
                     <option value="RESCHEDULED">Reagendada</option>
                     <option value="CANCELLED">Cancelada</option>
-                    <option value="MILESTONE">Hitos Oficiales</option>
+                    <option value="MILESTONE">{isPruebas ? "Hitos Académicos" : "Hitos Oficiales"}</option>
                   </select>
                 </div>
               </div>
@@ -581,7 +599,7 @@ export default function AdminCalendarPage() {
                   <span className="w-3 h-3 rounded-full bg-rose-500"></span> Cancelada
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-indigo-600"></span> Hito SIMCE Oficial
+                  <span className="w-3 h-3 rounded-full bg-indigo-600"></span> {isPruebas ? "Hito Académico" : "Hito SIMCE Oficial"}
                 </span>
               </div>
             </div>
@@ -611,7 +629,7 @@ export default function AdminCalendarPage() {
                 <div className="p-5 max-h-[420px] overflow-y-auto space-y-3">
                   {selectedDayEvents.events.length === 0 ? (
                     <div className="text-center py-8 text-gray-500 text-sm">
-                      No hay ensayos ni hitos agendados para este día.
+                      {isPruebas ? "No hay pruebas ni hitos agendados para este día." : "No hay ensayos ni hitos agendados para este día."}
                     </div>
                   ) : (
                     selectedDayEvents.events.map((ev, idx) => {
@@ -630,7 +648,7 @@ export default function AdminCalendarPage() {
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase border ${badge.bg}`}>
-                                  {isMilestone ? "Hito SIMCE Oficial" : badge.label}
+                                  {isMilestone ? (isPruebas ? "Hito Académico" : "Hito SIMCE Oficial") : badge.label}
                                 </span>
                                 <span className="text-xs text-gray-500 font-mono">
                                   {ev.time}
@@ -713,13 +731,13 @@ export default function AdminCalendarPage() {
             </div>
           )}
 
-          {/* Modal Crear Hito SIMCE Oficial */}
+          {/* Modal Crear Hito Oficial */}
           {showMilestoneModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border">
                 <div className="p-4 bg-indigo-900 text-white flex items-center justify-between">
                   <h3 className="font-bold text-base flex items-center gap-2">
-                    <Flag className="w-4 h-4 text-indigo-400" /> Programar Hito Oficial SIMCE
+                    <Flag className="w-4 h-4 text-indigo-400" /> {isPruebas ? "Programar Hito Académico" : "Programar Hito Oficial SIMCE"}
                   </h3>
                   <button onClick={() => setShowMilestoneModal(false)} className="text-slate-400 hover:text-white">
                     <X className="w-5 h-5" />
@@ -731,7 +749,7 @@ export default function AdminCalendarPage() {
                     <input
                       required
                       type="text"
-                      placeholder="Ej: SIMCE Nacional 4° Básico Matemática"
+                      placeholder={isPruebas ? "Ej: Cierre de Evaluaciones Semestre 1" : "Ej: SIMCE Nacional 4° Básico Matemática"}
                       value={milestoneTitle}
                       onChange={(e) => setMilestoneTitle(e.target.value)}
                       className="w-full border rounded-lg p-2.5 text-sm focus:outline-indigo-500"
@@ -756,10 +774,26 @@ export default function AdminCalendarPage() {
                         onChange={(e) => setMilestoneLevel(e.target.value)}
                         className="w-full border rounded-lg p-2.5 text-sm focus:outline-indigo-500"
                       >
+                        {isPruebas && (
+                          <>
+                            <option value="1B">1° Básico</option>
+                            <option value="2B">2° Básico</option>
+                            <option value="3B">3° Básico</option>
+                          </>
+                        )}
                         <option value="4B">4° Básico</option>
+                        {isPruebas && <option value="5B">5° Básico</option>}
                         <option value="6B">6° Básico</option>
+                        {isPruebas && <option value="7B">7° Básico</option>}
                         <option value="8B">8° Básico</option>
+                        {isPruebas && <option value="1M">1° Medio</option>}
                         <option value="2M">2° Medio</option>
+                        {isPruebas && (
+                          <>
+                            <option value="3M">3° Medio</option>
+                            <option value="4M">4° Medio</option>
+                          </>
+                        )}
                       </select>
                     </div>
                   </div>
@@ -803,7 +837,7 @@ export default function AdminCalendarPage() {
                       type="submit"
                       className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm"
                     >
-                      Guardar Hito SIMCE
+                      {isPruebas ? "Guardar Hito" : "Guardar Hito SIMCE"}
                     </button>
                   </div>
                 </form>
@@ -817,7 +851,7 @@ export default function AdminCalendarPage() {
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border">
                 <div className="p-4 bg-amber-500 text-white flex items-center justify-between">
                   <h3 className="font-bold text-base flex items-center gap-2">
-                    <RotateCcw className="w-4 h-4" /> Reagendar Ensayo
+                    <RotateCcw className="w-4 h-4" /> {isPruebas ? "Reagendar Prueba" : "Reagendar Ensayo"}
                   </h3>
                   <button onClick={() => setShowRescheduleModal(false)} className="text-white hover:opacity-75">
                     <X className="w-5 h-5" />
@@ -888,7 +922,7 @@ export default function AdminCalendarPage() {
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border">
                 <div className="p-4 bg-rose-600 text-white flex items-center justify-between">
                   <h3 className="font-bold text-base flex items-center gap-2">
-                    <Ban className="w-4 h-4" /> Cancelar Ensayo Calendarizado
+                    <Ban className="w-4 h-4" /> {isPruebas ? "Cancelar Prueba Calendarizada" : "Cancelar Ensayo Calendarizado"}
                   </h3>
                   <button onClick={() => setShowCancelModal(false)} className="text-white hover:opacity-75">
                     <X className="w-5 h-5" />
@@ -923,7 +957,7 @@ export default function AdminCalendarPage() {
                       type="submit"
                       className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-sm"
                     >
-                      Cancelar Ensayo
+                      {isPruebas ? "Cancelar Prueba" : "Cancelar Ensayo"}
                     </button>
                   </div>
                 </form>

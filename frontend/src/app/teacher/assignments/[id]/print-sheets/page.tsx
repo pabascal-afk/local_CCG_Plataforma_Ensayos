@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import RequireRole from "@/components/RequireRole";
 import QRCode from "qrcode";
 import { Printer, ArrowLeft, Check, Users, FileText, CheckCircle2, AlertCircle } from "lucide-react";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type Question = {
   id: number;
@@ -47,6 +48,7 @@ type SheetData = {
 export default function PrintSheetsPage() {
   const { id } = useParams();
   const router = useRouter();
+  const isPruebas = useIsPruebas();
   const [data, setData] = useState<SheetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -336,7 +338,7 @@ export default function PrintSheetsPage() {
                         />
                         <div>
                           <div className="text-[9px] uppercase font-bold tracking-wider text-slate-700">
-                            Colegio Cerro Grande &bull; Plataforma SIMCE
+                            Colegio Cerro Grande &bull; {isPruebas ? "Plataforma de Evaluaciones" : "Plataforma SIMCE"}
                           </div>
                           <h2 className="text-sm font-extrabold uppercase text-black leading-tight">
                             HOJA DE RESPUESTAS OFICIAL
@@ -526,7 +528,7 @@ export default function PrintSheetsPage() {
 
                     {/* PIE DE HOJA: CONTROL DE FIRMA Y REGISTRO */}
                     <div className="mt-2 pt-1 border-t border-black flex items-center justify-between text-[8px] text-slate-600 font-mono">
-                      <span>Colegio Cerro Grande &bull; Sistema Oficial de Ensayos SIMCE</span>
+                      <span>Colegio Cerro Grande &bull; {isPruebas ? "Sistema Oficial de Evaluaciones" : "Sistema Oficial de Ensayos SIMCE"}</span>
                       <span>Hoja calibrada para corrección óptica OMR automatizada</span>
                       <span>Pág. 1 de 1</span>
                     </div>

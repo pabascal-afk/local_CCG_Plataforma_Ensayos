@@ -7,6 +7,7 @@ import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useSchoolYear } from "@/context/SchoolYearContext";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type Assignment = {
   id: number;
@@ -25,6 +26,7 @@ type Assignment = {
 
 function TeacherDashboard() {
   const { selectedYear } = useSchoolYear();
+  const isPruebas = useIsPruebas();
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [error, setError] = useState("");
 
@@ -39,7 +41,11 @@ function TeacherDashboard() {
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Portal del Profesor</h1>
-          <p className="text-gray-500">Monitoreo y resultados de los ensayos asignados a tus cursos.</p>
+          <p className="text-gray-500">
+            {isPruebas
+              ? "Monitoreo y resultados de las evaluaciones asignadas a tus cursos."
+              : "Monitoreo y resultados de los ensayos asignados a tus cursos."}
+          </p>
         </div>
         {assignments && assignments.length > 0 && (
           <button
@@ -64,7 +70,9 @@ function TeacherDashboard() {
         <div className="text-gray-500 animate-pulse">Cargando...</div>
       ) : assignments?.length === 0 ? (
         <div className="bg-white border rounded-xl p-10 text-center text-gray-500">
-          No tienes cursos o ensayos asignados actualmente.
+          {isPruebas
+            ? "No tienes cursos o evaluaciones asignadas actualmente."
+            : "No tienes cursos o ensayos asignados actualmente."}
         </div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">

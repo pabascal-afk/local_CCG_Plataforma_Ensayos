@@ -4,12 +4,14 @@ import { useEffect, useState, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
 import LongitudinalChart from "@/components/charts/LongitudinalChart";
 import { TrendingUp, Users, BookOpen, AlertCircle, Filter, Sparkles } from "lucide-react";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 interface EvolutionTabProps {
   assignmentId: number;
 }
 
 export default function EvolutionTab({ assignmentId }: { assignmentId: number }) {
+  const isPruebas = useIsPruebas();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -90,7 +92,7 @@ export default function EvolutionTab({ assignmentId }: { assignmentId: number })
             Evolución Longitudinal de {data.course?.name} · {data.course?.subject}
           </h2>
           <p className="text-xs text-blue-700 mt-1">
-            Comparativa del rendimiento del curso a través de los distintos ensayos aplicados durante el año.
+            Comparativa del rendimiento del curso a través de {isPruebas ? "las distintas evaluaciones aplicadas" : "los distintos ensayos aplicados"} durante el año.
           </p>
         </div>
         <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-blue-200 text-xs font-semibold text-blue-800 shrink-0">
@@ -109,7 +111,7 @@ export default function EvolutionTab({ assignmentId }: { assignmentId: number })
             <div className="flex items-center gap-1.5">
               {[
                 { id: "TODOS", label: "Todos" },
-                { id: "ENSAYO", label: "Ensayos SIMCE" },
+                { id: "ENSAYO", label: isPruebas ? "Pruebas" : "Ensayos SIMCE" },
                 { id: "QUIZ", label: "Quizzes" },
                 { id: "REMEDIAL", label: "Remediales" }
               ].map(t => (
@@ -130,7 +132,7 @@ export default function EvolutionTab({ assignmentId }: { assignmentId: number })
 
           {/* Rango de Ensayos */}
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-gray-700">Ensayos:</span>
+            <span className="text-xs font-semibold text-gray-700">{isPruebas ? "Pruebas:" : "Ensayos:"}</span>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => { setRangePreset("ALL"); setCustomSelectedExams([]); }}
@@ -220,7 +222,7 @@ export default function EvolutionTab({ assignmentId }: { assignmentId: number })
                   <th className="px-4 py-3.5">Tipo</th>
                   <th className="px-4 py-3.5">Fecha</th>
                   <th className="px-4 py-3.5 text-center">Rendición</th>
-                  <th className="px-4 py-3.5 text-center">Prom. SIMCE</th>
+                  <th className="px-4 py-3.5 text-center">{isPruebas ? "Prom. Puntaje" : "Prom. SIMCE"}</th>
                   <th className="px-4 py-3.5 text-center">Prom. Nota</th>
                   <th className="px-4 py-3.5 text-center">Distribución de Logro</th>
                 </tr>
@@ -258,7 +260,7 @@ export default function EvolutionTab({ assignmentId }: { assignmentId: number })
                           item.examType === 'REMEDIAL' ? 'bg-amber-100 text-amber-800' :
                           'bg-blue-100 text-blue-800'
                         }`}>
-                          {item.examType || 'ENSAYO'}
+                          {isPruebas && (!item.examType || item.examType === 'ENSAYO') ? 'PRUEBA' : (item.examType || 'ENSAYO')}
                         </span>
                       </td>
                       <td className="px-4 py-4 text-xs text-gray-500 font-mono">

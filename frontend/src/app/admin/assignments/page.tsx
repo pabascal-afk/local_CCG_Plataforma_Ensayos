@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/session";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useSchoolYear } from "@/context/SchoolYearContext";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 import AiPromptModal, { AiPromptMode } from "@/components/AiPromptModal";
 import OmrScannerModal from "@/components/OmrScannerModal";
 
@@ -165,10 +166,10 @@ type TimerPreset = {
 };
 
 const TIMER_PRESETS: TimerPreset[] = [
-  { minutes: 90, label: "90 min", badge: "Estándar SIMCE", desc: "Tiempo oficial de prueba" },
+  { minutes: 90, label: "90 min", badge: "Estándar", desc: "Tiempo oficial de evaluación" },
   { minutes: 60, label: "60 min", badge: "Exprés", desc: "Ideal para quizes y diagnósticos" },
   { minutes: 45, label: "45 min", badge: "Módulo Pedagógico", desc: "1 bloque de clases" },
-  { minutes: 120, label: "120 min", badge: "Extendido", desc: "Para ensayos largos" },
+  { minutes: 120, label: "120 min", badge: "Extendido", desc: "Para evaluaciones largas" },
   { minutes: null, label: "Sin Límite", badge: "Libre", desc: "Sin cronómetro regresivo" },
 ];
 
@@ -185,6 +186,7 @@ const formatCourseName = (c?: { level?: string; letter?: string; year?: number }
 
 export default function AssignmentsDashboard() {
   const { selectedYear } = useSchoolYear();
+  const isPruebas = useIsPruebas();
   const [exams, setExams] = useState<Exam[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -1086,7 +1088,7 @@ export default function AssignmentsDashboard() {
                 <Link
                   href="/admin/calendar"
                   className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-colors"
-                  title="Ver Calendario SIMCE institucional"
+                  title={isPruebas ? "Ver Calendario de Pruebas institucional" : "Ver Calendario SIMCE institucional"}
                 >
                   <Calendar className="w-3.5 h-3.5" /> 
                   <span>Calendario</span>
@@ -1144,12 +1146,12 @@ export default function AssignmentsDashboard() {
 
             {/* Barra de Filtros de Selección y Búsqueda */}
             <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm flex flex-wrap items-center gap-3">
-              {/* Buscador de Ensayo */}
+              {/* Buscador de Ensayo/Prueba */}
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
                 <input 
                   type="text"
-                  placeholder="Filtrar ensayo por título o número (#1, #2...)"
+                  placeholder={isPruebas ? "Filtrar prueba por título o número (#1, #2...)" : "Filtrar ensayo por título o número (#1, #2...)"}
                   value={searchExam}
                   onChange={(e) => setSearchExam(e.target.value)}
                   className="w-full pl-9 pr-3 py-1.5 text-xs bg-gray-50 hover:bg-gray-100/60 focus:bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition"
@@ -1164,7 +1166,7 @@ export default function AssignmentsDashboard() {
                 )}
               </div>
 
-              {/* Filtro por Tipo de Ensayo */}
+              {/* Filtro por Tipo de Evaluación */}
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] font-bold text-gray-500 uppercase">Tipo:</span>
                 <select
@@ -1173,11 +1175,11 @@ export default function AssignmentsDashboard() {
                   className="text-xs bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-1.5 font-semibold text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="TODOS">Todos los tipos</option>
-                  <option value="ENSAYO">Ensayo SIMCE</option>
+                  <option value="ENSAYO">{isPruebas ? "Prueba / Evaluación" : "Ensayo SIMCE"}</option>
                   <option value="QUIZ">Quiz / Rápido</option>
                   <option value="REMEDIAL">Remedial</option>
                   <option value="DIAGNOSTICO">Diagnóstico</option>
-                  <option value="ENSAYO_LARGO">Ensayo Largo</option>
+                  <option value="ENSAYO_LARGO">{isPruebas ? "Evaluación Extendida" : "Ensayo Largo"}</option>
                 </select>
               </div>
 
@@ -1232,12 +1234,12 @@ export default function AssignmentsDashboard() {
             {/* Grilla Principal de 3 Columnas */}
             <div className="flex-1 grid grid-cols-12 gap-5 min-h-0 overflow-hidden">
               
-              {/* ================= COLUMNA IZQUIERDA: BANCO DE ENSAYOS ================= */}
+              {/* ================= COLUMNA IZQUIERDA: BANCO DE ENSAYOS / PRUEBAS ================= */}
               <div className="col-span-3 bg-white border border-gray-200 rounded-2xl flex flex-col shadow-sm overflow-hidden">
                 <div className="p-3.5 bg-slate-50 border-b border-gray-200 font-bold text-gray-800 text-xs flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <BookOpen className="w-4 h-4 text-blue-600" />
-                    <span>Banco de Ensayos</span>
+                    <span>{isPruebas ? "Banco de Pruebas" : "Banco de Ensayos"}</span>
                   </div>
                   <span className="bg-blue-100 text-blue-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
                     {filteredExams.length}
@@ -1250,7 +1252,7 @@ export default function AssignmentsDashboard() {
                     <div>
                       <div className="flex items-center gap-1.5 font-black text-indigo-950">
                         <Filter className="w-3.5 h-3.5 text-indigo-600 flex-shrink-0" />
-                        <span>Ensayos para {formatCourseName(selectedCourseForFilter)}</span>
+                        <span>{isPruebas ? "Pruebas" : "Ensayos"} para {formatCourseName(selectedCourseForFilter)}</span>
                       </div>
                       <p className="text-[11px] text-indigo-800 font-medium mt-1 leading-snug">
                         Mostrando solo nivel <strong>{formatCourseLevel(selectedCourseForFilter.level)}</strong> pendientes por asignar.
@@ -1262,7 +1264,7 @@ export default function AssignmentsDashboard() {
                     <button
                       onClick={() => setSelectedCourseForFilter(null)}
                       className="text-[10px] font-extrabold text-indigo-700 hover:text-indigo-900 bg-white border border-indigo-200 px-2 py-1 rounded shadow-xs hover:bg-indigo-100 transition whitespace-nowrap ml-2"
-                      title="Quitar filtro de curso y ver todos los ensayos"
+                      title="Quitar filtro de curso y ver todas las evaluaciones"
                     >
                       ✕ Ver todos
                     </button>
@@ -1339,7 +1341,7 @@ export default function AssignmentsDashboard() {
                                       startFocusMode(c, e);
                                     }}
                                     className="text-[10px] font-extrabold bg-white hover:bg-indigo-600 hover:text-white text-indigo-800 border border-indigo-200 rounded px-1.5 py-1 text-center truncate transition shadow-2xs"
-                                    title={`Asignar este ensayo a ${formatCourseName(c)}`}
+                                    title={`Asignar a ${formatCourseName(c)}`}
                                   >
                                     {formatCourseName(c)}
                                   </button>
@@ -1374,13 +1376,13 @@ export default function AssignmentsDashboard() {
                         ¡Al día con {formatCourseName(selectedCourseForFilter)}!
                       </p>
                       <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
-                        Todos los ensayos de nivel <strong>{formatCourseLevel(selectedCourseForFilter.level)}</strong> ya fueron asignados o rendidos este año por este curso.
+                        Todas las evaluaciones de nivel <strong>{formatCourseLevel(selectedCourseForFilter.level)}</strong> ya fueron asignadas o rendidas este año por este curso.
                       </p>
                       <button 
                         onClick={() => setSelectedCourseForFilter(null)}
                         className="mt-3 text-xs text-indigo-600 font-bold hover:underline"
                       >
-                        Ver catálogo completo de ensayos
+                        Ver catálogo completo
                       </button>
                     </div>
                   )}
@@ -1773,11 +1775,11 @@ export default function AssignmentsDashboard() {
                               type="text"
                               value={stagedDynamicPin}
                               onChange={(e) => setStagedDynamicPin(e.target.value.toUpperCase())}
-                              placeholder="Código PIN (ej. SIMCE4A)"
+                              placeholder={isPruebas ? "Código PIN (ej. PRUEBA4A)" : "Código PIN (ej. SIMCE4A)"}
                               className="font-mono text-sm tracking-widest font-black uppercase border border-amber-300 bg-amber-50/50 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-amber-500"
                             />
                             <p className="text-[11px] text-gray-500">
-                              Los estudiantes podrán iniciar sesión en este ensayo usando este código maestro de clase.
+                              Los estudiantes podrán iniciar sesión en esta evaluación usando este código maestro de clase.
                             </p>
                           </div>
                         ) : (
@@ -2677,7 +2679,7 @@ export default function AssignmentsDashboard() {
                     }`}
                   >
                     <AlertCircle className="w-4 h-4" />
-                    <span>Alertas: Ensayos sin Remedial</span>
+                    <span>{isPruebas ? "Alertas: Pruebas sin Remedial" : "Alertas: Ensayos sin Remedial"}</span>
                     {activeAlertsCount > 0 ? (
                       <span className="bg-red-600 text-white px-2 py-0.5 rounded-full text-[10px] font-black">
                         {activeAlertsCount} sin plan
@@ -2833,10 +2835,10 @@ export default function AssignmentsDashboard() {
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-white p-3 rounded-xl border border-gray-100 text-xs">
                                       <div>
                                         <span className="text-[10px] uppercase font-bold text-gray-400 block mb-0.5">
-                                          Ensayo SIMCE de Origen
+                                          {isPruebas ? "Prueba de Origen" : "Ensayo SIMCE de Origen"}
                                         </span>
                                         <span className="font-bold text-gray-900 block">
-                                          {prop.originAssignment?.exam?.title || "Ensayo"}
+                                          {prop.originAssignment?.exam?.title || (isPruebas ? "Prueba" : "Ensayo")}
                                         </span>
                                         <span className="text-[11px] text-gray-500 font-semibold">
                                           {prop.originAssignment?.exam?.subject}
@@ -2975,7 +2977,7 @@ export default function AssignmentsDashboard() {
                     </div>
                   )}
 
-                  {/* PESTAÑA 2: ALERTAS DE ENSAYOS SIN REMEDIAL */}
+                  {/* PESTAÑA 2: ALERTAS DE ENSAYOS / PRUEBAS SIN REMEDIAL */}
                   {remedialModalTab === "alerts" && (
                     <div className="space-y-4">
                       
@@ -2983,9 +2985,9 @@ export default function AssignmentsDashboard() {
                       <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 text-xs text-red-900 flex items-start gap-2.5">
                         <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
                         <div>
-                          <span className="font-black block">Protocolo de Alerta Temprana SIMCE</span>
+                          <span className="font-black block">{isPruebas ? "Protocolo de Alerta Temprana de Evaluaciones" : "Protocolo de Alerta Temprana SIMCE"}</span>
                           <p className="text-red-700 mt-0.5">
-                            Los siguientes ensayos ya fueron rendidos por los alumnos, pero NO cuentan con evaluación remedial ni propuesta pendiente registrada. El colegio requiere que todo ensayo rendido cuente con un plan de nivelación para los Objetivos de Aprendizaje descendidos.
+                            Las siguientes evaluaciones ya fueron rendidas por los alumnos, pero NO cuentan con evaluación remedial ni propuesta pendiente registrada. El colegio requiere que toda evaluación rendida cuente con un plan de nivelación para los Objetivos de Aprendizaje descendidos.
                           </p>
                         </div>
                       </div>

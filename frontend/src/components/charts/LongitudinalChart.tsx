@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { TrendingUp, TrendingDown, Minus, Award, Calendar } from "lucide-react";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export type DataPoint = {
   id?: number | string;
@@ -31,6 +32,7 @@ export default function LongitudinalChart({
   height = 280,
 }: LongitudinalChartProps) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const isPruebas = useIsPruebas();
 
   if (!data || data.length === 0) {
     return (
@@ -48,7 +50,7 @@ export default function LongitudinalChart({
   if (validData.length === 0) {
     return (
       <div className="flex items-center justify-center p-8 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-sm">
-        No hay puntajes SIMCE registrados para esta serie.
+        {isPruebas ? "No hay puntajes registrados para esta serie." : "No hay puntajes SIMCE registrados para esta serie."}
       </div>
     );
   }
@@ -102,16 +104,16 @@ export default function LongitudinalChart({
         <div>
           <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
             <Award className="w-5 h-5 text-blue-600" />
-            Trayectoria y Puntaje SIMCE
+            {isPruebas ? "Trayectoria y Puntaje de Logro" : "Trayectoria y Puntaje SIMCE"}
           </h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Evolución estandarizada en escala oficial (100 a 400 puntos)
+            Evolución estandarizada en escala institucional (100 a 400 puntos)
           </p>
         </div>
 
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <span className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold block">Último Ensayo</span>
+            <span className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold block">{isPruebas ? "Última Prueba" : "Último Ensayo"}</span>
             <span className="text-xl font-extrabold text-gray-900">{lastScore} ptos</span>
           </div>
 
@@ -354,7 +356,7 @@ export default function LongitudinalChart({
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right">
-              <div className="text-[10px] text-slate-400 uppercase">Puntaje SIMCE</div>
+              <div className="text-[10px] text-slate-400 uppercase">{isPruebas ? "Puntaje" : "Puntaje SIMCE"}</div>
               <div className="text-base font-extrabold text-blue-400">{hoveredItem.simceScore} ptos</div>
             </div>
             {hoveredItem.grade !== undefined && (

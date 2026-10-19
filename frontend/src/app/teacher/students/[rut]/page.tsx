@@ -8,9 +8,11 @@ import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useParams } from "next/navigation";
 import LongitudinalChart from "@/components/charts/LongitudinalChart";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function StudentEvolutionPage() {
   const { rut } = useParams();
+  const isPruebas = useIsPruebas();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
 
@@ -92,7 +94,9 @@ export default function StudentEvolutionPage() {
 
             {Object.keys(bySubject).length === 0 ? (
               <div className="bg-white border rounded-xl p-10 text-center text-gray-500">
-                El estudiante no ha rendido ningún ensayo.
+                {isPruebas
+                  ? "El estudiante no ha rendido ninguna evaluación."
+                  : "El estudiante no ha rendido ningún ensayo."}
               </div>
             ) : (
               <div className="space-y-8">
@@ -130,7 +134,9 @@ export default function StudentEvolutionPage() {
                                   </div>
                                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
                                     <div className="text-center bg-white border rounded px-3 py-2">
-                                      <span className="block text-[10px] text-gray-400 uppercase font-bold">Puntaje SIMCE</span>
+                                      <span className="block text-[10px] text-gray-400 uppercase font-bold">
+                                        {isPruebas ? "Puntaje" : "Puntaje SIMCE"}
+                                      </span>
                                       <span className="block text-xl font-extrabold text-blue-600">
                                         {exam.simceScore || (exam.percent ? Math.round(250 + (exam.percent - 50) * 2) : 250)}
                                       </span>

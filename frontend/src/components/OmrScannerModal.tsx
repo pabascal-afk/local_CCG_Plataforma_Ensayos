@@ -341,7 +341,7 @@ export default function OmrScannerModal({
       });
 
       setSuccessMessage(
-        `¡Éxito! Se guardaron y corrigieron ${response.savedCount} hojas de respuestas con cálculo de puntajes SIMCE y TRI.`
+        `¡Éxito! Se guardaron y corrigieron ${response.savedCount} hojas de respuestas automáticamente.`
       );
 
       setTimeout(() => {
@@ -840,7 +840,7 @@ export default function OmrScannerModal({
 
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-500 hidden sm:inline">
-              Al guardar, el sistema calificará las respuestas y calculará el puntaje SIMCE con Teoría de Respuesta al Ítem (TRI).
+              Al guardar, el sistema calificará las respuestas y calculará la nota y puntaje estandarizado.
             </span>
 
             <button

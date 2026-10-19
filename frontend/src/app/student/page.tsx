@@ -33,8 +33,10 @@ const BADGE: Record<State, { label: string; cls: string; icon: React.ElementType
 };
 
 import LongitudinalChart from "@/components/charts/LongitudinalChart";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 function StudentDashboard() {
+  const isPruebas = useIsPruebas();
   const [activeTab, setActiveTab] = useState<"assignments" | "trajectory">("assignments");
   const [items, setItems] = useState<StudentAssignment[] | null>(null);
   const [trajectoryData, setTrajectoryData] = useState<any>(null);
@@ -65,7 +67,11 @@ function StudentDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 mb-1">Portal del Estudiante</h1>
-          <p className="text-gray-500">Revisa tus ensayos asignados y tu evolución académica</p>
+          <p className="text-gray-500">
+            {isPruebas
+              ? "Revisa tus pruebas asignadas y tu evolución académica"
+              : "Revisa tus ensayos asignados y tu evolución académica"}
+          </p>
         </div>
 
         {/* Pestañas */}
@@ -76,7 +82,7 @@ function StudentDashboard() {
               activeTab === "assignments" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
             }`}
           >
-            Mis Ensayos
+            {isPruebas ? "Mis Pruebas" : "Mis Ensayos"}
           </button>
           <button
             onClick={() => setActiveTab("trajectory")}
@@ -85,7 +91,7 @@ function StudentDashboard() {
             }`}
           >
             <Award className="w-4 h-4 text-blue-600" />
-            Mi Progreso SIMCE
+            {isPruebas ? "Mi Progreso" : "Mi Progreso SIMCE"}
           </button>
         </div>
       </div>
@@ -101,7 +107,7 @@ function StudentDashboard() {
           {!items && !error && <p className="text-gray-500 animate-pulse">Cargando…</p>}
           {items?.length === 0 && (
             <div className="bg-white border rounded-xl p-10 text-center text-gray-500">
-              Aún no tienes ensayos asignados.
+              {isPruebas ? "Aún no tienes pruebas asignadas." : "Aún no tienes ensayos asignados."}
             </div>
           )}
 
@@ -167,7 +173,7 @@ function StudentDashboard() {
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <span className="text-xs text-gray-400 block">SIMCE</span>
+                        <span className="text-xs text-gray-400 block">{isPruebas ? "Puntaje" : "SIMCE"}</span>
                         <span className="font-bold text-blue-600">{d.simceScore} ptos</span>
                       </div>
                       {d.grade && (
