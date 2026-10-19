@@ -34,6 +34,68 @@ function publicUser(user) {
   };
 }
 
+// GET /api/auth/student-directory (Público para el buscador de estudiantes en pantalla de login)
+router.get('/student-directory', async (req, res) => {
+  try {
+    const { courseId } = req.query;
+
+    const courses = await prisma.course.findMany({
+      orderBy: [{ year: 'desc' }, { level: 'asc' }, { letter: 'asc' }],
+      select: {
+        id: true,
+        level: true,
+        letter: true,
+        year: true,
+        _count: {
+          select: { students: { where: { role: 'STUDENT', isActive: true } } }
+        }
+      }
+    });
+
+    const formattedCourses = courses.map(c => {
+      let lvlFormatted = c.level;
+      if (lvlFormatted.endsWith('B')) lvlFormatted = lvlFormatted.replace('B', '° Básico');
+      else if (lvlFormatted.endsWith('M')) lvlFormatted = lvlFormatted.replace('M', '° Medio');
+      else if (!lvlFormatted.includes('Básico') && !lvlFormatted.includes('Medio')) {
+        lvlFormatted = lvlFormatted.replace('B', '° Básico').replace('M', '° Medio');
+      }
+      return {
+        id: c.id,
+        level: c.level,
+        letter: c.letter,
+        year: c.year,
+        label: `${lvlFormatted} ${c.letter}`,
+        fullLabel: `${lvlFormatted} ${c.letter} (${c.year})`,
+        studentCount: c._count.students
+      };
+    }).filter(c => c.studentCount > 0);
+
+    const studentWhere = {
+      role: 'STUDENT',
+      isActive: true,
+      courseId: courseId ? parseInt(courseId, 10) : { not: null }
+    };
+
+    const students = await prisma.user.findMany({
+      where: studentWhere,
+      select: {
+        rut: true,
+        name: true,
+        courseId: true
+      },
+      orderBy: { name: 'asc' }
+    });
+
+    res.json({
+      courses: formattedCourses,
+      students
+    });
+  } catch (error) {
+    console.error('[Error student-directory]:', error);
+    res.status(500).json({ error: 'Error al obtener directorio de estudiantes' });
+  }
+});
+
 // POST /api/auth/login
 router.post('/login', loginLimiter, async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
@@ -80,19 +142,20 @@ router.post('/login', loginLimiter, async (req, res) => {
 
   // Si la contraseña normal no coincide, verificar si es un estudiante con contraseña dinámica de ensayo activa
   if (!passwordMatches && user && user.isActive && user.role === 'STUDENT' && user.courseId) {
-    const inputPass = parsed.data.password.trim();
-    const now = new Date();
-    const activeAssignment = await prisma.examAssignment.findFirst({
+    const inputPass = parsed.data.password.trim().toUpperCase();
+    const activeAssignments = await prisma.examAssignment.findMany({
       where: {
         courseId: user.courseId,
         dynamicPasswordActive: true,
-        dynamicPassword: { equals: inputPass },
-        opensAt: { lte: now },
-        closesAt: { gte: now }
+        status: { not: 'CANCELLED' }
       }
     });
 
-    if (activeAssignment) {
+    const matchingAssignment = activeAssignments.find(
+      a => a.dynamicPassword && a.dynamicPassword.trim().toUpperCase() === inputPass
+    );
+
+    if (matchingAssignment) {
       passwordMatches = true;
       usedDynamicPassword = true;
     }
