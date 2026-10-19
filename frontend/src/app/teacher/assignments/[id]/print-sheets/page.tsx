@@ -296,56 +296,68 @@ export default function PrintSheetsPage() {
               return (
                 <div
                   key={isBlank ? `blank-${index}` : studentItem.rut || index}
-                  className="omr-sheet-page bg-white shadow-lg print:shadow-none mx-auto mb-8 print:mb-0 relative box-border"
+                  className="omr-sheet-page bg-white shadow-lg print:shadow-none mx-auto mb-8 print:mb-0 relative box-border overflow-hidden"
                   style={{
                     width: "216mm",
+                    height: "279mm",
                     minHeight: "279mm",
                     maxHeight: "279mm",
-                    padding: "10mm 12mm",
+                    padding: "0",
+                    position: "relative",
                     pageBreakAfter: "always",
                   }}
                 >
-                  {/* MARCADORES FIDUCIALES EN LAS 4 ESQUINAS (CALIBRACIÓN OMR) */}
-                  <div className="absolute top-[8mm] left-[8mm] w-[14mm] h-[14mm] bg-black"></div>
-                  <div className="absolute top-[8mm] right-[8mm] w-[14mm] h-[14mm] bg-black"></div>
-                  <div className="absolute bottom-[8mm] left-[8mm] w-[14mm] h-[14mm] bg-black"></div>
-                  <div className="absolute bottom-[8mm] right-[8mm] w-[14mm] h-[14mm] bg-black"></div>
+                  {/* MARCADORES FIDUCIALES EN LAS 4 ESQUINAS (10x10mm CON ZONA DE SEGURIDAD) */}
+                  <div className="absolute top-[6mm] left-[6mm] w-[10mm] h-[10mm] bg-black z-10"></div>
+                  <div className="absolute top-[6mm] right-[6mm] w-[10mm] h-[10mm] bg-black z-10"></div>
+                  <div className="absolute bottom-[6mm] left-[6mm] w-[10mm] h-[10mm] bg-black z-10"></div>
+                  <div className="absolute bottom-[6mm] right-[6mm] w-[10mm] h-[10mm] bg-black z-10"></div>
 
-                  {/* CONTENEDOR PRINCIPAL DENTRO DE LOS MARCADORES */}
-                  <div className="flex flex-col h-full justify-between pt-[8mm] px-[6mm] pb-[8mm]">
+                  {/* CONTENEDOR PRINCIPAL DENTRO DE LOS MARCADORES (CLEARANCE DE 4mm RESPECTO A ESQUINAS) */}
+                  <div
+                    className="flex flex-col h-full justify-between"
+                    style={{
+                      padding: "6mm 20mm 7mm 20mm",
+                      width: "100%",
+                      height: "100%",
+                      boxSizing: "border-box",
+                    }}
+                  >
                     
                     {/* CABECERA: LOGO + TITULO + QR */}
-                    <div className="border-b-2 border-black pb-3 mb-3 flex items-start justify-between gap-4">
+                    <div className="border-b-2 border-black pb-2 mb-2 flex items-start justify-between gap-3">
                       {/* Lado izquierdo: Identificación Institucional */}
                       <div className="flex items-center gap-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src="/CCG-logo-300x300.png"
                           alt="Logo CCG"
-                          className="w-14 h-14 object-contain filter grayscale contrast-200"
+                          className="w-12 h-12 object-contain filter grayscale contrast-200 shrink-0"
                         />
                         <div>
-                          <div className="text-[10px] uppercase font-bold tracking-wider text-slate-700">
+                          <div className="text-[9px] uppercase font-bold tracking-wider text-slate-700">
                             Colegio Cerro Grande &bull; Plataforma SIMCE
                           </div>
-                          <h2 className="text-base font-extrabold uppercase text-black leading-tight">
+                          <h2 className="text-sm font-extrabold uppercase text-black leading-tight">
                             HOJA DE RESPUESTAS OFICIAL
                           </h2>
-                          <div className="text-xs font-semibold text-black mt-0.5">
+                          <div className="text-[11px] font-semibold text-black mt-0.5">
                             {exam.title} &bull; <span className="underline">{exam.subject}</span>
                           </div>
                         </div>
                       </div>
 
                       {/* Lado derecho: Código QR de lectura OMR */}
-                      <div className="flex flex-col items-center">
+                      <div className="flex flex-col items-center shrink-0">
                         {qrSrc ? (
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={qrSrc}
                             alt="QR OMR"
-                            className="w-[28mm] h-[28mm] object-contain border border-black p-0.5"
+                            className="w-[23mm] h-[23mm] object-contain border border-black p-0.5 bg-white"
                           />
                         ) : (
-                          <div className="w-[28mm] h-[28mm] border border-black flex items-center justify-center text-[9px] font-mono">
+                          <div className="w-[23mm] h-[23mm] border border-black flex items-center justify-center text-[8px] font-mono">
                             QR OMR
                           </div>
                         )}
@@ -356,47 +368,47 @@ export default function PrintSheetsPage() {
                     </div>
 
                     {/* BLOQUE DE DATOS DEL ESTUDIANTE */}
-                    <div className="border-2 border-black rounded-lg p-2.5 mb-3 bg-slate-50/50 print:bg-transparent">
+                    <div className="border-2 border-black rounded-lg p-2 mb-2 bg-slate-50/50 print:bg-transparent">
                       {isTeacherKey ? (
-                        <div className="bg-black text-white text-center py-2 font-black text-sm uppercase tracking-widest rounded">
+                        <div className="bg-black text-white text-center py-1.5 font-black text-xs uppercase tracking-widest rounded">
                           PAUTA OFICIAL DE CORRECCIÓN (USO EXCLUSIVO DOCENTE / UTP)
                         </div>
                       ) : (
-                        <div className="grid grid-cols-12 gap-3 items-center">
+                        <div className="grid grid-cols-12 gap-2 items-center text-xs">
                           <div className="col-span-8">
-                            <div className="text-[9px] font-bold uppercase text-slate-600">Nombre del Estudiante:</div>
+                            <div className="text-[8px] font-bold uppercase text-slate-600">Nombre del Estudiante:</div>
                             {isBlank ? (
-                              <div className="border-b border-dotted border-black h-6 mt-1 flex items-end text-xs font-serif text-slate-400">
+                              <div className="border-b border-dotted border-black h-5 flex items-end text-[10px] font-serif text-slate-400">
                                 (Escriba nombre y apellidos con letra imprenta clara)
                               </div>
                             ) : (
-                              <div className="text-sm font-black uppercase text-black tracking-tight truncate mt-0.5">
+                              <div className="text-xs font-black uppercase text-black tracking-tight truncate">
                                 {studentItem.name}
                               </div>
                             )}
                           </div>
 
-                          <div className="col-span-4 border-l-2 border-black pl-3">
-                            <div className="text-[9px] font-bold uppercase text-slate-600">RUT:</div>
+                          <div className="col-span-4 border-l-2 border-black pl-2.5">
+                            <div className="text-[8px] font-bold uppercase text-slate-600">RUT:</div>
                             {isBlank ? (
-                              <div className="border-b border-dotted border-black h-6 mt-1 flex items-end text-xs font-mono text-slate-400">
+                              <div className="border-b border-dotted border-black h-5 flex items-end text-[10px] font-mono text-slate-400">
                                 __.___.___-_
                               </div>
                             ) : (
-                              <div className="text-sm font-mono font-black text-black mt-0.5">
+                              <div className="text-xs font-mono font-black text-black">
                                 {studentItem.rut}
                               </div>
                             )}
                           </div>
 
-                          <div className="col-span-6 border-t border-slate-300 pt-1.5">
-                            <span className="text-[9px] font-bold uppercase text-slate-600">Curso: </span>
-                            <span className="text-xs font-bold text-black">{course.fullName}</span>
+                          <div className="col-span-6 border-t border-slate-300 pt-1">
+                            <span className="text-[8px] font-bold uppercase text-slate-600">Curso: </span>
+                            <span className="text-[11px] font-bold text-black">{course.fullName}</span>
                           </div>
 
-                          <div className="col-span-6 border-t border-slate-300 pt-1.5 text-right">
-                            <span className="text-[9px] font-bold uppercase text-slate-600">Fecha Aplicación: </span>
-                            <span className="text-xs font-mono font-semibold text-black">
+                          <div className="col-span-6 border-t border-slate-300 pt-1 text-right">
+                            <span className="text-[8px] font-bold uppercase text-slate-600">Fecha Aplicación: </span>
+                            <span className="text-[11px] font-mono font-semibold text-black">
                               {new Date().toLocaleDateString("es-CL")}
                             </span>
                           </div>
@@ -405,85 +417,94 @@ export default function PrintSheetsPage() {
                     </div>
 
                     {/* INSTRUCCIONES DE LLENADO SIMCE */}
-                    <div className="border border-black rounded px-3 py-1.5 mb-3 text-[9px] leading-tight flex items-center justify-between bg-white">
+                    <div className="border border-black rounded px-2.5 py-1 mb-2 text-[8.5px] leading-tight flex items-center justify-between bg-white">
                       <div>
                         <span className="font-bold text-black uppercase">Instrucciones: </span>
-                        <span>Rellene completamente el círculo con lápiz grafito o pasta oscuro. No doble ni ensucie esta hoja.</span>
+                        <span>Rellene completamente el círculo con lápiz grafito o pasta oscuro. No doble ni manche esta hoja.</span>
                       </div>
-                      <div className="flex items-center gap-2 pl-3 border-l border-slate-300 shrink-0 font-mono font-bold">
+                      <div className="flex items-center gap-2 pl-2.5 border-l border-slate-300 shrink-0 font-mono font-bold text-[9px]">
                         <span className="flex items-center gap-1">
-                          Correcto: <span className="inline-block w-3.5 h-3.5 bg-black rounded-full"></span>
+                          Correcto: <span className="inline-block w-3 h-3 bg-black rounded-full"></span>
                         </span>
                         <span className="text-slate-400">|</span>
                         <span className="flex items-center gap-1 text-slate-500">
-                          Incorrecto: <span className="inline-block w-3.5 h-3.5 border border-black rounded-full text-center leading-3 text-[10px]">✕</span>
+                          Incorrecto: <span className="inline-block w-3 h-3 border border-black rounded-full text-center leading-2.5 text-[8px]">✕</span>
                         </span>
                       </div>
                     </div>
 
-                    {/* GRILLA DE BURBUJAS OMR (COLUMNAS BALANCEADAS) */}
-                    <div className="flex-1 flex gap-4 justify-between border-2 border-black rounded-xl p-3 bg-white">
+                    {/* GRILLA DE BURBUJAS OMR (COLUMNAS BALANCEADAS CON CALIBRACIÓN) */}
+                    <div className="flex-1 flex gap-3 justify-between border-2 border-black rounded-xl p-2.5 bg-white min-h-0">
                       {columns.map((colQuestions, colIdx) => (
                         <div
                           key={colIdx}
                           className={`flex-1 flex flex-col justify-between ${
-                            colIdx < columns.length - 1 ? "border-r border-slate-300 pr-3" : ""
+                            colIdx < columns.length - 1 ? "border-r border-slate-300 pr-2.5" : ""
                           }`}
                         >
+                          {/* Cabecera de Columna */}
                           <div className="flex items-center justify-between pb-1 mb-1 border-b border-black text-[9px] font-black text-slate-700">
-                            <span>N°</span>
-                            <div className="flex gap-2.5 pr-1">
+                            <span className="pl-1">N°</span>
+                            <div className={`flex ${columnsCount > 2 ? "gap-2" : "gap-3.5"} pr-1`}>
                               {options.map((opt) => (
-                                <span key={opt} className="w-5 text-center font-bold">
+                                <span key={opt} className="w-[5mm] text-center font-bold">
                                   {opt}
                                 </span>
                               ))}
                             </div>
                           </div>
 
-                          {colQuestions.map((q) => {
-                            const correctOpt = isTeacherKey ? q.correctAnswer : null;
+                          {/* Filas de preguntas */}
+                          <div className="flex-1 flex flex-col justify-around">
+                            {colQuestions.map((q) => {
+                              const correctOpt = isTeacherKey ? q.correctAnswer : null;
 
-                            return (
-                              <div
-                                key={q.id}
-                                className="flex items-center justify-between py-[1.5px] border-b border-slate-100 last:border-b-0"
-                              >
-                                {/* Número de pregunta */}
-                                <span className="text-xs font-mono font-bold w-6 text-slate-800">
-                                  {String(q.questionNumber).padStart(2, "0")}
-                                </span>
+                              return (
+                                <div
+                                  key={q.id}
+                                  className="flex items-center justify-between py-[1px] border-b border-slate-100 last:border-b-0"
+                                >
+                                  {/* Indicador de fila + Número de pregunta */}
+                                  <div className="flex items-center gap-1">
+                                    <div className="w-1.5 h-1.5 bg-black rounded-xs shrink-0" />
+                                    <span className="text-xs font-mono font-bold w-5 text-slate-800">
+                                      {String(q.questionNumber).padStart(2, "0")}
+                                    </span>
+                                  </div>
 
-                                {/* Burbujas de respuestas */}
-                                <div className="flex gap-2.5 pr-1">
-                                  {options.map((opt) => {
-                                    const isCorrect = correctOpt === opt;
+                                  {/* Burbujas de respuestas con borde fino y letras claras para alto contraste OMR */}
+                                  <div className={`flex ${columnsCount > 2 ? "gap-2" : "gap-3.5"} pr-1`}>
+                                    {options.map((opt) => {
+                                      const isCorrect = correctOpt === opt;
 
-                                    return (
-                                      <div
-                                        key={opt}
-                                        className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold font-mono transition-all ${
-                                          isCorrect
-                                            ? "bg-black text-white ring-2 ring-black"
-                                            : "border-2 border-black text-black bg-white"
-                                        }`}
-                                      >
-                                        {opt}
-                                      </div>
-                                    );
-                                  })}
+                                      return (
+                                        <div
+                                          key={opt}
+                                          className={`w-[5mm] h-[5mm] rounded-full flex items-center justify-center text-[8.5px] font-mono transition-all ${
+                                            isCorrect
+                                              ? "bg-black text-white font-bold ring-1 ring-black"
+                                              : isTeacherKey
+                                              ? "border-[1.5px] border-slate-300 text-slate-300 font-normal bg-white"
+                                              : "border-[1.5px] border-slate-400 text-slate-400 font-normal bg-white"
+                                          }`}
+                                        >
+                                          {opt}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            })}
+                          </div>
                         </div>
                       ))}
                     </div>
 
                     {/* PIE DE HOJA: CONTROL DE FIRMA Y REGISTRO */}
-                    <div className="mt-3 pt-2 border-t border-black flex items-center justify-between text-[9px] text-slate-600 font-mono">
+                    <div className="mt-2 pt-1 border-t border-black flex items-center justify-between text-[8px] text-slate-600 font-mono">
                       <span>Colegio Cerro Grande &bull; Sistema Oficial de Ensayos SIMCE</span>
-                      <span>Hoja diseñada para procesamiento y escaneo OMR automatizado</span>
+                      <span>Hoja calibrada para corrección óptica OMR automatizada</span>
                       <span>Pág. 1 de 1</span>
                     </div>
 
