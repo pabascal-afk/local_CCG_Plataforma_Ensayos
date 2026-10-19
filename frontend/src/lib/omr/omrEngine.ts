@@ -472,20 +472,22 @@ export async function readOmrSheetFromCanvas(
   const columnsCount = totalQuestions > 30 ? 3 : 2;
   const perCol = Math.ceil(totalQuestions / columnsCount);
 
-  // Límites verticales de la grilla de preguntas respecto a marcadores
-  const V_START = 0.293;
-  const V_END = 0.957;
+  // Límites verticales de la grilla de preguntas respecto a marcadores (calibrados en hoja oficial)
+  const V_START = 0.296;
+  const V_END = 0.948;
 
-  // Coordenadas horizontales 'u' calibradas
+  // Coordenadas horizontales 'u' calibradas milimétricamente
+  // 2 Columnas (hasta 30 preguntas):
   const COL2_U = [
-    [0.117, 0.180, 0.250, 0.323, 0.392], // Columna 1 (A, B, C, D, E)
-    [0.634, 0.703, 0.772, 0.841, 0.910], // Columna 2 (A, B, C, D, E)
+    [0.180, 0.252, 0.324, 0.396, 0.468], // Columna 1 (A, B, C, D, E)
+    [0.628, 0.700, 0.772, 0.844, 0.916], // Columna 2 (A, B, C, D, E)
   ];
 
+  // 3 Columnas (más de 30 preguntas):
   const COL3_U = [
-    [0.110, 0.158, 0.206, 0.254, 0.302], // Columna 1
-    [0.440, 0.488, 0.536, 0.584, 0.632], // Columna 2
-    [0.760, 0.808, 0.856, 0.904, 0.952], // Columna 3
+    [0.144, 0.192, 0.240, 0.288, 0.336], // Columna 1
+    [0.448, 0.496, 0.544, 0.592, 0.640], // Columna 2
+    [0.752, 0.800, 0.848, 0.896, 0.944], // Columna 3
   ];
 
   const optionsList = ["A", "B", "C", "D", "E"].slice(0, optionsCount);
@@ -498,10 +500,13 @@ export async function readOmrSheetFromCanvas(
     const colIdx = Math.floor((qNum - 1) / perCol);
     const rowIdx = (qNum - 1) % perCol;
 
+    // Cantidad real de preguntas en ESTA columna específica (la última columna puede tener menos)
+    const colQuestionsCount = Math.min(perCol, totalQuestions - colIdx * perCol);
+
     const rowV =
-      perCol <= 1
+      colQuestionsCount <= 1
         ? (V_START + V_END) / 2
-        : V_START + (rowIdx * (V_END - V_START)) / (perCol - 1);
+        : V_START + (rowIdx * (V_END - V_START)) / (colQuestionsCount - 1);
 
     const uList = columnsCount === 2 ? COL2_U[colIdx] : COL3_U[colIdx];
 
