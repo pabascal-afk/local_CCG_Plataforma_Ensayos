@@ -65,10 +65,23 @@ IF ERRORLEVEL 1 (
 )
 cd ..
 
+IF EXIST "ServerManager.cs" (
+    IF EXIST "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" (
+        echo.
+        echo [EXTRA] Actualizando ejecutable Gestor_Servidores_CCG.exe...
+        "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /out:"Gestor_Servidores_CCG.exe" /win32icon:"app.ico" /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Net.Http.dll /r:System.Core.dll ServerManager.cs >nul 2>&1
+    )
+)
+
+IF EXIST "%~dp0Gestor_Servidores_CCG.exe" (
+    powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\Gestor de Servidores CCG.lnk'); $s.TargetPath = '%~dp0Gestor_Servidores_CCG.exe'; $s.WorkingDirectory = '%~dp0'; $s.IconLocation = '%~dp0app.ico'; $s.Description = 'Centro de Control de Servidores - Colegio Cerro Grande'; $s.Save()" >nul 2>&1
+)
+
 echo.
 color 0A
 echo ===============================================================
 echo   [EXITO] %APP_NAME% actualizada correctamente a la ultima version!
+echo   [NUEVO] Se ha creado 'Gestor de Servidores CCG' en el Escritorio.
 echo ===============================================================
 echo.
 echo Presione cualquier tecla para iniciar el servidor en consola...

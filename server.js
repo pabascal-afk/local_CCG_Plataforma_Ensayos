@@ -451,10 +451,13 @@ process.on('exit', () => {
     killTree(frontendProc);
 });
 
-// 9. Inicializar Bandeja del Sistema (Tray Icon)
-try {
-    initTray(PORT, localIp, shutdown, APP_TITLE);
-    log('[Tray] Icono de bandeja del sistema activo.');
-} catch (err) {
-    log(`[Tray Advertencia]: ${err.message}`);
+// 9. Inicializar Bandeja del Sistema (Tray Icon) si no es administrado por Gestor_Servidores_CCG.exe
+if (process.env.NO_TRAY !== '1') {
+    try {
+        initTray(PORT, localIp, shutdown, APP_TITLE);
+        log('[Tray] Icono de bandeja del sistema activo.');
+    } catch (err) {
+        log(`[Tray Advertencia]: ${err.message}`);
+    }
 }
+
