@@ -7,8 +7,8 @@ import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useSchoolYear } from "@/context/SchoolYearContext";
-import { useIsPruebas } from "@/lib/useIsPruebas";
 import AudioCutterModal from "@/components/AudioCutterModal";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type Assignment = {
   id: number;
