@@ -1238,15 +1238,19 @@ namespace CCGServerManager
                     else
                     {
                         AppendLog(generalLogBox, "[2/4] Descargando últimos cambios desde GitHub (origin/main)...");
+                        UnlockManagerExeBeforeGit(srv.FolderPath);
                         RunCommandWithLogs("git", "config http.sslVerify false", srv.FolderPath, generalLogBox);
                         RunCommandWithLogs("git", "fetch origin main", srv.FolderPath, generalLogBox);
                         int resetCode = RunCommandWithLogs("git", "reset --hard origin/main", srv.FolderPath, generalLogBox);
                         if (resetCode != 0)
                         {
-                            RunCommandWithLogs("git", "stash", srv.FolderPath, generalLogBox);
-                            RunCommandWithLogs("git", "pull origin main", srv.FolderPath, generalLogBox);
+                            UnlockManagerExeBeforeGit(srv.FolderPath);
+                            RunCommandWithLogs("git", "checkout -f origin/main", srv.FolderPath, generalLogBox);
                         }
                     }
+
+                    // Recargar ícono del Gestor desde disco si se actualizó app.ico
+                    this.BeginInvoke((Action)(() => ReloadAppIcon(srv.FolderPath)));
 
                     // 3. Build & Sync dependencies according to project type
                     if (srv.IsNextJs)
@@ -1332,6 +1336,46 @@ namespace CCGServerManager
             // Restart server automatically after update
             await StartServiceAsync(srv);
             AppendLog(generalLogBox, string.Format("✅ [ÉXITO] {0} actualizado y en línea en http://{1}:{2}", srv.Title, localIpAddress, srv.MainPort));
+        }
+
+        private void UnlockManagerExeBeforeGit(string folderPath)
+        {
+            try
+            {
+                string exePath = Path.Combine(folderPath, "Gestor_Servidores_CCG.exe");
+                string oldPath = Path.Combine(folderPath, "Gestor_Servidores_CCG.exe.old");
+                if (File.Exists(oldPath))
+                {
+                    try { File.Delete(oldPath); } catch { }
+                }
+                if (File.Exists(exePath))
+                {
+                    try { File.Move(exePath, oldPath); } catch { }
+                }
+            }
+            catch { }
+        }
+
+        private void ReloadAppIcon(string folderPath)
+        {
+            try
+            {
+                string icoCandidate = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
+                if (!File.Exists(icoCandidate) && !string.IsNullOrEmpty(folderPath))
+                {
+                    icoCandidate = Path.Combine(folderPath, "app.ico");
+                }
+                if (File.Exists(icoCandidate))
+                {
+                    Icon newIcon = new Icon(icoCandidate);
+                    this.Icon = newIcon;
+                    if (trayIcon != null)
+                    {
+                        trayIcon.Icon = newIcon;
+                    }
+                }
+            }
+            catch { }
         }
 
         private void EnsurePruebasEnv(string pruebasFolder)

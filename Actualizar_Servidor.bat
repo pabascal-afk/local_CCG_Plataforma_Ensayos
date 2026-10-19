@@ -23,18 +23,17 @@ echo.
 
 echo [1/4] Deteniendo instancias previas en los puertos %APP_PORT% y %APP_BACKEND_PORT%...
 powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort %APP_PORT%,%APP_BACKEND_PORT% -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+if exist "Gestor_Servidores_CCG.exe.old" del /F /Q "Gestor_Servidores_CCG.exe.old" >nul 2>&1
+if exist "Gestor_Servidores_CCG.exe" move /Y "Gestor_Servidores_CCG.exe" "Gestor_Servidores_CCG.exe.old" >nul 2>&1
 
 echo.
 echo [2/4] Descargando ultimos cambios desde GitHub (origin/main)...
 git config --global http.sslVerify false >nul 2>&1
 git fetch origin main
-git stash
-git pull origin main
+git reset --hard origin/main
 IF ERRORLEVEL 1 (
-    echo.
-    echo [AVISO] Fallo git pull regular por modificaciones locales.
-    echo [INFO] Forzando sincronizacion exacta con origin/main...
-    git reset --hard origin/main
+    git stash
+    git pull origin main
 )
 
 echo.

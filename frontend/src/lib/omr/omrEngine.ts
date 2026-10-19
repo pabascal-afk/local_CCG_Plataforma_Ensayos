@@ -35,17 +35,31 @@ export interface SheetReadResult {
   fullImageDataUrl?: string;
 }
 
-interface Point {
+export interface Point {
   x: number;
   y: number;
 }
 
-interface CornerMarkers {
+export interface CornerMarkers {
   tl: Point;
   tr: Point;
   bl: Point;
   br: Point;
+  hasTl?: boolean;
+  hasTr?: boolean;
+  hasBl?: boolean;
+  hasBr?: boolean;
   detectedCount: number;
+}
+
+export interface LiveFrameCheckResult {
+  hasTl: boolean;
+  hasTr: boolean;
+  hasBl: boolean;
+  hasBr: boolean;
+  detectedCount: number;
+  isAligned: boolean;
+  qrMetadata: OmrSheetMetadata | null;
 }
 
 /**
@@ -242,6 +256,10 @@ function detectCornerMarkers(
     tr: finalTr || nomTr,
     bl: finalBl || nomBl,
     br: finalBr || nomBr,
+    hasTl: !!tl,
+    hasTr: !!tr,
+    hasBl: !!bl,
+    hasBr: !!br,
     detectedCount,
   };
 }
@@ -593,3 +611,102 @@ export async function readOmrSheetFromCanvas(
     fullImageDataUrl,
   };
 }
+
+/**
+ * Analiza en tiempo real (<15ms) un fotograma de video de la cámara para detectar
+ * los 4 marcadores fiduciales de esquina y el código QR institucional.
+ */
+export function detectLiveFrameCorners(
+  video: HTMLVideoElement,
+  scratchCanvas: HTMLCanvasElement
+): LiveFrameCheckResult {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh || vw < 120 || vh < 120) {
+    return {
+      hasTl: false,
+      hasTr: false,
+      hasBl: false,
+      hasBr: false,
+      detectedCount: 0,
+      isAligned: false,
+      qrMetadata: null,
+    };
+  }
+
+  const targetW = 520;
+  const targetH = Math.max(1, Math.round((targetW * vh) / vw));
+  if (scratchCanvas.width !== targetW || scratchCanvas.height !== targetH) {
+    scratchCanvas.width = targetW;
+    scratchCanvas.height = targetH;
+  }
+
+  const ctx = scratchCanvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    return {
+      hasTl: false,
+      hasTr: false,
+      hasBl: false,
+      hasBr: false,
+      detectedCount: 0,
+      isAligned: false,
+      qrMetadata: null,
+    };
+  }
+
+  ctx.drawImage(video, 0, 0, targetW, targetH);
+  const imgData = ctx.getImageData(0, 0, targetW, targetH);
+  const corners = detectCornerMarkers(imgData.data, targetW, targetH);
+
+  const topSpan = corners.tr.x - corners.tl.x;
+  const botSpan = corners.br.x - corners.bl.x;
+  const leftSpan = corners.bl.y - corners.tl.y;
+  const rightSpan = corners.br.y - corners.tr.y;
+
+  const validGeometry =
+    topSpan > targetW * 0.45 &&
+    botSpan > targetW * 0.45 &&
+    leftSpan > targetH * 0.45 &&
+    rightSpan > targetH * 0.45 &&
+    Math.abs(topSpan - botSpan) < targetW * 0.28 &&
+    Math.abs(leftSpan - rightSpan) < targetH * 0.28;
+
+  let qrMetadata: OmrSheetMetadata | null = null;
+  if (corners.detectedCount >= 2) {
+    // Buscar QR en el 40% superior del frame para máxima velocidad
+    const qrH = Math.round(targetH * 0.42);
+    const qrImg = ctx.getImageData(0, 0, targetW, qrH);
+    const qr = jsQR(qrImg.data, targetW, qrH, { inversionAttempts: "dontInvert" });
+    if (qr && qr.data) {
+      try {
+        const parsed = JSON.parse(qr.data);
+        if (parsed.aid && parsed.qc) {
+          qrMetadata = {
+            aid: Number(parsed.aid),
+            rut: String(parsed.rut || ""),
+            eid: Number(parsed.eid || 0),
+            qc: Number(parsed.qc),
+            oc: Number(parsed.oc || 4),
+          };
+        }
+      } catch {
+        // Ignorar QR externo
+      }
+    }
+  }
+
+  const isAligned =
+    validGeometry &&
+    (corners.detectedCount === 4 || (corners.detectedCount >= 3 && qrMetadata !== null));
+
+  return {
+    hasTl: Boolean(corners.hasTl),
+    hasTr: Boolean(corners.hasTr),
+    hasBl: Boolean(corners.hasBl),
+    hasBr: Boolean(corners.hasBr),
+    detectedCount: corners.detectedCount,
+    isAligned,
+    qrMetadata,
+  };
+}
+

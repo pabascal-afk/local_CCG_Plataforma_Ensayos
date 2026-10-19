@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { pdfjs } from "react-pdf";
 import {
   X,
@@ -19,9 +19,17 @@ import {
   Camera,
   Sparkles,
   ExternalLink,
+  Video,
+  Zap,
+  SwitchCamera,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { readOmrSheetFromCanvas, SheetReadResult } from "@/lib/omr/omrEngine";
+import {
+  readOmrSheetFromCanvas,
+  detectLiveFrameCorners,
+  SheetReadResult,
+  LiveFrameCheckResult,
+} from "@/lib/omr/omrEngine";
 
 // Configurar worker de pdfjs servido localmente desde public/pdf.worker.min.mjs
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
@@ -76,9 +84,270 @@ export default function OmrScannerModal({
   const [successMessage, setSuccessMessage] = useState("");
   const [viewingFullImage, setViewingFullImage] = useState<string | null>(null);
 
+  // Estados para Cámara en Vivo (Live Feed)
+  const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState<"environment" | "user">("environment");
+  const [cameraError, setCameraError] = useState("");
+  const [autoCapture, setAutoCapture] = useState(true);
+  const [torchOn, setTorchOn] = useState(false);
+  const [hasTorch, setHasTorch] = useState(false);
+  const [liveCheck, setLiveCheck] = useState<LiveFrameCheckResult | null>(null);
+  const [isCapturingFrame, setIsCapturingFrame] = useState(false);
+  const [lastScannedToast, setLastScannedToast] = useState<{
+    studentName: string;
+    rut: string;
+    answered: number;
+    total: number;
+  } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const nativeCameraInputRef = useRef<HTMLInputElement>(null);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scratchCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const alignedStreakRef = useRef<number>(0);
+  const lastAutoCapturedRef = useRef<{ rut: string; ts: number }>({ rut: "", ts: 0 });
+
+  const playScanBeep = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch {
+      // Ignorar si el navegador bloquea audio sin gesto
+    }
+  }, []);
+
+  const stopLiveCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => {
+        try {
+          t.stop();
+        } catch {}
+      });
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setLiveCheck(null);
+    setTorchOn(false);
+    setHasTorch(false);
+    alignedStreakRef.current = 0;
+  }, []);
+
+  const startLiveCamera = useCallback(
+    async (facing: "environment" | "user") => {
+      stopLiveCamera();
+      setCameraError("");
+
+      if (typeof navigator === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setCameraError(
+          "El navegador bloqueó el acceso al video en vivo porque estás conectado por HTTP local (sin HTTPS). Puedes usar el botón 'Cámara Nativa Directa' aquí abajo o habilitar el permiso en Chrome."
+        );
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: facing },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        });
+
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+
+        // Detectar soporte de linterna (torch)
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack && typeof (videoTrack as any).getCapabilities === "function") {
+          const caps = (videoTrack as any).getCapabilities();
+          setHasTorch(Boolean(caps && caps.torch));
+        }
+      } catch (err: any) {
+        console.error("Error al iniciar cámara en vivo:", err);
+        setCameraError(
+          err?.name === "NotAllowedError"
+            ? "Permiso de cámara denegado. Permite el acceso a la cámara en tu navegador o usa el botón de Cámara Nativa Directa."
+            : "No se pudo abrir el flujo de cámara en vivo. Puedes usar el botón de Cámara Nativa Directa aquí abajo."
+        );
+      }
+    },
+    [stopLiveCamera]
+  );
+
+  useEffect(() => {
+    if (!isOpen) {
+      stopLiveCamera();
+      setIsLiveCameraOpen(false);
+      return;
+    }
+  }, [isOpen, stopLiveCamera]);
+
+  useEffect(() => {
+    if (isOpen && isLiveCameraOpen) {
+      startLiveCamera(cameraFacingMode);
+    } else {
+      stopLiveCamera();
+    }
+    return () => {
+      stopLiveCamera();
+    };
+  }, [isOpen, isLiveCameraOpen, cameraFacingMode, startLiveCamera, stopLiveCamera]);
+
+  const toggleTorch = async () => {
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (!track) return;
+    const nextState = !torchOn;
+    try {
+      await (track as any).applyConstraints({
+        advanced: [{ torch: nextState }],
+      });
+      setTorchOn(nextState);
+    } catch {
+      // No soportado
+    }
+  };
+
+  const captureCurrentVideoFrame = useCallback(async () => {
+    if (!videoRef.current || isCapturingFrame) return;
+    const video = videoRef.current;
+    if (!video.videoWidth || !video.videoHeight) return;
+
+    setIsCapturingFrame(true);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const nextIndex = processedSheets.length + 1;
+      const omrResult = await readOmrSheetFromCanvas(canvas, nextIndex, assignmentId);
+
+      let matchedRut = omrResult.studentRut || "";
+      if (matchedRut === "GENERICO") matchedRut = "";
+      let matchedName = "";
+
+      if (matchedRut) {
+        const found = courseStudents.find(
+          (s) => s.rut.replace(/[^0-9kK]/g, "").toUpperCase() === matchedRut.replace(/[^0-9kK]/g, "").toUpperCase()
+        );
+        if (found) {
+          matchedName = found.name;
+          matchedRut = found.rut;
+        }
+      }
+
+      const newItem: ProcessedSheetItem = {
+        id: `cam-${Date.now()}-${Math.random()}`,
+        pageIndex: nextIndex,
+        fileName: "Cámara en Vivo",
+        result: omrResult,
+        selectedRut: matchedRut,
+        studentName: matchedName,
+        answers: { ...omrResult.answers },
+        isReviewed: false,
+      };
+
+      playScanBeep();
+      lastAutoCapturedRef.current = {
+        rut: matchedRut || "SIN_RUT",
+        ts: Date.now(),
+      };
+
+      setProcessedSheets((prev) => {
+        if (matchedRut) {
+          const existingIdx = prev.findIndex((p) => p.selectedRut === matchedRut);
+          if (existingIdx >= 0) {
+            const copy = [...prev];
+            copy[existingIdx] = { ...newItem, pageIndex: copy[existingIdx].pageIndex };
+            return copy;
+          }
+        }
+        return [newItem, ...prev];
+      });
+
+      setSelectedSheetId(newItem.id);
+      const answeredCount = Object.keys(omrResult.answers).length;
+      const totalQ = examMeta?.questionCount || omrResult.totalQuestions || 30;
+
+      setLastScannedToast({
+        studentName: matchedName || (matchedRut ? `RUT ${matchedRut}` : "Hoja Capturada (Asignar Alumno)"),
+        rut: matchedRut,
+        answered: answeredCount,
+        total: totalQ,
+      });
+    } catch (err) {
+      console.error("Error capturando frame OMR:", err);
+    } finally {
+      setIsCapturingFrame(false);
+      alignedStreakRef.current = 0;
+    }
+  }, [assignmentId, courseStudents, examMeta?.questionCount, isCapturingFrame, playScanBeep, processedSheets.length]);
+
+  // Bucle de análisis en tiempo real cada 220ms mientras la cámara en vivo está abierta
+  useEffect(() => {
+    if (!isOpen || !isLiveCameraOpen) return;
+
+    if (!scratchCanvasRef.current && typeof document !== "undefined") {
+      scratchCanvasRef.current = document.createElement("canvas");
+    }
+
+    const timer = setInterval(() => {
+      if (!videoRef.current || !scratchCanvasRef.current || isCapturingFrame) return;
+      const video = videoRef.current;
+      if (video.readyState < 2 || !video.videoWidth) return;
+
+      const check = detectLiveFrameCorners(video, scratchCanvasRef.current);
+      setLiveCheck(check);
+
+      if (autoCapture) {
+        if (check.isAligned) {
+          alignedStreakRef.current += 1;
+          if (alignedStreakRef.current >= 2) {
+            const now = Date.now();
+            const detectedRut = check.qrMetadata?.rut || "";
+            const isSameRecentRut =
+              detectedRut &&
+              detectedRut !== "GENERICO" &&
+              detectedRut === lastAutoCapturedRef.current.rut &&
+              now - lastAutoCapturedRef.current.ts < 5000;
+
+            if (!isSameRecentRut && now - lastAutoCapturedRef.current.ts >= 2000) {
+              captureCurrentVideoFrame();
+            }
+          }
+        } else {
+          alignedStreakRef.current = 0;
+        }
+      }
+    }, 220);
+
+    return () => clearInterval(timer);
+  }, [isOpen, isLiveCameraOpen, autoCapture, isCapturingFrame, captureCurrentVideoFrame]);
 
   // Cargar estudiantes del curso e información de la evaluación
   useEffect(() => {
@@ -421,6 +690,15 @@ export default function OmrScannerModal({
               onChange={handleFilesSelected}
               className="hidden"
             />
+            {/* Input oculto para Cámara Nativa Directa (compatible con HTTP móvil) */}
+            <input
+              type="file"
+              ref={nativeCameraInputRef}
+              accept="image/*"
+              capture="environment"
+              onChange={handleFilesSelected}
+              className="hidden"
+            />
             {/* Input genérico fallback */}
             <input
               type="file"
@@ -431,12 +709,26 @@ export default function OmrScannerModal({
               className="hidden"
             />
 
+            {/* Botón Destacado: Cámara en Vivo (Live Feed) */}
+            <button
+              type="button"
+              onClick={() => {
+                setLastScannedToast(null);
+                setIsLiveCameraOpen(true);
+              }}
+              disabled={isProcessing}
+              className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition cursor-pointer"
+            >
+              <Video className="w-4 h-4" />
+              <span>📹 Cámara en Vivo (Teléfono / Webcam)</span>
+            </button>
+
             {/* Botón 1: PDF Multipágina */}
             <button
               type="button"
               onClick={() => pdfInputRef.current?.click()}
               disabled={isProcessing}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition"
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 shadow-sm transition cursor-pointer"
             >
               <FileText className="w-4 h-4" />
               <span>Subir PDF Multipágina (Todo el Curso)</span>
@@ -447,7 +739,7 @@ export default function OmrScannerModal({
               type="button"
               onClick={() => imageInputRef.current?.click()}
               disabled={isProcessing}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold px-3.5 py-2 rounded-xl flex items-center gap-2 shadow-sm transition"
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold px-3.5 py-2 rounded-xl flex items-center gap-2 shadow-sm transition cursor-pointer"
             >
               <Camera className="w-4 h-4" />
               <span>Subir Fotos Sueltas (JPG/PNG)</span>
@@ -518,21 +810,38 @@ export default function OmrScannerModal({
 
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {processedSheets.length === 0 && !isProcessing && (
-                <div className="h-full flex flex-col items-center justify-center p-4 space-y-3">
+                <div className="h-full flex flex-col items-center justify-center p-4 space-y-2.5">
                   <p className="text-xs font-bold text-gray-500 uppercase tracking-wider text-center">
-                    Selecciona una forma de carga
+                    Selecciona una forma de escaneo
                   </p>
+
+                  {/* Opción 0: Cámara en Vivo */}
+                  <div
+                    onClick={() => {
+                      setLastScannedToast(null);
+                      setIsLiveCameraOpen(true);
+                    }}
+                    className="w-full p-3.5 rounded-xl border-2 border-dashed border-purple-300 bg-purple-50/60 hover:bg-purple-50 hover:border-purple-500 transition cursor-pointer text-center group"
+                  >
+                    <Video className="w-7 h-7 mx-auto mb-1.5 text-purple-600 group-hover:scale-110 transition-transform" />
+                    <p className="text-xs font-bold text-purple-900">
+                      📹 Escáner Cámara en Vivo (Teléfono / Webcam)
+                    </p>
+                    <p className="text-[11px] text-purple-700 mt-0.5 leading-snug">
+                      Apunta tu cámara a la hoja con auto-detección de las 4 esquinas y captura manos libres.
+                    </p>
+                  </div>
                   
                   {/* Opción 1: PDF multipágina */}
                   <div
                     onClick={() => pdfInputRef.current?.click()}
-                    className="w-full p-4 rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 hover:bg-emerald-50 hover:border-emerald-500 transition cursor-pointer text-center group"
+                    className="w-full p-3.5 rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 hover:bg-emerald-50 hover:border-emerald-500 transition cursor-pointer text-center group"
                   >
-                    <FileText className="w-8 h-8 mx-auto mb-2 text-emerald-600 group-hover:scale-110 transition-transform" />
+                    <FileText className="w-7 h-7 mx-auto mb-1.5 text-emerald-600 group-hover:scale-110 transition-transform" />
                     <p className="text-xs font-bold text-emerald-900">
-                      Subir PDF Multipágina (Recomendado)
+                      Subir PDF Multipágina (Escáner de Bandeja)
                     </p>
-                    <p className="text-[11px] text-emerald-700 mt-1 leading-snug">
+                    <p className="text-[11px] text-emerald-700 mt-0.5 leading-snug">
                       Escanea todas las hojas del curso juntas en una sola pasada y sube el archivo PDF.
                     </p>
                   </div>
@@ -540,13 +849,13 @@ export default function OmrScannerModal({
                   {/* Opción 2: Fotos sueltas */}
                   <div
                     onClick={() => imageInputRef.current?.click()}
-                    className="w-full p-4 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 hover:bg-blue-50 hover:border-blue-500 transition cursor-pointer text-center group"
+                    className="w-full p-3.5 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/50 hover:bg-blue-50 hover:border-blue-500 transition cursor-pointer text-center group"
                   >
-                    <Camera className="w-8 h-8 mx-auto mb-2 text-blue-600 group-hover:scale-110 transition-transform" />
+                    <Camera className="w-7 h-7 mx-auto mb-1.5 text-blue-600 group-hover:scale-110 transition-transform" />
                     <p className="text-xs font-bold text-blue-900">
                       Subir Fotos Sueltas (JPG/PNG)
                     </p>
-                    <p className="text-[11px] text-blue-700 mt-1 leading-snug">
+                    <p className="text-[11px] text-blue-700 mt-0.5 leading-snug">
                       Sube fotos tomadas con teléfono celular o imágenes individuales de hojas.
                     </p>
                   </div>
@@ -904,6 +1213,286 @@ export default function OmrScannerModal({
                   alt="Hoja OMR original en alta resolución"
                   className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-md border border-gray-300 bg-white"
                 />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Escáner Cámara en Vivo (Live Feed para Teléfono o Webcam) */}
+        {isLiveCameraOpen && (
+          <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-xs flex flex-col items-center justify-center p-2 sm:p-4 animate-in fade-in">
+            <div className="bg-slate-900 text-white rounded-2xl max-w-3xl w-full h-[94vh] sm:h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-700">
+              {/* Cabecera del Visor en Vivo */}
+              <div className="p-3 px-4 bg-slate-800/90 border-b border-slate-700 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+                      <span>Escáner OMR en Vivo</span>
+                      <span className="bg-purple-600/40 border border-purple-400/40 text-purple-200 text-[10px] px-2 py-0.5 rounded-full font-semibold">
+                        {processedSheets.length} escaneada(s)
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-300 hidden sm:block">
+                      Encuadra los 4 cuadrados negros de las esquinas de la hoja dentro del visor
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {/* Switch Auto-Captura */}
+                  <button
+                    type="button"
+                    onClick={() => setAutoCapture((v) => !v)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition cursor-pointer flex items-center gap-1.5 ${
+                      autoCapture
+                        ? "bg-emerald-600/30 border-emerald-400 text-emerald-200"
+                        : "bg-slate-700 border-slate-600 text-slate-300"
+                    }`}
+                    title="Capturar automáticamente apenas se detecten las 4 esquinas"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Auto-Captura: {autoCapture ? "ON" : "OFF"}</span>
+                  </button>
+
+                  {/* Linterna / Flash si está disponible */}
+                  {hasTorch && (
+                    <button
+                      type="button"
+                      onClick={toggleTorch}
+                      className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                        torchOn
+                          ? "bg-amber-500 text-slate-950 border-amber-300"
+                          : "bg-slate-700 text-slate-200 border-slate-600 hover:bg-slate-600"
+                      }`}
+                      title="Activar/Desactivar Linterna"
+                    >
+                      <Zap className="w-4 h-4" />
+                    </button>
+                  )}
+
+                  {/* Cambiar cámara (Trasera / Frontal) */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCameraFacingMode((prev) => (prev === "environment" ? "user" : "environment"))
+                    }
+                    className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600 transition cursor-pointer"
+                    title="Cambiar cámara (Trasera / Frontal)"
+                  >
+                    <SwitchCamera className="w-4 h-4" />
+                  </button>
+
+                  {/* Cerrar visor */}
+                  <button
+                    type="button"
+                    onClick={() => setIsLiveCameraOpen(false)}
+                    className="p-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-600 text-white transition cursor-pointer"
+                    title="Volver a la lista de hojas"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Cuerpo Central: Video en Vivo + Guía de 4 Esquinas Fiduciales */}
+              <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden">
+                {!cameraError ? (
+                  <>
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-contain"
+                    />
+
+                    {/* Overlay Guía de Encuadre OMR (4 Esquinas + QR) */}
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center p-4 sm:p-6">
+                      <div
+                        className={`relative w-full max-w-[440px] aspect-[216/279] max-h-full rounded-xl border-2 transition-all duration-200 ${
+                          liveCheck?.isAligned
+                            ? "border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.45)] bg-emerald-500/5"
+                            : "border-white/40 border-dashed"
+                        }`}
+                      >
+                        {/* Esquina Superior Izquierda (TL) */}
+                        <div
+                          className={`absolute top-2 left-2 w-8 h-8 rounded border-2 flex items-center justify-center text-[10px] font-mono font-bold transition-colors ${
+                            liveCheck?.hasTl
+                              ? "border-emerald-400 bg-emerald-500/30 text-emerald-200"
+                              : "border-amber-400/80 bg-black/40 text-amber-300"
+                          }`}
+                        >
+                          {liveCheck?.hasTl ? "✓" : "┌"}
+                        </div>
+
+                        {/* Esquina Superior Derecha (TR) + Zona QR */}
+                        <div
+                          className={`absolute top-2 right-2 w-8 h-8 rounded border-2 flex items-center justify-center text-[10px] font-mono font-bold transition-colors ${
+                            liveCheck?.hasTr
+                              ? "border-emerald-400 bg-emerald-500/30 text-emerald-200"
+                              : "border-amber-400/80 bg-black/40 text-amber-300"
+                          }`}
+                        >
+                          {liveCheck?.hasTr ? "✓" : "┐"}
+                        </div>
+
+                        {/* Guía QR junto a esquina superior derecha */}
+                        <div
+                          className={`absolute top-4 right-12 px-2 py-1 rounded border text-[9px] font-mono transition-colors ${
+                            liveCheck?.qrMetadata
+                              ? "border-emerald-400 bg-emerald-950/80 text-emerald-300"
+                              : "border-white/30 bg-black/50 text-white/70"
+                          }`}
+                        >
+                          {liveCheck?.qrMetadata
+                            ? `QR OK (${liveCheck.qrMetadata.rut})`
+                            : "ZONA QR"}
+                        </div>
+
+                        {/* Esquina Inferior Izquierda (BL) */}
+                        <div
+                          className={`absolute bottom-2 left-2 w-8 h-8 rounded border-2 flex items-center justify-center text-[10px] font-mono font-bold transition-colors ${
+                            liveCheck?.hasBl
+                              ? "border-emerald-400 bg-emerald-500/30 text-emerald-200"
+                              : "border-amber-400/80 bg-black/40 text-amber-300"
+                          }`}
+                        >
+                          {liveCheck?.hasBl ? "✓" : "└"}
+                        </div>
+
+                        {/* Esquina Inferior Derecha (BR) */}
+                        <div
+                          className={`absolute bottom-2 right-2 w-8 h-8 rounded border-2 flex items-center justify-center text-[10px] font-mono font-bold transition-colors ${
+                            liveCheck?.hasBr
+                              ? "border-emerald-400 bg-emerald-500/30 text-emerald-200"
+                              : "border-amber-400/80 bg-black/40 text-amber-300"
+                          }`}
+                        >
+                          {liveCheck?.hasBr ? "✓" : "┘"}
+                        </div>
+
+                        {/* Indicador Central de Estado de Alineación */}
+                        <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-slate-900/85 border border-slate-700 text-[11px] font-bold whitespace-nowrap shadow-lg">
+                          {liveCheck?.isAligned ? (
+                            <span className="text-emerald-400 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> ¡Hoja Alineada! ({liveCheck.detectedCount}/4 esquinas)
+                            </span>
+                          ) : (
+                            <span className="text-amber-300">
+                              Esquinas detectadas: {liveCheck?.detectedCount || 0} / 4
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  /* Fallback automático cuando el navegador móvil bloquea getUserMedia por HTTP */
+                  <div className="p-6 max-w-md text-center space-y-4">
+                    <div className="w-14 h-14 rounded-full bg-amber-500/20 border border-amber-400/40 flex items-center justify-center mx-auto text-amber-300">
+                      <Camera className="w-7 h-7" />
+                    </div>
+                    <h4 className="text-base font-bold text-white">
+                      Modo Cámara Directa para Red Local (HTTP)
+                    </h4>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      {cameraError}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsLiveCameraOpen(false);
+                        nativeCameraInputRef.current?.click();
+                      }}
+                      className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition"
+                    >
+                      <Camera className="w-4 h-4" />
+                      <span>📸 Abrir Cámara Nativa del Teléfono Ahora</span>
+                    </button>
+                    <div className="text-left bg-slate-800/90 border border-slate-700 rounded-xl p-3 text-[11px] text-slate-300 space-y-1">
+                      <p className="font-bold text-amber-300">
+                        💡 ¿Quieres activar el video continuo en Chrome Android sobre HTTP?
+                      </p>
+                      <p>
+                        1. Abre <code className="text-white bg-slate-950 px-1 py-0.5 rounded">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>
+                      </p>
+                      <p>
+                        2. Agrega <code className="text-emerald-300 bg-slate-950 px-1 py-0.5 rounded">{typeof window !== "undefined" ? window.location.origin : ""}</code>, ponlo en <b>Enabled</b> y reinicia Chrome.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Banner Flotante de Última Hoja Escaneada */}
+                {lastScannedToast && (
+                  <div className="absolute bottom-4 left-4 right-4 bg-emerald-950/95 border-2 border-emerald-400 text-white p-3 rounded-xl shadow-2xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3">
+                    <div className="flex items-center gap-2.5 overflow-hidden">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <div className="overflow-hidden">
+                        <p className="text-xs font-bold text-emerald-200 truncate">
+                          ✅ {lastScannedToast.studentName}
+                        </p>
+                        <p className="text-[11px] text-emerald-300/90">
+                          {lastScannedToast.answered} de {lastScannedToast.total} respuestas leídas • Apunta a la siguiente hoja
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsLiveCameraOpen(false)}
+                      className="shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg cursor-pointer transition"
+                    >
+                      Revisar ({processedSheets.length})
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Barra Inferior de Disparo Manual y Acceso a Cámara Nativa */}
+              <div className="p-3 px-4 bg-slate-800 border-t border-slate-700 flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsLiveCameraOpen(false);
+                    nativeCameraInputRef.current?.click();
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition"
+                  title="Tomar foto en máxima resolución con la app nativa de cámara del teléfono"
+                >
+                  <Camera className="w-3.5 h-3.5 text-blue-300" />
+                  <span>Cámara Nativa (Foto HD)</span>
+                </button>
+
+                {!cameraError && (
+                  <button
+                    type="button"
+                    disabled={isCapturingFrame}
+                    onClick={captureCurrentVideoFrame}
+                    className="flex-1 sm:flex-initial bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition"
+                  >
+                    {isCapturingFrame ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Procesando Hoja...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="w-4 h-4" />
+                        <span>📸 Capturar Hoja Ahora</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setIsLiveCameraOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer transition"
+                >
+                  Listo ({processedSheets.length})
+                </button>
               </div>
             </div>
           </div>
