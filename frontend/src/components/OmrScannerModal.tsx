@@ -688,62 +688,103 @@ export default function OmrScannerModal({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
-                    {Array.from({ length: qCount }).map((_, idx) => {
-                      const qNum = idx + 1;
-                      const selected = activeSheet.answers[qNum];
-                      const detail = activeSheet.result.questionsDetail?.find(
-                        (d) => d.questionNumber === qNum
-                      );
+                  {/* Distribución en Columnas Verticales Idéntica a la Hoja Física */}
+                  {(() => {
+                    const modalColumnsCount = qCount > 30 ? 3 : 2;
+                    const perColModal = Math.ceil(qCount / modalColumnsCount);
 
-                      const isDouble = detail?.status === "DOUBLE_MARK";
-                      const isUncertain = detail?.status === "UNCERTAIN";
+                    const modalColumns: number[][] = [];
+                    for (let c = 0; c < modalColumnsCount; c++) {
+                      const col: number[] = [];
+                      for (let r = 0; r < perColModal; r++) {
+                        const qNum = c * perColModal + r + 1;
+                        if (qNum <= qCount) {
+                          col.push(qNum);
+                        }
+                      }
+                      if (col.length > 0) modalColumns.push(col);
+                    }
 
-                      return (
-                        <div
-                          key={qNum}
-                          className={`p-2 rounded-lg border text-xs flex items-center justify-between ${
-                            isDouble
-                              ? "bg-rose-50 border-rose-300"
-                              : isUncertain
-                              ? "bg-amber-50 border-amber-300"
-                              : selected
-                              ? "bg-slate-50 border-gray-200"
-                              : "bg-white border-dashed border-gray-200 text-gray-400"
-                          }`}
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-gray-600 w-5 text-right">{qNum}.</span>
-                            {isDouble && (
-                              <span title="Doble marca detectada" className="text-rose-600 font-bold">
-                                ⚠
-                              </span>
-                            )}
-                          </div>
+                    return (
+                      <div className={`flex gap-3 items-start ${modalColumnsCount > 2 ? "flex-col lg:flex-row" : "flex-col sm:flex-row"}`}>
+                        {modalColumns.map((colQuestions, cIdx) => (
+                          <div
+                            key={cIdx}
+                            className="flex-1 w-full bg-slate-50/70 rounded-xl border border-gray-200 p-2.5 space-y-1.5 shadow-xs"
+                          >
+                            {/* Cabecera idéntica a la hoja física */}
+                            <div className="flex items-center justify-between pb-1.5 mb-1 border-b border-gray-300 text-[11px] font-bold text-gray-700 px-1">
+                              <span className="w-7 font-mono">N°</span>
+                              <div className="flex items-center gap-1.5 pr-1">
+                                {letters.map((letra) => (
+                                  <span key={letra} className="w-6 text-center font-bold font-mono">
+                                    {letra}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
 
-                          <div className="flex items-center gap-1">
-                            {letters.map((letra) => {
-                              const isChecked = selected === letra;
+                            {/* Filas de preguntas en orden vertical descendente (01..10, 11..20, etc.) */}
+                            {colQuestions.map((qNum) => {
+                              const selected = activeSheet.answers[qNum];
+                              const detail = activeSheet.result.questionsDetail?.find(
+                                (d) => d.questionNumber === qNum
+                              );
+
+                              const isDouble = detail?.status === "DOUBLE_MARK";
+                              const isUncertain = detail?.status === "UNCERTAIN";
+
                               return (
-                                <button
-                                  key={letra}
-                                  type="button"
-                                  onClick={() => handleAnswerChange(activeSheet.id, qNum, letra)}
-                                  className={`w-6 h-6 rounded-full font-bold text-[11px] transition flex items-center justify-center ${
-                                    isChecked
-                                      ? "bg-blue-600 text-white shadow-sm ring-2 ring-blue-300"
-                                      : "bg-white border border-gray-300 text-gray-600 hover:bg-gray-100"
+                                <div
+                                  key={qNum}
+                                  className={`p-1.5 px-2 rounded-lg border text-xs flex items-center justify-between transition-colors ${
+                                    isDouble
+                                      ? "bg-rose-50 border-rose-300"
+                                      : isUncertain
+                                      ? "bg-amber-50 border-amber-300"
+                                      : selected
+                                      ? "bg-white border-blue-200 shadow-xs"
+                                      : "bg-white/60 border-dashed border-gray-200 text-gray-400"
                                   }`}
                                 >
-                                  {letra}
-                                </button>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-gray-700 w-6 font-mono text-[11px]">
+                                      {String(qNum).padStart(2, "0")}
+                                    </span>
+                                    {isDouble && (
+                                      <span title="Doble marca detectada" className="text-rose-600 font-bold text-xs">
+                                        ⚠
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5">
+                                    {letters.map((letra) => {
+                                      const isChecked = selected === letra;
+                                      return (
+                                        <button
+                                          key={letra}
+                                          type="button"
+                                          onClick={() => handleAnswerChange(activeSheet.id, qNum, letra)}
+                                          className={`w-6 h-6 rounded-full font-bold text-[11px] font-mono transition flex items-center justify-center ${
+                                            isChecked
+                                              ? "bg-blue-600 text-white shadow-xs ring-2 ring-blue-300"
+                                              : "bg-white border border-gray-300 text-gray-600 hover:bg-gray-100 hover:border-gray-400"
+                                          }`}
+                                        >
+                                          {letra}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
                               );
                             })}
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Footer de la columna derecha con miniatura de la hoja completa */}

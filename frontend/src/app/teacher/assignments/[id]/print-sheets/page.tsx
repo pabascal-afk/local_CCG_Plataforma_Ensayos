@@ -433,28 +433,39 @@ export default function PrintSheetsPage() {
                       </div>
                     </div>
 
-                    {/* GRILLA DE BURBUJAS OMR (COLUMNAS BALANCEADAS CON CALIBRACIÓN) */}
+                    {/* GRILLA DE BURBUJAS OMR (COLUMNAS BALANCEADAS CON CALIBRACIÓN MILIMÉTRICA) */}
                     <div className="flex-1 flex gap-3 justify-between border-2 border-black rounded-xl p-2.5 bg-white min-h-0">
                       {columns.map((colQuestions, colIdx) => (
                         <div
                           key={colIdx}
                           className={`flex-1 flex flex-col justify-between ${
-                            colIdx < columns.length - 1 ? "border-r border-slate-300 pr-2.5" : ""
+                            colIdx < columns.length - 1 ? "border-r border-slate-300 pr-2" : ""
                           }`}
                         >
-                          {/* Cabecera de Columna */}
-                          <div className="flex items-center justify-between pb-1 mb-1 border-b border-black text-[9px] font-black text-slate-700">
-                            <span className="pl-1">N°</span>
-                            <div className={`flex ${columnsCount > 2 ? "gap-2" : "gap-3.5"} pr-1`}>
+                          {/* Cabecera de Columna alineada al milímetro con las burbujas */}
+                          <div className="flex items-center pb-1 mb-1 border-b border-black text-[9px] font-black text-slate-700">
+                            <span className={columnsCount > 2 ? "w-[11mm] pl-0.5" : "w-[14mm] pl-1"}>N°</span>
+                            <div
+                              className="flex items-center"
+                              style={{
+                                gap: columnsCount > 2 ? "4.5mm" : "8.8mm",
+                                marginLeft: columnsCount > 2 ? "3mm" : "6mm",
+                              }}
+                            >
                               {options.map((opt) => (
-                                <span key={opt} className="w-[5mm] text-center font-bold">
+                                <span
+                                  key={opt}
+                                  className={`text-center font-bold ${
+                                    columnsCount > 2 ? "w-[4.8mm]" : "w-[5.2mm]"
+                                  }`}
+                                >
                                   {opt}
                                 </span>
                               ))}
                             </div>
                           </div>
 
-                          {/* Filas de preguntas */}
+                          {/* Filas de preguntas con espaciado métrico determinista */}
                           <div className="flex-1 flex flex-col justify-around">
                             {colQuestions.map((q) => {
                               const correctOpt = isTeacherKey ? q.correctAnswer : null;
@@ -462,25 +473,37 @@ export default function PrintSheetsPage() {
                               return (
                                 <div
                                   key={q.id}
-                                  className="flex items-center justify-between py-[1px] border-b border-slate-100 last:border-b-0"
+                                  className="flex items-center py-[1px] border-b border-slate-100 last:border-b-0"
                                 >
                                   {/* Indicador de fila + Número de pregunta */}
-                                  <div className="flex items-center gap-1">
+                                  <div
+                                    className={`flex items-center gap-1 shrink-0 ${
+                                      columnsCount > 2 ? "w-[11mm]" : "w-[14mm]"
+                                    }`}
+                                  >
                                     <div className="w-1.5 h-1.5 bg-black rounded-xs shrink-0" />
-                                    <span className="text-xs font-mono font-bold w-5 text-slate-800">
+                                    <span className="text-xs font-mono font-bold text-slate-800">
                                       {String(q.questionNumber).padStart(2, "0")}
                                     </span>
                                   </div>
 
-                                  {/* Burbujas de respuestas con borde fino y letras claras para alto contraste OMR */}
-                                  <div className={`flex ${columnsCount > 2 ? "gap-2" : "gap-3.5"} pr-1`}>
+                                  {/* Burbujas de respuestas alineadas con precisión milimétrica */}
+                                  <div
+                                    className="flex items-center"
+                                    style={{
+                                      gap: columnsCount > 2 ? "4.5mm" : "8.8mm",
+                                      marginLeft: columnsCount > 2 ? "3mm" : "6mm",
+                                    }}
+                                  >
                                     {options.map((opt) => {
                                       const isCorrect = correctOpt === opt;
 
                                       return (
                                         <div
                                           key={opt}
-                                          className={`w-[5mm] h-[5mm] rounded-full flex items-center justify-center text-[8.5px] font-mono transition-all ${
+                                          className={`rounded-full flex items-center justify-center font-mono transition-all ${
+                                            columnsCount > 2 ? "w-[4.8mm] h-[4.8mm] text-[8px]" : "w-[5.2mm] h-[5.2mm] text-[8.5px]"
+                                          } ${
                                             isCorrect
                                               ? "bg-black text-white font-bold ring-1 ring-black"
                                               : isTeacherKey
