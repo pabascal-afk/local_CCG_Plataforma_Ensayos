@@ -1014,7 +1014,6 @@ namespace CCGServerManager
                         StandardErrorEncoding = Encoding.UTF8
                     };
 
-                    psi.EnvironmentVariables["NO_TRAY"] = "1";
                     psi.EnvironmentVariables["PORT"] = srv.MainPort.ToString();
                     if (srv.BackendPort > 0)
                     {
