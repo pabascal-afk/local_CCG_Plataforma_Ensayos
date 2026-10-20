@@ -19,15 +19,23 @@ export async function apiFetch<T = unknown>(
   options: { method?: string; body?: unknown; keepalive?: boolean } = {}
 ): Promise<T> {
   const token = getToken();
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+
+  const headers: Record<string, string> = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  if (!isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
+
   let res: Response;
   try {
     res = await fetch(`/api${path}`, {
       method: options.method || "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      headers,
+      body: options.body !== undefined
+        ? (isFormData ? (options.body as BodyInit) : JSON.stringify(options.body))
+        : undefined,
       keepalive: options.keepalive,
       cache: "no-store",
     });
