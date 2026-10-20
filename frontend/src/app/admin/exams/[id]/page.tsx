@@ -180,18 +180,33 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     setPasteText("");
   };
 
-  const handleSelectAnswerOrType = (qNum: string, val: string) => {
-    setAnswerKey(prev => ({ ...prev, [qNum]: val }));
-    if (val === "DESARROLLO") {
-      setQuestionTypesKeys(prev => ({ ...prev, [qNum]: "WRITTEN" }));
+  const [selectedAudioQuestion, setSelectedAudioQuestion] = useState<number | null>(null);
+
+  const handleTypeChange = (qNum: string, newType: string) => {
+    setQuestionTypesKeys(prev => ({ ...prev, [qNum]: newType }));
+    if (newType === "WRITTEN") {
+      setAnswerKey(prev => ({ ...prev, [qNum]: "DESARROLLO" }));
       setMaxPointsKeys(prev => ({ ...prev, [qNum]: prev[qNum] && prev[qNum] > 1 ? prev[qNum] : 5 }));
-    } else if (val === "ORAL") {
-      setQuestionTypesKeys(prev => ({ ...prev, [qNum]: "ORAL" }));
+    } else if (newType === "ORAL") {
+      setAnswerKey(prev => ({ ...prev, [qNum]: "ORAL" }));
       setMaxPointsKeys(prev => ({ ...prev, [qNum]: prev[qNum] && prev[qNum] > 1 ? prev[qNum] : 4 }));
     } else {
-      setQuestionTypesKeys(prev => ({ ...prev, [qNum]: "MULTIPLE_CHOICE" }));
+      setAnswerKey(prev => {
+        const curr = prev[qNum];
+        const defaultLetter = (curr && curr !== "DESARROLLO" && curr !== "ORAL") ? curr : "A";
+        return { ...prev, [qNum]: defaultLetter };
+      });
       setMaxPointsKeys(prev => ({ ...prev, [qNum]: 1 }));
     }
+  };
+
+  const handleKeyChange = (qNum: string, newKey: string) => {
+    setAnswerKey(prev => ({ ...prev, [qNum]: newKey }));
+  };
+
+  const openAudioModalForQuestion = (qNum: number) => {
+    setSelectedAudioQuestion(qNum);
+    setShowAudioModal(true);
   };
 
   if (loading) return <div className="p-8">Cargando...</div>;
@@ -221,7 +236,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     <RequireRole roles={["ADMIN", "DIRECTOR"]}>
       {(user) => (
         <AppShell user={user}>
-          <div className="p-8 max-w-6xl mx-auto">
+          <div className="p-8 max-w-7xl mx-auto">
             <div className="mb-6 flex justify-between items-end">
               <div>
                 <Link href="/admin/exams" className="text-blue-600 hover:underline flex items-center gap-1 inline-flex mb-2">
@@ -343,101 +358,148 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
               <div className="md:col-span-3">
                 <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
                   <table className="w-full text-left text-sm">
-                    <thead className="bg-gray-50 border-b text-gray-600">
+                    <thead className="bg-gray-50 border-b text-gray-600 text-xs">
                       <tr>
-                        <th className="p-3 font-semibold w-12 text-center">Nº</th>
-                        <th className="p-3 font-semibold w-52">Clave / Clasificación</th>
-                        <th className="p-3 font-semibold">Eje / Tema</th>
-                        <th className="p-3 font-semibold w-20">OA</th>
-                        <th className="p-3 font-semibold">Habilidad Cognitiva</th>
-                        <th className="p-3 font-semibold w-32">Dificultad (TRI)</th>
+                        <th className="p-3 font-bold w-12 text-center">Nº</th>
+                        <th className="p-3 font-bold w-44">Tipo de Pregunta</th>
+                        <th className="p-3 font-bold w-36">Clave / Puntaje</th>
+                        <th className="p-3 font-bold w-36">Audio (Listening)</th>
+                        <th className="p-3 font-bold">Eje / Tema</th>
+                        <th className="p-3 font-bold w-20">OA</th>
+                        <th className="p-3 font-bold">Habilidad Cognitiva</th>
+                        <th className="p-3 font-bold w-28">Dificultad (TRI)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
                       {questions.map((qNum) => {
                         const currentKey = answerKey[qNum] || "";
                         const qType = questionTypesKeys[qNum] || (currentKey === "DESARROLLO" ? "WRITTEN" : currentKey === "ORAL" ? "ORAL" : "MULTIPLE_CHOICE");
-                        const isOpen = qType === "WRITTEN" || qType === "ORAL" || currentKey === "DESARROLLO" || currentKey === "ORAL";
-                        const selectVal = qType === "WRITTEN" ? "DESARROLLO" : qType === "ORAL" ? "ORAL" : currentKey;
-                        const maxPts = maxPointsKeys[qNum] ?? (isOpen ? 5 : 1);
+                        const isOpen = qType === "WRITTEN" || qType === "ORAL";
+                        const maxPts = maxPointsKeys[qNum] ?? (qType === "ORAL" ? 4 : qType === "WRITTEN" ? 5 : 1);
+                        const hasAudioClip = audioQuestionsSet.has(Number(qNum));
 
                         return (
-                          <tr key={qNum} className={`hover:bg-blue-50/30 transition-colors ${isOpen ? "bg-amber-50/20" : ""}`}>
-                            <td className="p-3 text-center font-bold text-gray-500">
-                              <div className="flex flex-col items-center justify-center gap-0.5">
-                                <span>{qNum}</span>
-                                {audioQuestionsSet.has(Number(qNum)) && (
-                                  <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 border border-purple-200" title="Esta pregunta tiene audio asociado">
-                                    <Headphones className="w-2.5 h-2.5" /> Audio
-                                  </span>
-                                )}
-                              </div>
+                          <tr key={qNum} className={`hover:bg-blue-50/30 transition-colors ${isOpen ? "bg-amber-50/15" : ""}`}>
+                            <td className="p-3 text-center font-bold text-gray-700">
+                              {qNum}
                             </td>
+
+                            {/* 1. Tipo de Pregunta */}
                             <td className="p-3">
-                              <div className="flex items-center gap-1.5">
+                              <select
+                                value={qType}
+                                onChange={e => handleTypeChange(qNum, e.target.value)}
+                                className={`w-full border rounded-lg px-2 py-1.5 font-bold focus:ring-2 focus:ring-blue-500 outline-none text-xs transition ${
+                                  qType === "WRITTEN"
+                                    ? "bg-amber-50 border-amber-300 text-amber-900"
+                                    : qType === "ORAL"
+                                    ? "bg-purple-50 border-purple-300 text-purple-900"
+                                    : "bg-white border-gray-300 text-gray-800"
+                                }`}
+                              >
+                                <option value="MULTIPLE_CHOICE">🔘 Selección Múltiple</option>
+                                <option value="WRITTEN">📝 Desarrollo Escrito</option>
+                                <option value="ORAL">🗣️ Respuesta Oral</option>
+                              </select>
+                            </td>
+
+                            {/* 2. Clave o Puntaje */}
+                            <td className="p-3">
+                              {qType === "MULTIPLE_CHOICE" ? (
                                 <select
-                                  value={selectVal}
-                                  onChange={e => handleSelectAnswerOrType(qNum, e.target.value)}
-                                  className={`border rounded px-2 py-1.5 font-bold focus:ring-2 focus:ring-blue-500 outline-none text-xs ${
-                                    selectVal === "ORAL"
-                                      ? "bg-purple-50 border-purple-300 text-purple-900 flex-1"
-                                      : selectVal === "DESARROLLO"
-                                      ? "bg-amber-50 border-amber-300 text-amber-900 flex-1"
-                                      : selectVal
-                                      ? "bg-blue-50 border-blue-300 text-blue-800 w-full"
-                                      : "bg-white w-full"
+                                  value={(currentKey && currentKey !== "DESARROLLO" && currentKey !== "ORAL") ? currentKey : ""}
+                                  onChange={e => handleKeyChange(qNum, e.target.value)}
+                                  className={`w-full border rounded-lg px-2 py-1.5 font-bold focus:ring-2 focus:ring-blue-500 outline-none text-xs ${
+                                    currentKey && currentKey !== "DESARROLLO" && currentKey !== "ORAL"
+                                      ? "bg-blue-50 border-blue-300 text-blue-900"
+                                      : "bg-white border-gray-300 text-gray-500"
                                   }`}
                                 >
-                                  <option value="">-</option>
-                                  {Array.from({length: exam.optionsCount || 4}, (_, i) => String.fromCharCode(65 + i)).map(opt => (
+                                  <option value="">Clave: -</option>
+                                  {Array.from({ length: exam.optionsCount || 4 }, (_, i) => String.fromCharCode(65 + i)).map(opt => (
                                     <option key={opt} value={opt}>Alternativa {opt}</option>
                                   ))}
-                                  <option value="DESARROLLO">📝 Desarrollo Escrito</option>
-                                  <option value="ORAL">🗣️ Desarrollo Oral</option>
                                 </select>
-                                {isOpen && (
-                                  <div className="flex items-center gap-1 bg-white border border-slate-300 rounded px-1.5 py-1" title="Puntaje máximo de esta pregunta">
-                                    <input
-                                      type="number"
-                                      min={0.5}
-                                      max={100}
-                                      step="0.5"
-                                      value={maxPts}
-                                      onChange={e => setMaxPointsKeys(prev => ({ ...prev, [qNum]: Math.max(0.5, parseFloat(e.target.value) || 1) }))}
-                                      className="w-11 text-center font-black text-xs text-slate-900 outline-none"
-                                    />
-                                    <span className="text-[10px] font-bold text-slate-500">pts</span>
-                                  </div>
-                                )}
-                              </div>
+                              ) : (
+                                <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1" title="Puntaje máximo de esta pregunta">
+                                  <input
+                                    type="number"
+                                    min={0.5}
+                                    max={100}
+                                    step={0.5}
+                                    value={maxPts}
+                                    onChange={e => setMaxPointsKeys(prev => ({ ...prev, [qNum]: Math.max(0.5, parseFloat(e.target.value) || 1) }))}
+                                    className="w-12 text-center font-black text-xs text-slate-900 outline-none"
+                                  />
+                                  <span className="text-[11px] font-bold text-slate-500">pts</span>
+                                </div>
+                              )}
                             </td>
+
+                            {/* 3. Audio (Listening) */}
+                            <td className="p-3">
+                              {hasAudioClip ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
+                                    <Headphones className="w-3 h-3 text-purple-700" />
+                                    Con Audio
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => openAudioModalForQuestion(Number(qNum))}
+                                    className="text-purple-600 hover:text-purple-800 text-[11px] font-bold underline cursor-pointer"
+                                    title="Editar pista de audio para esta pregunta"
+                                  >
+                                    Editar
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => openAudioModalForQuestion(Number(qNum))}
+                                  className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-purple-700 hover:bg-purple-50 border border-dashed border-gray-300 hover:border-purple-300 px-2 py-1 rounded-md transition cursor-pointer"
+                                  title={`Asignar audio para la pregunta ${qNum}`}
+                                >
+                                  <Headphones className="w-3 h-3 text-gray-400" />
+                                  <span>+ Asignar Audio</span>
+                                </button>
+                              )}
+                            </td>
+
+                            {/* 4. Eje / Tema */}
                             <td className="p-3">
                               <input 
                                 type="text" 
                                 value={axesKeys[qNum] || ""} 
                                 onChange={e => setAxesKeys({ ...axesKeys, [qNum]: e.target.value })}
                                 placeholder="Ej: Geometría"
-                                className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none"
+                                className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none text-xs"
                               />
                             </td>
+
+                            {/* 5. OA */}
                             <td className="p-3">
                               <input 
                                 type="text" 
                                 value={learningObjectivesKeys[qNum] || ""} 
                                 onChange={e => setLearningObjectivesKeys({ ...learningObjectivesKeys, [qNum]: e.target.value })}
                                 placeholder="OA 14"
-                                className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none"
+                                className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none text-xs"
                               />
                             </td>
+
+                            {/* 6. Habilidad */}
                             <td className="p-3">
                               <input 
                                 type="text" 
                                 value={skillsKeys[qNum] || ""} 
                                 onChange={e => setSkillsKeys({ ...skillsKeys, [qNum]: e.target.value })}
-                                placeholder="Ej: Argumentar y comunicar"
-                                className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none"
+                                placeholder="Ej: Argumentar"
+                                className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none text-xs"
                               />
                             </td>
+
+                            {/* 7. Dificultad (TRI) */}
                             <td className="p-3">
                               <select
                                 value={normalizeDifficultySelectValue(difficultiesKeys[qNum])}
@@ -473,10 +535,14 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
           {/* Modal Cortador de Audio por Pregunta */}
           <AudioCutterModal
             isOpen={showAudioModal}
-            onClose={() => setShowAudioModal(false)}
+            onClose={() => {
+              setShowAudioModal(false);
+              setSelectedAudioQuestion(null);
+            }}
             examId={exam?.id}
             examTitle={exam?.title}
             questionCount={maxQ}
+            initialQuestionNumber={selectedAudioQuestion}
             onClipsUpdated={loadExam}
           />
         </AppShell>

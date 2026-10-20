@@ -596,42 +596,31 @@ export default function ExamsPage() {
                   return (
                     <div 
                       key={e.id} 
-                      className={`bg-white border rounded-2xl shadow-xs transition-all overflow-hidden border-l-4 ${theme.accentBorder} ${
+                      className={`bg-white border rounded-xl shadow-xs transition-all overflow-hidden ${
                         isExpanded 
-                          ? "border-t-blue-300 border-r-blue-300 border-b-blue-300 shadow-md ring-1 ring-blue-100" 
+                          ? "border-blue-400 ring-2 ring-blue-50 shadow-md" 
                           : "border-gray-200 hover:border-gray-300 hover:shadow-xs"
                       }`}
                     >
                       {/* Fila / Barra Compacta Clicable */}
                       <div 
                         onClick={() => toggleExamExpand(e.id)}
-                        className="p-3.5 sm:p-4 cursor-pointer select-none bg-white hover:bg-slate-50/70 transition-colors space-y-2.5"
+                        className="p-4 cursor-pointer select-none bg-white hover:bg-slate-50/70 transition-colors"
                       >
-                        {/* Fila 1: Badges de Identificación y Acciones */}
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                            {/* Número de Orden */}
-                            <span className="bg-slate-900 text-white font-black text-xs px-2 py-0.5 rounded-md shrink-0 shadow-2xs">
+                        {/* Fila 1: Badges superiores (Orden, Nivel, Tipo a la izquierda; Botón Audio condicional y Chevron a la derecha) */}
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="bg-slate-900 text-white font-black text-xs px-2 py-0.5 rounded-md">
                               #{e.orderNumber}
                             </span>
-
-                            {/* Nivel */}
-                            <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs px-2 py-0.5 rounded-md shrink-0">
+                            <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs px-2 py-0.5 rounded-md">
                               {formatLevelName(e.level)}
                             </span>
-
-                            {/* Materia con color distintivo */}
-                            <span className={`border text-[11px] font-bold px-2 py-0.5 rounded-md truncate max-w-[130px] sm:max-w-[170px] ${theme.bgBadge}`}>
-                              {e.subject}
-                            </span>
-
-                            {/* Tipo */}
                             {getExamTypeBadge(e.examType)}
                           </div>
 
-                          {/* Acciones del Encabezado */}
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {/* BOTÓN DE AUDIOS: SOLO SI LA PRUEBA TIENE AUDIOS */}
+                            {/* BOTÓN DE AUDIOS: SOLO SI LA EVALUACIÓN TIENE AUDIOS ASIGNADOS */}
                             {hasAudio && (
                               <button
                                 type="button"
@@ -639,143 +628,117 @@ export default function ExamsPage() {
                                   ev.stopPropagation();
                                   setSelectedAudioExam(e);
                                 }}
-                                className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-100/90 hover:bg-purple-200 border border-purple-200 px-2 py-1 rounded-lg transition shadow-2xs"
-                                title={`Esta prueba tiene ${e.audioClipsCount || 1} audio(s) asignado(s). Clic para escuchar o editar.`}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2 py-0.5 rounded-md transition"
+                                title={`${e.audioClipsCount || 1} audio(s) configurado(s). Clic para abrir el cortador.`}
                               >
                                 <Headphones className="w-3.5 h-3.5 text-purple-700 shrink-0" />
-                                <span className="font-extrabold">{e.audioClipsCount || ""}</span>
-                                <span className="hidden sm:inline">Audios</span>
+                                <span>Audios</span>
                               </button>
                             )}
 
-                            {/* Chevron Expandir/Colapsar */}
-                            <div className={`p-1 rounded-lg text-gray-400 hover:text-gray-600 transition ${isExpanded ? "bg-blue-50 text-blue-600" : ""}`}>
-                              {isExpanded ? (
-                                <ChevronUp className="w-4 h-4 text-blue-600" />
-                              ) : (
-                                <ChevronDown className="w-4 h-4" />
-                              )}
+                            <div className={`p-1 rounded-md text-gray-400 hover:text-gray-600 transition ${isExpanded ? "text-blue-600 bg-blue-50" : ""}`}>
+                              {isExpanded ? <ChevronUp className="w-4 h-4 text-blue-600" /> : <ChevronDown className="w-4 h-4" />}
                             </div>
                           </div>
                         </div>
 
-                        {/* Fila 2: Título de la Prueba con buena jerarquía */}
-                        <h2 className="text-sm font-black text-gray-900 leading-snug line-clamp-2">
-                          {e.title}
-                        </h2>
+                        {/* Fila 2: Materia y Título */}
+                        <div className="mb-2.5">
+                          <div className="text-[11px] font-extrabold text-blue-800 uppercase tracking-wide">
+                            {e.subject}
+                          </div>
+                          <h2 className="text-sm font-bold text-gray-900 leading-snug line-clamp-1 mt-0.5" title={e.title}>
+                            {e.title}
+                          </h2>
+                        </div>
 
-                        {/* Fila 3: Micro-chips de Información Rápida */}
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-500 pt-0.5">
-                          <span className="inline-flex items-center gap-1 font-semibold bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-[11px]">
-                            <FileText className="w-3 h-3 text-gray-500" />
-                            {e.questionCount} {e.questionCount === 1 ? "preg" : "preg"}
-                          </span>
-
-                          {Boolean(e.totalMaxPoints && e.totalMaxPoints !== e.questionCount) && (
-                            <span className="inline-flex items-center gap-1 font-bold bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-[11px]" title="Puntaje total máximo de la pauta">
-                              🎯 {e.totalMaxPoints} pts
-                            </span>
-                          )}
-
+                        {/* Fila 3: Metadatos simples y limpios (1 sola línea, sin colisiones) */}
+                        <div className="flex items-center gap-2 text-xs text-gray-500 pt-2 border-t border-gray-100 font-medium">
+                          <span className="text-gray-800 font-semibold">{e.questionCount} preg</span>
+                          <span>•</span>
+                          <span>{e.durationMinutes ? `${e.durationMinutes} min` : "Libre"}</span>
+                          <span>•</span>
+                          <span>{e.optionsCount ? `${e.optionsCount} alt.` : "4 alt."}</span>
                           {Boolean(e.writtenCount && e.writtenCount > 0) && (
-                            <span className="inline-flex items-center gap-1 font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded text-[11px]" title="Preguntas con desarrollo escrito">
-                              📝 {e.writtenCount} esc.
-                            </span>
+                            <>
+                              <span>•</span>
+                              <span className="text-amber-700 font-semibold">{e.writtenCount} esc.</span>
+                            </>
                           )}
-
                           {Boolean(e.oralCount && e.oralCount > 0) && (
-                            <span className="inline-flex items-center gap-1 font-bold bg-purple-50 text-purple-800 border border-purple-200 px-2 py-0.5 rounded text-[11px]" title="Preguntas de respuesta oral">
-                              🗣️ {e.oralCount} oral
-                            </span>
+                            <>
+                              <span>•</span>
+                              <span className="text-purple-700 font-semibold">{e.oralCount} oral</span>
+                            </>
                           )}
-
-                          {e.durationMinutes ? (
-                            <span className="inline-flex items-center gap-1 text-gray-500 text-[11px]">
-                              <Clock className="w-3 h-3 text-gray-400" />
-                              {e.durationMinutes} min
-                            </span>
-                          ) : null}
-
-                          {hasAudio && e.audioQuestionNumbers && e.audioQuestionNumbers.length > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded" title="Preguntas con pista de audio">
-                              🎧 Preg {e.audioQuestionNumbers.join(", ")}
-                            </span>
+                          {hasAudio && (
+                            <>
+                              <span>•</span>
+                              <span className="text-purple-700 font-bold inline-flex items-center gap-0.5">
+                                <Headphones className="w-3 h-3" /> Audio
+                              </span>
+                            </>
                           )}
                         </div>
                       </div>
 
                       {/* Contenido Expandido */}
                       {isExpanded && (
-                        <div className="px-4 pb-4 pt-3 border-t border-gray-100 bg-slate-50/60 space-y-3.5">
-                          {/* Ficha Técnica Detallada */}
-                          <div className="bg-white p-3 rounded-xl border border-gray-200/80 shadow-2xs space-y-2">
-                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">
-                              Estructura de la Evaluación
-                            </span>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                <span className="text-[10px] text-gray-400 font-bold block">Preguntas</span>
-                                <span className="font-black text-gray-800 text-sm">{e.questionCount}</span>
-                                <span className="text-[10px] text-gray-500 block truncate">
-                                  {e.multipleChoiceCount ?? e.questionCount} selec.
-                                  {(e.writtenCount ?? 0) > 0 ? `, ${e.writtenCount} esc.` : ""}
-                                  {(e.oralCount ?? 0) > 0 ? `, ${e.oralCount} oral` : ""}
-                                </span>
-                              </div>
-
-                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                <span className="text-[10px] text-gray-400 font-bold block">Puntaje Total</span>
-                                <span className="font-black text-blue-700 text-sm">
-                                  {e.totalMaxPoints ?? e.questionCount} pts
-                                </span>
-                                <span className="text-[10px] text-gray-500 block">Pauta corregida</span>
-                              </div>
-
-                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                <span className="text-[10px] text-gray-400 font-bold block">Duración</span>
-                                <span className="font-black text-gray-800 text-sm">
-                                  {e.durationMinutes ? `${e.durationMinutes} min` : "Libre"}
-                                </span>
-                                <span className="text-[10px] text-gray-500 block">Tiempo en sala</span>
-                              </div>
-
-                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                <span className="text-[10px] text-gray-400 font-bold block">Alternativas</span>
-                                <span className="font-black text-gray-800 text-sm">
-                                  {e.optionsCount ? `${e.optionsCount} (A-${String.fromCharCode(64 + e.optionsCount)})` : "4 (A-D)"}
-                                </span>
-                                <span className="text-[10px] text-gray-500 block">Selección múltiple</span>
-                              </div>
+                        <div className="px-4 pb-4 pt-3 border-t border-gray-100 bg-slate-50/70 space-y-3">
+                          {/* Resumen en 3 métricas limpias */}
+                          <div className="grid grid-cols-3 gap-2 text-xs bg-white p-3 rounded-xl border border-gray-200 shadow-2xs">
+                            <div>
+                              <span className="text-[10px] text-gray-400 font-bold uppercase block">Preguntas</span>
+                              <span className="font-black text-gray-800 text-sm">{e.questionCount}</span>
+                              <span className="text-[10px] text-gray-500 block truncate">
+                                {e.multipleChoiceCount ?? e.questionCount} selec.
+                                {(e.writtenCount ?? 0) > 0 ? `, ${e.writtenCount} esc.` : ""}
+                                {(e.oralCount ?? 0) > 0 ? `, ${e.oralCount} oral` : ""}
+                              </span>
                             </div>
 
-                            {/* Banner informativo de audios: SOLO SI TIENE AUDIOS */}
-                            {hasAudio && (
-                              <div className="mt-2 p-2.5 bg-purple-50/90 border border-purple-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                                <div className="flex items-center gap-2 text-purple-900">
-                                  <Headphones className="w-4 h-4 text-purple-700 shrink-0" />
-                                  <span>
-                                    <strong>{e.audioClipsCount || 1} pista(s) de audio asignada(s)</strong>
-                                    {e.audioQuestionNumbers && e.audioQuestionNumbers.length > 0 ? (
-                                      <> para la(s) pregunta(s) <strong>{e.audioQuestionNumbers.join(", ")}</strong>.</>
-                                    ) : (
-                                      <> configuradas en esta evaluación.</>
-                                    )}
-                                  </span>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedAudioExam(e)}
-                                  className="self-end sm:self-auto shrink-0 bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] px-3 py-1 rounded-md shadow-2xs transition"
-                                >
-                                  Abrir Cortador
-                                </button>
-                              </div>
-                            )}
+                            <div>
+                              <span className="text-[10px] text-gray-400 font-bold uppercase block">Puntaje Total</span>
+                              <span className="font-black text-blue-700 text-sm">
+                                {e.totalMaxPoints ?? e.questionCount} pts
+                              </span>
+                              <span className="text-[10px] text-gray-500 block">Pauta oficial</span>
+                            </div>
+
+                            <div>
+                              <span className="text-[10px] text-gray-400 font-bold uppercase block">Tiempo</span>
+                              <span className="font-black text-gray-800 text-sm">
+                                {e.durationMinutes ? `${e.durationMinutes} min` : "Libre"}
+                              </span>
+                              <span className="text-[10px] text-gray-500 block">Duración</span>
+                            </div>
                           </div>
+
+                          {/* Banner de audios: SOLO SI TIENE AUDIOS */}
+                          {hasAudio && (
+                            <div className="p-2.5 bg-purple-50/90 border border-purple-200 rounded-lg flex items-center justify-between gap-2 text-xs">
+                              <div className="flex items-center gap-2 text-purple-900">
+                                <Headphones className="w-4 h-4 text-purple-700 shrink-0" />
+                                <span>
+                                  <strong>{e.audioClipsCount || 1} pista(s) de audio asignada(s)</strong>
+                                  {e.audioQuestionNumbers && e.audioQuestionNumbers.length > 0 ? (
+                                    <> (preguntas <strong>{e.audioQuestionNumbers.join(", ")}</strong>).</>
+                                  ) : null}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedAudioExam(e)}
+                                className="shrink-0 bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] px-2.5 py-1 rounded-md transition"
+                              >
+                                Abrir Cortador
+                              </button>
+                            </div>
+                          )}
 
                           {/* Cursos Asignados */}
                           <div>
-                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block mb-1">
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
                               Cursos Programados ({e.assignedCourses?.length || 0}):
                             </span>
                             {e.assignedCourses && e.assignedCourses.length > 0 ? (
@@ -783,14 +746,14 @@ export default function ExamsPage() {
                                 {e.assignedCourses.map(ac => (
                                   <span 
                                     key={ac.id} 
-                                    className="text-[11px] font-bold bg-white border border-slate-200 text-slate-800 px-2.5 py-1 rounded-md shadow-2xs"
+                                    className="text-[11px] font-bold bg-white border border-slate-200 text-slate-800 px-2.5 py-0.5 rounded-md shadow-2xs"
                                   >
                                     {formatLevelName(ac.level)} {ac.letter} <span className="text-gray-400 font-normal">({ac.year})</span>
                                   </span>
                                 ))}
                               </div>
                             ) : (
-                              <p className="text-xs text-gray-400 italic bg-white p-2.5 rounded-lg border border-dashed border-gray-200">
+                              <p className="text-xs text-gray-400 italic bg-white p-2 rounded-lg border border-dashed border-gray-200">
                                 Disponible en catálogo. Aún no ha sido asignada a ningún curso.
                               </p>
                             )}
@@ -801,7 +764,7 @@ export default function ExamsPage() {
                             <button 
                               type="button"
                               onClick={() => handleDelete(e.id)} 
-                              className="inline-flex items-center gap-1.5 text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg font-semibold transition"
+                              className="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2 py-1 rounded-lg font-semibold transition"
                               title="Eliminar esta prueba del catálogo"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -809,20 +772,19 @@ export default function ExamsPage() {
                             </button>
 
                             <div className="flex items-center gap-2">
-                              {/* Botón Audios en footer: SOLO SI TIENE AUDIOS */}
                               {hasAudio && (
                                 <button 
                                   type="button"
                                   onClick={() => setSelectedAudioExam(e)}
-                                  className="inline-flex items-center gap-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"
+                                  className="inline-flex items-center gap-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs px-2.5 py-1.5 rounded-lg transition"
                                 >
                                   <Headphones className="w-3.5 h-3.5 text-purple-600" />
-                                  <span>Gestionar Audios</span>
+                                  <span>Audios</span>
                                 </button>
                               )}
                               <Link 
                                 href={`/admin/exams/${e.id}`} 
-                                className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-xs transition"
+                                className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"
                               >
                                 <FileSpreadsheet className="w-3.5 h-3.5" />
                                 <span>Editar Pauta</span>
