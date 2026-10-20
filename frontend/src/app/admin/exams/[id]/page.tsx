@@ -91,19 +91,20 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     }
   };
 
+  const loadExam = async () => {
+    try {
+      const e = await apiFetch<any>(`/admin/exams/${id}`);
+      if (!e) throw new Error("Ensayo no encontrado");
+      applyExamState(e);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const load = async () => {
-      try {
-        const e = await apiFetch<any>(`/admin/exams/${id}`);
-        if (!e) throw new Error("Ensayo no encontrado");
-        applyExamState(e);
-      } catch (err: any) {
-        alert(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+    loadExam();
   }, [id]);
 
   const handleSave = async () => {
@@ -199,6 +200,23 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const maxQ = Math.max(exam.questionCount || 45, ...Object.keys(answerKey).map(Number).filter(n => !isNaN(n)));
   const questions = Array.from({ length: maxQ }, (_, i) => String(i + 1));
 
+  const audioQuestionsSet = new Set<number>();
+  if (exam?.audioQuestionNumbers && Array.isArray(exam.audioQuestionNumbers)) {
+    exam.audioQuestionNumbers.forEach((n: number) => audioQuestionsSet.add(n));
+  } else if (exam?.audioClips && Array.isArray(exam.audioClips)) {
+    exam.audioClips.forEach((c: any) => {
+      try {
+        const parsed = JSON.parse(c.questionNumbers);
+        if (Array.isArray(parsed)) parsed.forEach((n: number) => audioQuestionsSet.add(n));
+      } catch {
+        String(c.questionNumbers || "").split(",").forEach((n: string) => {
+          const num = parseInt(n.trim(), 10);
+          if (!isNaN(num)) audioQuestionsSet.add(num);
+        });
+      }
+    });
+  }
+
   return (
     <RequireRole roles={["ADMIN", "DIRECTOR"]}>
       {(user) => (
@@ -250,20 +268,31 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                 </div>
 
                 {/* Card Audios por Pregunta / Cortador */}
-                <div className="bg-indigo-50 border border-indigo-200 text-indigo-950 p-4 rounded-xl shadow-sm space-y-2">
-                  <h3 className="font-semibold text-sm flex items-center gap-1.5 text-indigo-900">
-                    <Headphones className="w-4 h-4 text-indigo-600" /> Audios por Pregunta
-                  </h3>
-                  <p className="text-xs text-indigo-700 leading-snug">
+                <div className="bg-purple-50/90 border border-purple-200 text-purple-950 p-4 rounded-xl shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-sm flex items-center gap-1.5 text-purple-900">
+                      <Headphones className="w-4 h-4 text-purple-700" /> Audios por Pregunta
+                    </h3>
+                    {exam?.audioClipsCount ? (
+                      <span className="bg-purple-200 text-purple-900 font-extrabold text-[10px] px-2 py-0.5 rounded-full">
+                        {exam.audioClipsCount} pista(s)
+                      </span>
+                    ) : (
+                      <span className="bg-gray-200/80 text-gray-600 font-bold text-[10px] px-2 py-0.5 rounded-full">
+                        0 audios
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-purple-800 leading-snug">
                     Sube audios para comprensión auditiva, córtalos con el visor de onda y asígnalos a preguntas específicas.
                   </p>
                   <button
                     type="button"
                     onClick={() => setShowAudioModal(true)}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 px-3 rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    className="w-full bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs py-2 px-3 rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition cursor-pointer"
                   >
                     <Scissors className="w-3.5 h-3.5" />
-                    <span>Gestionar / Cortar Audios</span>
+                    <span>{exam?.audioClipsCount ? "Gestionar / Cortar Audios" : "Agregar Pistas de Audio"}</span>
                   </button>
                 </div>
 
@@ -334,7 +363,16 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
 
                         return (
                           <tr key={qNum} className={`hover:bg-blue-50/30 transition-colors ${isOpen ? "bg-amber-50/20" : ""}`}>
-                            <td className="p-3 text-center font-bold text-gray-500">{qNum}</td>
+                            <td className="p-3 text-center font-bold text-gray-500">
+                              <div className="flex flex-col items-center justify-center gap-0.5">
+                                <span>{qNum}</span>
+                                {audioQuestionsSet.has(Number(qNum)) && (
+                                  <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 border border-purple-200" title="Esta pregunta tiene audio asociado">
+                                    <Headphones className="w-2.5 h-2.5" /> Audio
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="p-3">
                               <div className="flex items-center gap-1.5">
                                 <select
@@ -439,6 +477,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
             examId={exam?.id}
             examTitle={exam?.title}
             questionCount={maxQ}
+            onClipsUpdated={loadExam}
           />
         </AppShell>
       )}
