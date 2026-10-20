@@ -36,12 +36,13 @@ const uploadAudioDisk = multer({
       return cb(err);
     }
     const isAllowedExt = /\.(mp3|m4a|aac|ogg|oga|webm|opus)$/i.test(original);
-    const isAllowedMime = /^audio\/(mpeg|mp3|mp4|x-m4a|aac|ogg|webm|opus)$/i.test(file.mimetype) ||
+    const isAllowedMime = /^audio\//i.test(file.mimetype) ||
+                          file.mimetype === 'video/mp4' ||
                           file.mimetype === 'application/octet-stream';
     if (isAllowedExt || isAllowedMime) {
       cb(null, true);
     } else {
-      const err = new Error('Formato no soportado. Solo se permiten audios comprimidos (.mp3, .m4a, .aac, .ogg, .webm).');
+      const err = new Error(`Formato no soportado (${file.mimetype || 'desconocido'}). Solo se permiten audios comprimidos (.mp3, .m4a, .aac, .ogg, .webm).`);
       err.status = 400;
       cb(err);
     }
@@ -2123,6 +2124,12 @@ router.post('/assignments/:id/audios', (req, res, next) => {
 }, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
+    console.log('[POST /assignments/:id/audios]', {
+      assignmentId: id,
+      file: req.file ? { filename: req.file.filename, originalname: req.file.originalname, size: req.file.size, mimetype: req.file.mimetype } : null,
+      existingAudioPath: req.body?.existingAudioPath,
+      hasClips: !!req.body?.clips
+    });
     const assignment = await prisma.examAssignment.findUnique({
       where: { id },
       include: { exam: true }
@@ -2137,6 +2144,7 @@ router.post('/assignments/:id/audios', (req, res, next) => {
     const examId = assignment.examId;
     let audioPath = req.file ? req.file.filename : (req.body.existingAudioPath ? path.basename(req.body.existingAudioPath) : null);
     if (!audioPath) {
+      console.warn('[POST /assignments/:id/audios] 400: No audioPath found (no file and no existingAudioPath)');
       return res.status(400).json({ error: 'Debes seleccionar y subir un archivo de audio (.mp3, .m4a, .ogg)' });
     }
 

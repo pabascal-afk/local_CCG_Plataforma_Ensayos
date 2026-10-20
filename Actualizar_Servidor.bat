@@ -7,10 +7,12 @@ if %errorlevel% equ 0 (
     set APP_NAME=PRUEBAS CCG
     set APP_PORT=3600
     set APP_BACKEND_PORT=3601
+    set GIT_BRANCH=pruebas-ccg
 ) else (
     set APP_NAME=Plataforma SIMCE
     set APP_PORT=3300
     set APP_BACKEND_PORT=3001
+    set GIT_BRANCH=main
 )
 
 title Actualizar %APP_NAME% desde GitHub - Colegio Cerro Grande
@@ -27,13 +29,13 @@ if exist "Gestor_Servidores_CCG.exe.old" del /F /Q "Gestor_Servidores_CCG.exe.ol
 if exist "Gestor_Servidores_CCG.exe" move /Y "Gestor_Servidores_CCG.exe" "Gestor_Servidores_CCG.exe.old" >nul 2>&1
 
 echo.
-echo [2/4] Descargando ultimos cambios desde GitHub (origin/main)...
+echo [2/4] Descargando ultimos cambios desde GitHub (origin/%GIT_BRANCH%)...
 git config --global http.sslVerify false >nul 2>&1
-git fetch origin main
-git reset --hard origin/main
+git fetch origin %GIT_BRANCH%
+git reset --hard origin/%GIT_BRANCH%
 IF ERRORLEVEL 1 (
     git stash
-    git pull origin main
+    git pull origin %GIT_BRANCH%
 )
 
 echo.

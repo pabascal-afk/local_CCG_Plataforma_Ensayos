@@ -19,6 +19,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api";
+import { getToken } from "@/lib/session";
 
 export interface AudioClipItem {
   id: number;
@@ -376,6 +377,12 @@ export default function AudioCutterModal({
     setSuccessMsg("");
 
     try {
+      if (!serverAudioPath && !audioFile) {
+        setErrorMsg("Debes seleccionar o cargar un archivo de audio antes de guardar el fragmento.");
+        setSavingClip(false);
+        return;
+      }
+
       const formData = new FormData();
       if (serverAudioPath) {
         formData.append("existingAudioPath", serverAudioPath);
@@ -393,13 +400,22 @@ export default function AudioCutterModal({
 
       formData.append("clips", JSON.stringify([clipPayload]));
 
-      const res = await apiFetch<any>(apiBasePath, {
+      const token = getToken();
+      const res = await fetch(`/api${apiBasePath}`, {
         method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: formData,
       });
 
-      if (res?.clips?.[0]?.audioPath) {
-        setServerAudioPath(res.clips[0].audioPath);
+      const resData = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(resData?.error || `Error ${res.status}: no se pudo guardar el fragmento`);
+      }
+
+      if (resData?.clips?.[0]?.audioPath) {
+        setServerAudioPath(resData.clips[0].audioPath);
       }
 
       setSuccessMsg(`¡Fragmento guardado exitosamente para la(s) pregunta(s) ${selectedQuestions.join(", ")}!`);
