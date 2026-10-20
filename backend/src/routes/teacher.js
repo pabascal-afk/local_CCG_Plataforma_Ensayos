@@ -1630,7 +1630,7 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
                 create: {
                   submissionId: submission.id,
                   questionId: q.id,
-                  selectedAnswer: existing?.selectedAnswer || null,
+                  selectedAnswer: existing?.selectedAnswer || '',
                   awardedPoints: finalPts,
                   isCorrect
                 }
@@ -1838,7 +1838,7 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
                 create: {
                   submissionId: submission.id,
                   questionId: q.id,
-                  selectedAnswer: existing?.selectedAnswer || null,
+                  selectedAnswer: existing?.selectedAnswer || '',
                   awardedPoints: finalPts,
                   isCorrect
                 }
@@ -1957,9 +1957,10 @@ router.post('/assignments/:id/grade-open-questions', async (req, res, next) => {
       const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL' || q.correctAnswer === 'DESARROLLO' || q.correctAnswer === 'ORAL';
       if (!isOpen) continue;
 
+      const existing = (submission.answers || []).find(a => a.questionId === q.id);
+
       if (rawPts === null || rawPts === '') {
         // Clear awardedPoints while keeping any digital text answer
-        const existing = (submission.answers || []).find(a => a.questionId === q.id);
         if (existing) {
           if (existing.selectedAnswer) {
             await prisma.submissionAnswer.update({
@@ -1993,7 +1994,7 @@ router.post('/assignments/:id/grade-open-questions', async (req, res, next) => {
         create: {
           submissionId: submission.id,
           questionId: q.id,
-          selectedAnswer: null,
+          selectedAnswer: existing?.selectedAnswer || '',
           awardedPoints: clampedPts,
           isCorrect
         }
@@ -2041,6 +2042,7 @@ router.post('/assignments/:id/grade-open-questions', async (req, res, next) => {
       }
     });
   } catch (error) {
+    console.error('[grade-open-questions error]:', error);
     handleAssignmentError(error, res, next);
   }
 });

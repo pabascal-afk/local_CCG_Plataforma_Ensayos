@@ -141,7 +141,7 @@ model SubmissionAnswer {
   id             Int        @id @default(autoincrement())
   submissionId   Int
   questionId     Int
-  selectedAnswer String
+  selectedAnswer String?    @default("")
   isCorrect      Boolean?
   awardedPoints  Float?     // Puntos asignados por el profesor en preguntas WRITTEN / ORAL
   updatedAt      DateTime   @updatedAt
