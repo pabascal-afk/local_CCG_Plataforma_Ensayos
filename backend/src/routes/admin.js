@@ -1548,7 +1548,8 @@ router.get('/exams', async (req, res, next) => {
         questions: true,
         assignments: {
           include: { course: true }
-        }
+        },
+        audioClips: true
       },
       orderBy: [
         { orderNumber: 'asc' },
@@ -1566,16 +1567,46 @@ router.get('/exams', async (req, res, next) => {
       const learningObjectivesKeys = {};
       const difficultiesKeys = {};
 
+      let writtenCount = 0;
+      let oralCount = 0;
+      let multipleChoiceCount = 0;
+      let totalMaxPoints = 0;
+
       (e.questions || []).forEach(q => {
         if (!q) return;
         answerKey[q.questionNumber] = q.correctAnswer;
-        questionTypesKeys[q.questionNumber] = q.questionType || 'MULTIPLE_CHOICE';
-        maxPointsKeys[q.questionNumber] = q.maxPoints ?? 1;
+        const qType = q.questionType || 'MULTIPLE_CHOICE';
+        questionTypesKeys[q.questionNumber] = qType;
+        const pts = q.maxPoints ?? 1;
+        maxPointsKeys[q.questionNumber] = pts;
+        totalMaxPoints += pts;
+
+        if (qType === 'WRITTEN') writtenCount++;
+        else if (qType === 'ORAL') oralCount++;
+        else multipleChoiceCount++;
+
         if (q.skill) skillsKeys[q.questionNumber] = q.skill;
         if (q.axis) axesKeys[q.questionNumber] = q.axis;
         if (q.learningObjective) learningObjectivesKeys[q.questionNumber] = q.learningObjective;
         difficultiesKeys[q.questionNumber] = formatDifficultyKey(q.difficulty);
       });
+
+      const audioQuestionNumbers = new Set();
+      (e.audioClips || []).forEach(clip => {
+        if (!clip.questionNumbers) return;
+        try {
+          const parsed = JSON.parse(clip.questionNumbers);
+          if (Array.isArray(parsed)) parsed.forEach(n => audioQuestionNumbers.add(n));
+        } catch {
+          String(clip.questionNumbers).split(',').forEach(n => {
+            const num = parseInt(n.trim(), 10);
+            if (!isNaN(num)) audioQuestionNumbers.add(num);
+          });
+        }
+      });
+      const audioQuestionsList = Array.from(audioQuestionNumbers).sort((a, b) => a - b);
+      const audioClipsCount = (e.audioClips || []).length;
+      const hasAudios = audioClipsCount > 0 || audioQuestionsList.length > 0;
 
       const assignedCourses = (e.assignments || [])
         .filter(a => a && a.course)
@@ -1605,7 +1636,14 @@ router.get('/exams', async (req, res, next) => {
         skillsKeys,
         axesKeys,
         learningObjectivesKeys,
-        difficultiesKeys
+        difficultiesKeys,
+        audioClipsCount,
+        hasAudios,
+        audioQuestionNumbers: audioQuestionsList,
+        writtenCount,
+        oralCount,
+        multipleChoiceCount,
+        totalMaxPoints: Math.round(totalMaxPoints * 10) / 10
       };
     });
 
@@ -1666,7 +1704,10 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
     const id = parseInt(req.params.id, 10);
     const e = await prisma.exam.findUnique({
       where: { id },
-      include: { questions: { orderBy: { questionNumber: 'asc' } } }
+      include: {
+        questions: { orderBy: { questionNumber: 'asc' } },
+        audioClips: { orderBy: { orderIndex: 'asc' } }
+      }
     });
     if (!e) return res.status(404).json({ error: 'Ensayo no encontrado' });
     
@@ -1677,20 +1718,53 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
     const axesKeys = {};
     const learningObjectivesKeys = {};
     const difficultiesKeys = {};
-    e.questions.forEach(q => {
+    let writtenCount = 0;
+    let oralCount = 0;
+    let multipleChoiceCount = 0;
+    let totalMaxPoints = 0;
+
+    (e.questions || []).forEach(q => {
       answerKey[q.questionNumber] = q.correctAnswer;
-      questionTypesKeys[q.questionNumber] = q.questionType || 'MULTIPLE_CHOICE';
-      maxPointsKeys[q.questionNumber] = q.maxPoints ?? 1;
+      const qType = q.questionType || 'MULTIPLE_CHOICE';
+      questionTypesKeys[q.questionNumber] = qType;
+      const pts = q.maxPoints ?? 1;
+      maxPointsKeys[q.questionNumber] = pts;
+      totalMaxPoints += pts;
+
+      if (qType === 'WRITTEN') writtenCount++;
+      else if (qType === 'ORAL') oralCount++;
+      else multipleChoiceCount++;
+
       if (q.skill) skillsKeys[q.questionNumber] = q.skill;
       if (q.axis) axesKeys[q.questionNumber] = q.axis;
       if (q.learningObjective) learningObjectivesKeys[q.questionNumber] = q.learningObjective;
       difficultiesKeys[q.questionNumber] = formatDifficultyKey(q.difficulty);
     });
+
+    const audioQuestionNumbers = new Set();
+    (e.audioClips || []).forEach(clip => {
+      if (!clip.questionNumbers) return;
+      try {
+        const parsed = JSON.parse(clip.questionNumbers);
+        if (Array.isArray(parsed)) parsed.forEach(n => audioQuestionNumbers.add(n));
+      } catch {
+        String(clip.questionNumbers).split(',').forEach(n => {
+          const num = parseInt(n.trim(), 10);
+          if (!isNaN(num)) audioQuestionNumbers.add(num);
+        });
+      }
+    });
+    const audioQuestionsList = Array.from(audioQuestionNumbers).sort((a, b) => a - b);
+    const audioClipsCount = (e.audioClips || []).length;
+    const hasAudios = audioClipsCount > 0 || audioQuestionsList.length > 0;
+
     res.json({
       id: e.id,
       title: e.title,
       subject: e.subject,
-      level: e.level, orderNumber: e.orderNumber, examType: e.examType,
+      level: e.level,
+      orderNumber: e.orderNumber,
+      examType: e.examType,
       optionsCount: e.optionsCount,
       questionCount: e.questions.length,
       answerKey,
@@ -1699,7 +1773,15 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
       skillsKeys,
       axesKeys,
       learningObjectivesKeys,
-      difficultiesKeys
+      difficultiesKeys,
+      audioClips: e.audioClips || [],
+      audioClipsCount,
+      hasAudios,
+      audioQuestionNumbers: audioQuestionsList,
+      writtenCount,
+      oralCount,
+      multipleChoiceCount,
+      totalMaxPoints: Math.round(totalMaxPoints * 10) / 10
     });
   } catch (error) {
     next(error);

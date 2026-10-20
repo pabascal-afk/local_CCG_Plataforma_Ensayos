@@ -8,7 +8,7 @@ import Link from "next/link";
 import { 
   ArrowLeft, Trash2, FileText, Plus, Download, Search, 
   Filter, BookOpen, Layers, Clock, X, ChevronRight, Check, Sparkles,
-  ChevronDown, ChevronUp, Headphones
+  ChevronDown, ChevronUp, Headphones, FileSpreadsheet
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal from "@/components/AiPromptModal";
@@ -35,7 +35,58 @@ type Exam = {
   optionsCount?: number;
   createdAt?: string;
   assignedCourses?: CourseItem[];
+  audioClipsCount?: number;
+  hasAudios?: boolean;
+  audioQuestionNumbers?: number[];
+  writtenCount?: number;
+  oralCount?: number;
+  multipleChoiceCount?: number;
+  totalMaxPoints?: number;
 };
+
+function getSubjectTheme(subject: string) {
+  const s = (subject || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (s.includes("matematica")) {
+    return {
+      bgBadge: "bg-blue-50 text-blue-700 border-blue-200",
+      accentBorder: "border-l-blue-500",
+      dot: "bg-blue-500"
+    };
+  }
+  if (s.includes("lectura") || s.includes("lenguaje") || s.includes("comunicacion")) {
+    return {
+      bgBadge: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      accentBorder: "border-l-emerald-500",
+      dot: "bg-emerald-500"
+    };
+  }
+  if (s.includes("ciencia")) {
+    return {
+      bgBadge: "bg-amber-50 text-amber-800 border-amber-200",
+      accentBorder: "border-l-amber-500",
+      dot: "bg-amber-500"
+    };
+  }
+  if (s.includes("historia") || s.includes("sociales")) {
+    return {
+      bgBadge: "bg-purple-50 text-purple-700 border-purple-200",
+      accentBorder: "border-l-purple-500",
+      dot: "bg-purple-500"
+    };
+  }
+  if (s.includes("ingles") || s.includes("english")) {
+    return {
+      bgBadge: "bg-cyan-50 text-cyan-800 border-cyan-200",
+      accentBorder: "border-l-cyan-500",
+      dot: "bg-cyan-500"
+    };
+  }
+  return {
+    bgBadge: "bg-slate-100 text-slate-700 border-slate-200",
+    accentBorder: "border-l-slate-400",
+    dot: "bg-slate-500"
+  };
+}
 
 export default function ExamsPage() {
   const { selectedYear } = useSchoolYear();
@@ -51,6 +102,7 @@ export default function ExamsPage() {
   const [levelCourseFilter, setLevelCourseFilter] = useState("TODOS");
   const [orderRangePreset, setOrderRangePreset] = useState<"TODOS" | "1-3" | "4-6" | "7-10" | "CUSTOM">("TODOS");
   const [selectedOrderNumbers, setSelectedOrderNumbers] = useState<number[]>([]);
+  const [onlyAudioFilter, setOnlyAudioFilter] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [selectedAudioExam, setSelectedAudioExam] = useState<Exam | null>(null);
   const isPruebas = useIsPruebas();
@@ -154,6 +206,7 @@ export default function ExamsPage() {
     setLevelCourseFilter("TODOS");
     setOrderRangePreset("TODOS");
     setSelectedOrderNumbers([]);
+    setOnlyAudioFilter(false);
   };
 
   const hasActiveFilters = Boolean(
@@ -162,12 +215,18 @@ export default function ExamsPage() {
     subjectFilter !== "TODAS" || 
     levelCourseFilter !== "TODOS" || 
     orderRangePreset !== "TODOS" || 
-    selectedOrderNumbers.length > 0
+    selectedOrderNumbers.length > 0 ||
+    onlyAudioFilter
   );
 
   // Filtrado de evaluaciones
   const filteredExams = useMemo(() => {
     return exams.filter(e => {
+      // 0. Filtro solo con audios
+      if (onlyAudioFilter && !e.hasAudios) {
+        return false;
+      }
+
       // 1. Búsqueda por texto (título, materia, orden)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -211,7 +270,7 @@ export default function ExamsPage() {
 
       return true;
     });
-  }, [exams, searchQuery, typeFilter, subjectFilter, levelCourseFilter, orderRangePreset, selectedOrderNumbers, courses]);
+  }, [exams, searchQuery, typeFilter, subjectFilter, levelCourseFilter, orderRangePreset, selectedOrderNumbers, courses, onlyAudioFilter]);
 
   const handleDelete = async (id: number) => {
     if (!confirm("¿Seguro que quieres eliminar este ensayo? Esto no se puede deshacer y puede afectar resultados históricos.")) return;
@@ -448,6 +507,23 @@ export default function ExamsPage() {
                       {p === "TODOS" ? "Todos" : `${isPruebas ? "Pruebas" : "Ensayos"} ${p}`}
                     </button>
                   ))}
+
+                  <div className="h-4 w-px bg-gray-300 mx-1 hidden sm:block" />
+
+                  <button
+                    type="button"
+                    onClick={() => setOnlyAudioFilter(prev => !prev)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                      onlyAudioFilter 
+                        ? "bg-purple-600 text-white shadow-xs" 
+                        : "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100"
+                    }`}
+                    title="Filtrar evaluaciones que tienen audios asignados"
+                  >
+                    <Headphones className="w-3.5 h-3.5" />
+                    <span>Solo con audios</span>
+                    {onlyAudioFilter && <Check className="w-3 h-3 ml-0.5" />}
+                  </button>
                 </div>
 
                 {/* Chips puntuales (ej: 1, 3, 7) */}
@@ -514,137 +590,245 @@ export default function ExamsPage() {
               ) : (
                 filteredExams.map(e => {
                   const isExpanded = expandedExams.has(e.id);
+                  const theme = getSubjectTheme(e.subject);
+                  const hasAudio = Boolean(e.hasAudios || (e.audioClipsCount && e.audioClipsCount > 0));
+
                   return (
                     <div 
                       key={e.id} 
-                      className={`bg-white border rounded-2xl shadow-xs transition-all overflow-hidden ${
-                        isExpanded ? "border-blue-400 shadow-md" : "border-gray-200 hover:border-gray-300 hover:shadow-xs"
+                      className={`bg-white border rounded-2xl shadow-xs transition-all overflow-hidden border-l-4 ${theme.accentBorder} ${
+                        isExpanded 
+                          ? "border-t-blue-300 border-r-blue-300 border-b-blue-300 shadow-md ring-1 ring-blue-100" 
+                          : "border-gray-200 hover:border-gray-300 hover:shadow-xs"
                       }`}
                     >
                       {/* Fila / Barra Compacta Clicable */}
                       <div 
                         onClick={() => toggleExamExpand(e.id)}
-                        className="p-3.5 flex items-center justify-between gap-3 cursor-pointer select-none bg-white hover:bg-slate-50/70 transition-colors"
+                        className="p-3.5 sm:p-4 cursor-pointer select-none bg-white hover:bg-slate-50/70 transition-colors space-y-2.5"
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="bg-slate-100 text-slate-800 font-black text-xs px-2 py-0.5 rounded-md shrink-0">
-                            #{e.orderNumber}
-                          </span>
-                          <div className="min-w-0">
-                            <h2 className="text-sm font-black text-gray-900 truncate">
-                              {e.title}
-                            </h2>
-                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500">
-                              <span className="truncate">{e.subject}</span>
-                              <span className="text-gray-300">•</span>
-                              <span className="text-indigo-700 font-bold shrink-0">
-                                {formatLevelName(e.level)}
-                              </span>
+                        {/* Fila 1: Badges de Identificación y Acciones */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                            {/* Número de Orden */}
+                            <span className="bg-slate-900 text-white font-black text-xs px-2 py-0.5 rounded-md shrink-0 shadow-2xs">
+                              #{e.orderNumber}
+                            </span>
+
+                            {/* Nivel */}
+                            <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs px-2 py-0.5 rounded-md shrink-0">
+                              {formatLevelName(e.level)}
+                            </span>
+
+                            {/* Materia con color distintivo */}
+                            <span className={`border text-[11px] font-bold px-2 py-0.5 rounded-md truncate max-w-[130px] sm:max-w-[170px] ${theme.bgBadge}`}>
+                              {e.subject}
+                            </span>
+
+                            {/* Tipo */}
+                            {getExamTypeBadge(e.examType)}
+                          </div>
+
+                          {/* Acciones del Encabezado */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {/* BOTÓN DE AUDIOS: SOLO SI LA PRUEBA TIENE AUDIOS */}
+                            {hasAudio && (
+                              <button
+                                type="button"
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  setSelectedAudioExam(e);
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-100/90 hover:bg-purple-200 border border-purple-200 px-2 py-1 rounded-lg transition shadow-2xs"
+                                title={`Esta prueba tiene ${e.audioClipsCount || 1} audio(s) asignado(s). Clic para escuchar o editar.`}
+                              >
+                                <Headphones className="w-3.5 h-3.5 text-purple-700 shrink-0" />
+                                <span className="font-extrabold">{e.audioClipsCount || ""}</span>
+                                <span className="hidden sm:inline">Audios</span>
+                              </button>
+                            )}
+
+                            {/* Chevron Expandir/Colapsar */}
+                            <div className={`p-1 rounded-lg text-gray-400 hover:text-gray-600 transition ${isExpanded ? "bg-blue-50 text-blue-600" : ""}`}>
+                              {isExpanded ? (
+                                <ChevronUp className="w-4 h-4 text-blue-600" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4" />
+                              )}
                             </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          {getExamTypeBadge(e.examType)}
-                          <button
-                            type="button"
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              setSelectedAudioExam(e);
-                            }}
-                            className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-md transition shadow-2xs"
-                            title="Gestionar y cortar audios por pregunta"
-                          >
-                            <Headphones className="w-3.5 h-3.5 text-purple-600" />
-                            <span className="hidden sm:inline">Audios</span>
-                          </button>
-                          
-                          <button 
-                            type="button"
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              handleDelete(e.id);
-                            }} 
-                            className="text-gray-300 hover:text-rose-600 p-1 rounded-md transition"
-                            title="Eliminar evaluación"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                        {/* Fila 2: Título de la Prueba con buena jerarquía */}
+                        <h2 className="text-sm font-black text-gray-900 leading-snug line-clamp-2">
+                          {e.title}
+                        </h2>
 
-                          <button
-                            type="button"
-                            className="text-gray-400 hover:text-gray-600 p-1 rounded-md transition"
-                            title={isExpanded ? "Colapsar detalles" : "Expandir detalles"}
-                          >
-                            {isExpanded ? (
-                              <ChevronUp className="w-4 h-4 text-blue-600" />
-                            ) : (
-                              <ChevronDown className="w-4 h-4" />
-                            )}
-                          </button>
+                        {/* Fila 3: Micro-chips de Información Rápida */}
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-500 pt-0.5">
+                          <span className="inline-flex items-center gap-1 font-semibold bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-[11px]">
+                            <FileText className="w-3 h-3 text-gray-500" />
+                            {e.questionCount} {e.questionCount === 1 ? "preg" : "preg"}
+                          </span>
+
+                          {Boolean(e.totalMaxPoints && e.totalMaxPoints !== e.questionCount) && (
+                            <span className="inline-flex items-center gap-1 font-bold bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-[11px]" title="Puntaje total máximo de la pauta">
+                              🎯 {e.totalMaxPoints} pts
+                            </span>
+                          )}
+
+                          {Boolean(e.writtenCount && e.writtenCount > 0) && (
+                            <span className="inline-flex items-center gap-1 font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded text-[11px]" title="Preguntas con desarrollo escrito">
+                              📝 {e.writtenCount} esc.
+                            </span>
+                          )}
+
+                          {Boolean(e.oralCount && e.oralCount > 0) && (
+                            <span className="inline-flex items-center gap-1 font-bold bg-purple-50 text-purple-800 border border-purple-200 px-2 py-0.5 rounded text-[11px]" title="Preguntas de respuesta oral">
+                              🗣️ {e.oralCount} oral
+                            </span>
+                          )}
+
+                          {e.durationMinutes ? (
+                            <span className="inline-flex items-center gap-1 text-gray-500 text-[11px]">
+                              <Clock className="w-3 h-3 text-gray-400" />
+                              {e.durationMinutes} min
+                            </span>
+                          ) : null}
+
+                          {hasAudio && e.audioQuestionNumbers && e.audioQuestionNumbers.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded" title="Preguntas con pista de audio">
+                              🎧 Preg {e.audioQuestionNumbers.join(", ")}
+                            </span>
+                          )}
                         </div>
                       </div>
 
                       {/* Contenido Expandido */}
                       {isExpanded && (
-                        <div className="px-4 pb-4 pt-2 border-t border-gray-100 bg-slate-50/50 space-y-3">
-                          {/* Métricas del Ensayo */}
-                          <div className="grid grid-cols-3 gap-2 text-xs text-gray-600 bg-white p-2.5 rounded-xl border border-gray-100">
-                            <div className="flex items-center gap-1.5">
-                              <FileText className="w-3.5 h-3.5 text-blue-500" />
-                              <span className="font-semibold">{e.questionCount} preg</span>
+                        <div className="px-4 pb-4 pt-3 border-t border-gray-100 bg-slate-50/60 space-y-3.5">
+                          {/* Ficha Técnica Detallada */}
+                          <div className="bg-white p-3 rounded-xl border border-gray-200/80 shadow-2xs space-y-2">
+                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">
+                              Estructura de la Evaluación
+                            </span>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                <span className="text-[10px] text-gray-400 font-bold block">Preguntas</span>
+                                <span className="font-black text-gray-800 text-sm">{e.questionCount}</span>
+                                <span className="text-[10px] text-gray-500 block truncate">
+                                  {e.multipleChoiceCount ?? e.questionCount} selec.
+                                  {(e.writtenCount ?? 0) > 0 ? `, ${e.writtenCount} esc.` : ""}
+                                  {(e.oralCount ?? 0) > 0 ? `, ${e.oralCount} oral` : ""}
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                <span className="text-[10px] text-gray-400 font-bold block">Puntaje Total</span>
+                                <span className="font-black text-blue-700 text-sm">
+                                  {e.totalMaxPoints ?? e.questionCount} pts
+                                </span>
+                                <span className="text-[10px] text-gray-500 block">Pauta corregida</span>
+                              </div>
+
+                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                <span className="text-[10px] text-gray-400 font-bold block">Duración</span>
+                                <span className="font-black text-gray-800 text-sm">
+                                  {e.durationMinutes ? `${e.durationMinutes} min` : "Libre"}
+                                </span>
+                                <span className="text-[10px] text-gray-500 block">Tiempo en sala</span>
+                              </div>
+
+                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                <span className="text-[10px] text-gray-400 font-bold block">Alternativas</span>
+                                <span className="font-black text-gray-800 text-sm">
+                                  {e.optionsCount ? `${e.optionsCount} (A-${String.fromCharCode(64 + e.optionsCount)})` : "4 (A-D)"}
+                                </span>
+                                <span className="text-[10px] text-gray-500 block">Selección múltiple</span>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              <Clock className="w-3.5 h-3.5 text-indigo-500" />
-                              <span className="font-semibold">{e.durationMinutes ? `${e.durationMinutes} min` : "Libre"}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-gray-500">
-                              <span className="font-semibold truncate">
-                                {e.optionsCount ? `${e.optionsCount} alt` : "4 alt"}
-                              </span>
-                            </div>
+
+                            {/* Banner informativo de audios: SOLO SI TIENE AUDIOS */}
+                            {hasAudio && (
+                              <div className="mt-2 p-2.5 bg-purple-50/90 border border-purple-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                                <div className="flex items-center gap-2 text-purple-900">
+                                  <Headphones className="w-4 h-4 text-purple-700 shrink-0" />
+                                  <span>
+                                    <strong>{e.audioClipsCount || 1} pista(s) de audio asignada(s)</strong>
+                                    {e.audioQuestionNumbers && e.audioQuestionNumbers.length > 0 ? (
+                                      <> para la(s) pregunta(s) <strong>{e.audioQuestionNumbers.join(", ")}</strong>.</>
+                                    ) : (
+                                      <> configuradas en esta evaluación.</>
+                                    )}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedAudioExam(e)}
+                                  className="self-end sm:self-auto shrink-0 bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] px-3 py-1 rounded-md shadow-2xs transition"
+                                >
+                                  Abrir Cortador
+                                </button>
+                              </div>
+                            )}
                           </div>
 
                           {/* Cursos Asignados */}
-                          {e.assignedCourses && e.assignedCourses.length > 0 ? (
-                            <div>
-                              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
-                                Cursos Programados ({e.assignedCourses.length}):
-                              </span>
-                              <div className="flex flex-wrap gap-1">
+                          <div>
+                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block mb-1">
+                              Cursos Programados ({e.assignedCourses?.length || 0}):
+                            </span>
+                            {e.assignedCourses && e.assignedCourses.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5">
                                 {e.assignedCourses.map(ac => (
                                   <span 
                                     key={ac.id} 
-                                    className="text-[10px] font-bold bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded shadow-2xs"
+                                    className="text-[11px] font-bold bg-white border border-slate-200 text-slate-800 px-2.5 py-1 rounded-md shadow-2xs"
                                   >
-                                    {formatLevelName(ac.level)} {ac.letter}
+                                    {formatLevelName(ac.level)} {ac.letter} <span className="text-gray-400 font-normal">({ac.year})</span>
                                   </span>
                                 ))}
                               </div>
-                            </div>
-                          ) : (
-                            <div className="text-[11px] text-gray-400 italic">
-                              Sin cursos programados actualmente.
-                            </div>
-                          )}
+                            ) : (
+                              <p className="text-xs text-gray-400 italic bg-white p-2.5 rounded-lg border border-dashed border-gray-200">
+                                Disponible en catálogo. Aún no ha sido asignada a ningún curso.
+                              </p>
+                            )}
+                          </div>
 
-                          {/* Footer y Enlace a Pauta */}
-                          <div className="pt-2 border-t border-gray-200/60 flex justify-end items-center gap-2">
+                          {/* Barra de Acciones del Pie */}
+                          <div className="pt-2 border-t border-gray-200 flex items-center justify-between gap-2">
                             <button 
                               type="button"
-                              onClick={() => setSelectedAudioExam(e)}
-                              className="inline-flex items-center gap-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"
+                              onClick={() => handleDelete(e.id)} 
+                              className="inline-flex items-center gap-1.5 text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg font-semibold transition"
+                              title="Eliminar esta prueba del catálogo"
                             >
-                              <Headphones className="w-3.5 h-3.5 text-purple-600" />
-                              <span>Gestionar Audios</span>
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Eliminar</span>
                             </button>
-                            <Link 
-                              href={`/admin/exams/${e.id}`} 
-                              className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"
-                            >
-                              <span>Editar Pauta</span>
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            </Link>
+
+                            <div className="flex items-center gap-2">
+                              {/* Botón Audios en footer: SOLO SI TIENE AUDIOS */}
+                              {hasAudio && (
+                                <button 
+                                  type="button"
+                                  onClick={() => setSelectedAudioExam(e)}
+                                  className="inline-flex items-center gap-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"
+                                >
+                                  <Headphones className="w-3.5 h-3.5 text-purple-600" />
+                                  <span>Gestionar Audios</span>
+                                </button>
+                              )}
+                              <Link 
+                                href={`/admin/exams/${e.id}`} 
+                                className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-xs transition"
+                              >
+                                <FileSpreadsheet className="w-3.5 h-3.5" />
+                                <span>Editar Pauta</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </Link>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -671,6 +855,7 @@ export default function ExamsPage() {
               examId={selectedAudioExam.id}
               examTitle={selectedAudioExam.title}
               questionCount={selectedAudioExam.questionCount}
+              onClipsUpdated={loadData}
             />
           )}
         </AppShell>
