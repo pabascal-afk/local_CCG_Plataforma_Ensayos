@@ -69,6 +69,7 @@ export default function AudioCutterModal({
   // Estado del archivo en edición
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string>("");
+  const [serverAudioPath, setServerAudioPath] = useState<string>("");
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [duration, setDuration] = useState<number>(0);
   const [isDecoding, setIsDecoding] = useState<boolean>(false);
@@ -120,6 +121,7 @@ export default function AudioCutterModal({
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       setAudioFile(null);
       setAudioUrl("");
+      setServerAudioPath("");
       setAudioBuffer(null);
       setDuration(0);
       setIsPlaying(false);
@@ -132,6 +134,7 @@ export default function AudioCutterModal({
   const handleFileSelected = async (file: File) => {
     setErrorMsg("");
     setSuccessMsg("");
+    setServerAudioPath("");
 
     if (file.size > 15 * 1024 * 1024) {
       setErrorMsg("El archivo excede el tamaño máximo permitido de 15 MB.");
@@ -374,7 +377,9 @@ export default function AudioCutterModal({
 
     try {
       const formData = new FormData();
-      if (audioFile) {
+      if (serverAudioPath) {
+        formData.append("existingAudioPath", serverAudioPath);
+      } else if (audioFile) {
         formData.append("audio", audioFile);
       }
 
@@ -388,10 +393,14 @@ export default function AudioCutterModal({
 
       formData.append("clips", JSON.stringify([clipPayload]));
 
-      await apiFetch<any>(apiBasePath, {
+      const res = await apiFetch<any>(apiBasePath, {
         method: "POST",
         body: formData,
       });
+
+      if (res?.clips?.[0]?.audioPath) {
+        setServerAudioPath(res.clips[0].audioPath);
+      }
 
       setSuccessMsg(`¡Fragmento guardado exitosamente para la(s) pregunta(s) ${selectedQuestions.join(", ")}!`);
       await loadClips();
