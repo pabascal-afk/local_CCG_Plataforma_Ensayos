@@ -129,8 +129,8 @@ export default function NewExamPage() {
                 </h1>
                 <p className="text-gray-500 mt-1">
                   {isPruebas 
-                    ? "Sube el PDF de la prueba y configura los parámetros base. Luego podrás ingresar o importar la pauta de preguntas (.xlsx)." 
-                    : "Sube el PDF y configura los parámetros base. Luego podrás editar la pauta correcta."}
+                    ? "Sube el PDF de la prueba y configura los parámetros base. En el siguiente paso podrás ingresar la pauta, preguntas de desarrollo y subir/cortar audios con el visor de onda." 
+                    : "Sube el PDF y configura los parámetros base. En el siguiente paso podrás editar la pauta, preguntas de desarrollo y subir/cortar audios para listening."}
                 </p>
               </div>
             </div>

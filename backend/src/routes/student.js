@@ -105,7 +105,7 @@ router.post('/assignments/:id/start', async (req, res) => {
     return res.status(409).json({ error: 'El tiempo de este ensayo terminó', submissionId: closed.id });
   }
 
-  const [questions, answers] = await Promise.all([
+  const [questions, answers, rawClips] = await Promise.all([
     prisma.question.findMany({
       where: { examId: assignment.examId },
       select: { id: true, questionNumber: true, questionType: true, maxPoints: true }, // ¡nunca la pauta!
@@ -115,7 +115,28 @@ router.post('/assignments/:id/start', async (req, res) => {
       where: { submissionId: submission.id },
       select: { questionId: true, selectedAnswer: true },
     }),
+    prisma.examAudioClip.findMany({
+      where: { examId: assignment.examId },
+      orderBy: [{ orderIndex: 'asc' }, { id: 'asc' }]
+    }),
   ]);
+
+  const audioClips = (rawClips || []).map((c) => {
+    let qNums = [];
+    try {
+      qNums = JSON.parse(c.questionNumbers || '[]');
+    } catch {
+      qNums = [];
+    }
+    return {
+      id: c.id,
+      title: c.title,
+      startSec: c.startSec,
+      endSec: c.endSec,
+      questionNumbers: qNums,
+      maxPlays: c.maxPlays
+    };
+  });
 
   res.json({
     submissionId: submission.id,
@@ -127,6 +148,7 @@ router.post('/assignments/:id/start', async (req, res) => {
       optionsCount: assignment.exam.optionsCount,
     },
     questions,
+    audioClips,
     answers: Object.fromEntries(answers.map((a) => [a.questionId, a.selectedAnswer])),
     serverNow: now.toISOString(),
     deadline: deadline.toISOString(),
@@ -151,6 +173,32 @@ router.get('/assignments/:id/pdf', async (req, res) => {
 
   // sendFile soporta peticiones por rangos (Range), así pdf.js descarga por partes.
   res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.sendFile(filePath);
+});
+
+// GET /api/student/assignments/:id/audios/:clipId  -> Audio privado con streaming HTTP 206 y soporte de rangos
+router.get('/assignments/:id/audios/:clipId', async (req, res) => {
+  const assignment = await getOwnAssignment(req, Number(req.params.id));
+  if (!assignment) return res.status(404).json({ error: 'Ensayo no encontrado' });
+
+  const submission = await prisma.submission.findUnique({
+    where: { studentRut_assignmentId: { studentRut: req.user.rut, assignmentId: assignment.id } },
+  });
+  if (!submission || (submission.status !== 'IN_PROGRESS' && submission.status !== 'SUBMITTED')) {
+    return res.status(403).json({ error: 'El ensayo no está disponible' });
+  }
+
+  const clipId = parseInt(req.params.clipId, 10);
+  const clip = await prisma.examAudioClip.findFirst({
+    where: { id: clipId, examId: assignment.examId }
+  });
+  if (!clip || !clip.audioPath) return res.status(404).json({ error: 'Audio no encontrado' });
+
+  const uploadsDir = path.resolve(process.env.UPLOADS_DIR || './uploads');
+  const filePath = path.join(uploadsDir, path.basename(clip.audioPath));
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Archivo de audio no encontrado' });
+
+  res.setHeader('Cache-Control', 'private, max-age=7200');
   res.sendFile(filePath);
 });
 

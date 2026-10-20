@@ -5,9 +5,10 @@ import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
 import Link from "next/link";
-import { ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, Sparkles } from "lucide-react";
+import { ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, Sparkles, Headphones, Scissors } from "lucide-react";
 import { getToken } from "@/lib/session";
 import AiPromptModal from "@/components/AiPromptModal";
+import AudioCutterModal from "@/components/AudioCutterModal";
 
 export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const { id } = params;
@@ -15,6 +16,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
+  const [showAudioModal, setShowAudioModal] = useState(false);
   
   const [answerKey, setAnswerKey] = useState<Record<string, string>>({});
   const [questionTypesKeys, setQuestionTypesKeys] = useState<Record<string, string>>({});
@@ -247,6 +249,24 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                   )}
                 </div>
 
+                {/* Card Audios por Pregunta / Cortador */}
+                <div className="bg-indigo-50 border border-indigo-200 text-indigo-950 p-4 rounded-xl shadow-sm space-y-2">
+                  <h3 className="font-semibold text-sm flex items-center gap-1.5 text-indigo-900">
+                    <Headphones className="w-4 h-4 text-indigo-600" /> Audios por Pregunta
+                  </h3>
+                  <p className="text-xs text-indigo-700 leading-snug">
+                    Sube audios para comprensión auditiva, córtalos con el visor de onda y asígnalos a preguntas específicas.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowAudioModal(true)}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 px-3 rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Scissors className="w-3.5 h-3.5" />
+                    <span>Gestionar / Cortar Audios</span>
+                  </button>
+                </div>
+
                 <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-4 rounded-xl shadow-sm">
                   <h3 className="font-semibold mb-1 flex items-center gap-2 text-emerald-800">
                     <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Importar Pauta
@@ -410,6 +430,15 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
             initialLevel={exam?.level}
             initialSubject={exam?.subject}
             initialExamTitle={exam?.title}
+          />
+
+          {/* Modal Cortador de Audio por Pregunta */}
+          <AudioCutterModal
+            isOpen={showAudioModal}
+            onClose={() => setShowAudioModal(false)}
+            examId={exam?.id}
+            examTitle={exam?.title}
+            questionCount={maxQ}
           />
         </AppShell>
       )}
