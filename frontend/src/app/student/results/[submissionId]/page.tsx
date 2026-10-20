@@ -78,8 +78,14 @@ export default function ResultsPage() {
                       </p>
                     </div>
                     <div className="bg-green-50 rounded-xl p-4">
-                      <p className="text-sm text-green-600 font-medium mb-1">Correctas</p>
-                      <p className="text-3xl font-bold text-green-900">{data.correctCount} / {data.total}</p>
+                      <p className="text-sm text-green-600 font-medium mb-1">
+                        {data.maxScore && data.maxScore !== data.total ? "Puntaje" : "Correctas"}
+                      </p>
+                      <p className="text-3xl font-bold text-green-900">
+                        {data.maxScore && data.maxScore !== data.total
+                          ? `${data.totalScore ?? data.correctCount} / ${data.maxScore}`
+                          : `${data.correctCount} / ${data.total}`}
+                      </p>
                     </div>
                     <div className="bg-orange-50 rounded-xl p-4">
                       <p className="text-sm text-orange-600 font-medium mb-1">% de Logro</p>

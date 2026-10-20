@@ -74,6 +74,8 @@ model Question {
   examId            Int
   questionNumber    Int
   correctAnswer     String
+  questionType      String             @default("MULTIPLE_CHOICE") // MULTIPLE_CHOICE | WRITTEN | ORAL
+  maxPoints         Float              @default(1.0) // 1.0 para selección múltiple, ej. 7.0 para desarrollo
   skill             String? // Habilidad
   axis              String? // Eje tematico
   learningObjective String? // OA puntual
@@ -140,6 +142,7 @@ model SubmissionAnswer {
   questionId     Int
   selectedAnswer String
   isCorrect      Boolean?
+  awardedPoints  Float?     // Puntos asignados por el profesor en preguntas WRITTEN / ORAL
   updatedAt      DateTime   @updatedAt
   submission     Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   question       Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)

@@ -12,6 +12,8 @@ type Question = {
   id: number;
   questionNumber: number;
   correctAnswer: string;
+  questionType?: string;
+  maxPoints?: number;
 };
 
 type Student = {
@@ -471,6 +473,13 @@ export default function PrintSheetsPage() {
                           <div className="flex-1 flex flex-col justify-around">
                             {colQuestions.map((q) => {
                               const correctOpt = isTeacherKey ? q.correctAnswer : null;
+                              const isOpen =
+                                q.questionType === "WRITTEN" ||
+                                q.questionType === "ORAL" ||
+                                q.correctAnswer === "DESARROLLO" ||
+                                q.correctAnswer === "ORAL";
+                              const isOral = q.questionType === "ORAL" || q.correctAnswer === "ORAL";
+                              const maxPts = q.maxPoints != null && q.maxPoints > 0 ? q.maxPoints : 1;
 
                               return (
                                 <div
@@ -489,35 +498,53 @@ export default function PrintSheetsPage() {
                                     </span>
                                   </div>
 
-                                  {/* Burbujas de respuestas alineadas con precisión milimétrica */}
-                                  <div
-                                    className="flex items-center"
-                                    style={{
-                                      gap: columnsCount > 2 ? "4.5mm" : "8.8mm",
-                                      marginLeft: columnsCount > 2 ? "3mm" : "6mm",
-                                    }}
-                                  >
-                                    {options.map((opt) => {
-                                      const isCorrect = correctOpt === opt;
+                                  {isOpen ? (
+                                    <div
+                                      className={`flex items-center justify-between border border-dashed border-slate-400 rounded px-2 bg-slate-50/70 font-sans ${
+                                        columnsCount > 2 ? "h-[4.8mm] text-[7.5px]" : "h-[5.2mm] text-[8.5px]"
+                                      } flex-1`}
+                                      style={{
+                                        marginLeft: columnsCount > 2 ? "3mm" : "6mm",
+                                      }}
+                                    >
+                                      <span className="font-extrabold text-slate-800 uppercase tracking-tight">
+                                        {isOral ? "Desarrollo Oral" : "Desarrollo Escrito"}
+                                      </span>
+                                      <span className="font-mono font-bold text-slate-700">
+                                        {isTeacherKey ? `Rúbrica: ${maxPts} pts` : `Pts: ____ / ${maxPts}`}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    /* Burbujas de respuestas alineadas con precisión milimétrica */
+                                    <div
+                                      className="flex items-center"
+                                      style={{
+                                        gap: columnsCount > 2 ? "4.5mm" : "8.8mm",
+                                        marginLeft: columnsCount > 2 ? "3mm" : "6mm",
+                                      }}
+                                    >
+                                      {options.map((opt) => {
+                                        const isCorrect = correctOpt === opt;
 
-                                      return (
-                                        <div
-                                          key={opt}
-                                          className={`rounded-full flex items-center justify-center font-mono transition-all ${
-                                            columnsCount > 2 ? "w-[4.8mm] h-[4.8mm] text-[8px]" : "w-[5.2mm] h-[5.2mm] text-[8.5px]"
-                                          } ${
-                                            isCorrect
-                                              ? "bg-black text-white font-bold ring-1 ring-black"
-                                              : isTeacherKey
-                                              ? "border-[1.5px] border-slate-300 text-slate-300 font-normal bg-white"
-                                              : "border-[1.5px] border-slate-400 text-slate-400 font-normal bg-white"
-                                          }`}
-                                        >
-                                          {opt}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
+                                        return (
+                                          <div
+                                            key={opt}
+                                            className={`rounded-full flex items-center justify-center font-mono transition-all ${
+                                              columnsCount > 2 ? "w-[4.8mm] h-[4.8mm] text-[8px]" : "w-[5.2mm] h-[5.2mm] text-[8.5px]"
+                                            } ${
+                                              isCorrect
+                                                ? "bg-black text-white font-bold ring-1 ring-black"
+                                                : isTeacherKey
+                                                ? "border-[1.5px] border-slate-300 text-slate-300 font-normal bg-white"
+                                                : "border-[1.5px] border-slate-400 text-slate-400 font-normal bg-white"
+                                            }`}
+                                          >
+                                            {opt}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}

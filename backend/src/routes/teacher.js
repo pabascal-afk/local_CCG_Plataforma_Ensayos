@@ -6,7 +6,7 @@ const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const { normalizeRut } = require('../utils/rut');
 const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet');
-const { computeResults } = require('../services/grading');
+const { computeResults, isOpenQuestion, getQuestionMaxPoints } = require('../services/grading');
 
 const router = express.Router();
 const uploadMemory = multer({ storage: multer.memoryStorage() });
@@ -202,22 +202,33 @@ router.get('/assignments/:id/live', async (req, res, next) => {
     // Todos los estudiantes del curso
     const students = await prisma.user.findMany({
       where: { courseId: assignment.courseId, role: 'STUDENT' },
-      select: { rut: true, name: true }
+      select: { rut: true, name: true },
+      orderBy: { name: 'asc' }
     });
+
+    const questions = await prisma.question.findMany({
+      where: { examId: assignment.examId },
+      orderBy: { questionNumber: 'asc' }
+    });
+
+    const openQuestions = questions.filter(q => isOpenQuestion(q));
+    const maxTotalPoints = questions.reduce((sum, q) => sum + getQuestionMaxPoints(q), 0);
 
     const submissions = await prisma.submission.findMany({
       where: { assignmentId: assignment.id },
-      include: { _count: { select: { answers: true } } }
+      include: { answers: true, _count: { select: { answers: true } } }
     });
     const subMap = Object.fromEntries(submissions.map(s => [s.studentRut, s]));
 
     const result = students.map(st => {
       const sub = subMap[st.rut];
       let state = 'NOT_STARTED';
-      let progress = 0;
       let submittedAt = null;
       let startedAt = null;
       
+      const openAnswers = {};
+      let openGradedCount = 0;
+
       if (sub) {
         if (sub.status === 'SUBMITTED') {
           state = 'SUBMITTED';
@@ -226,8 +237,32 @@ router.get('/assignments/:id/live', async (req, res, next) => {
           state = 'IN_PROGRESS';
           startedAt = sub.startedAt;
         }
-        // Approximate progress: answered / total questions
-        // Note: exam._count.questions requires another query, we can just use sub._count.answers
+
+        const ansByQId = Object.fromEntries((sub.answers || []).map(a => [a.questionId, a]));
+        for (const oq of openQuestions) {
+          const a = ansByQId[oq.id];
+          const hasAwarded = a && a.awardedPoints !== null && a.awardedPoints !== undefined;
+          if (hasAwarded) openGradedCount++;
+          openAnswers[oq.questionNumber] = {
+            questionId: oq.id,
+            questionNumber: oq.questionNumber,
+            questionType: oq.questionType,
+            maxPoints: getQuestionMaxPoints(oq),
+            selectedAnswer: a?.selectedAnswer || '',
+            awardedPoints: hasAwarded ? a.awardedPoints : null
+          };
+        }
+      } else {
+        for (const oq of openQuestions) {
+          openAnswers[oq.questionNumber] = {
+            questionId: oq.id,
+            questionNumber: oq.questionNumber,
+            questionType: oq.questionType,
+            maxPoints: getQuestionMaxPoints(oq),
+            selectedAnswer: '',
+            awardedPoints: null
+          };
+        }
       }
       
       return {
@@ -238,8 +273,14 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         submittedAt,
         answersCount: sub ? sub._count.answers : 0,
         grade: sub?.grade || null,
+        percent: sub?.percent ?? null,
+        correctCount: sub?.correctCount ?? null,
+        maxTotalPoints,
         simceScore: sub?.simceScore || null,
-        achievementLevel: sub?.achievementLevel || null
+        achievementLevel: sub?.achievementLevel || null,
+        openGradedCount,
+        openTotalCount: openQuestions.length,
+        openAnswers
       };
     });
 
@@ -248,7 +289,19 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         id: assignment.id,
         applicationMode: assignment.applicationMode || 'DIGITAL'
       },
-      questionCount: await prisma.question.count({ where: { examId: assignment.examId } }),
+      applicationMode: assignment.applicationMode || 'DIGITAL',
+      questionCount: questions.length,
+      maxTotalPoints,
+      hasOpenQuestions: openQuestions.length > 0,
+      openQuestions: openQuestions.map(oq => ({
+        id: oq.id,
+        questionNumber: oq.questionNumber,
+        questionType: oq.questionType,
+        maxPoints: getQuestionMaxPoints(oq),
+        skill: oq.skill,
+        axis: oq.axis,
+        learningObjective: oq.learningObjective
+      })),
       students: result
     });
   } catch (error) {
@@ -322,32 +375,41 @@ router.get('/assignments/:id/skills', async (req, res, next) => {
     const axes = {};
 
     questions.forEach(q => {
+      const maxPts = getQuestionMaxPoints(q);
       if (q.skill) {
         if (!skills[q.skill]) skills[q.skill] = { correct: 0, total: 0 };
-        skills[q.skill].total += submissions.length;
+        skills[q.skill].total += submissions.length * maxPts;
       }
       if (q.axis) {
         if (!axes[q.axis]) axes[q.axis] = { correct: 0, total: 0 };
-        axes[q.axis].total += submissions.length;
+        axes[q.axis].total += submissions.length * maxPts;
       }
     });
 
     submissions.forEach(sub => {
       sub.answers.forEach(ans => {
-        if (ans.isCorrect) {
-          const q = questions.find(qu => qu.id === ans.questionId);
-          if (q) {
-            if (q.skill) skills[q.skill].correct++;
-            if (q.axis) axes[q.axis].correct++;
+        const q = questions.find(qu => qu.id === ans.questionId);
+        if (!q) return;
+        const maxPts = getQuestionMaxPoints(q);
+        let earned = 0;
+        if (isOpenQuestion(q)) {
+          if (ans.awardedPoints !== null && ans.awardedPoints !== undefined) {
+            earned = Math.max(0, Math.min(maxPts, Number(ans.awardedPoints)));
           }
+        } else if (ans.isCorrect) {
+          earned = maxPts;
+        }
+        if (earned > 0) {
+          if (q.skill && skills[q.skill]) skills[q.skill].correct += earned;
+          if (q.axis && axes[q.axis]) axes[q.axis].correct += earned;
         }
       });
     });
 
     const formatObj = (obj) => Object.entries(obj).map(([name, data]) => ({
       name,
-      correct: data.correct,
-      total: data.total,
+      correct: Math.round(data.correct * 10) / 10,
+      total: Math.round(data.total * 10) / 10,
       percent: data.total > 0 ? data.correct / data.total : 0
     })).sort((a, b) => a.percent - b.percent);
 
@@ -378,26 +440,35 @@ router.get('/assignments/:id/remedial', async (req, res, next) => {
       const oa = q.learningObjective || "Sin OA";
       const skill = q.skill || "Sin Habilidad";
       const key = `${axis} || ${oa} || ${skill}`;
+      const maxPts = getQuestionMaxPoints(q);
       
       if (!clusters[key]) {
         clusters[key] = { axis, oa, skill, correct: 0, total: 0, questionsCount: 0 };
       }
-      clusters[key].total += submissions.length;
+      clusters[key].total += submissions.length * maxPts;
       clusters[key].questionsCount += 1;
     });
 
     submissions.forEach(sub => {
       sub.answers.forEach(ans => {
         const q = questions.find(qu => qu.id === ans.questionId);
-        if (q && ans.isCorrect) {
-          const key = `${q.axis || "Sin Eje"} || ${q.learningObjective || "Sin OA"} || ${q.skill || "Sin Habilidad"}`;
-          clusters[key].correct += 1;
+        if (!q) return;
+        const maxPts = getQuestionMaxPoints(q);
+        const key = `${q.axis || "Sin Eje"} || ${q.learningObjective || "Sin OA"} || ${q.skill || "Sin Habilidad"}`;
+        if (isOpenQuestion(q)) {
+          if (ans.awardedPoints !== null && ans.awardedPoints !== undefined) {
+            clusters[key].correct += Math.max(0, Math.min(maxPts, Number(ans.awardedPoints)));
+          }
+        } else if (ans.isCorrect) {
+          clusters[key].correct += maxPts;
         }
       });
     });
 
     let results = Object.values(clusters).map(c => ({
       ...c,
+      correct: Math.round(c.correct * 10) / 10,
+      total: Math.round(c.total * 10) / 10,
       percentage: c.total === 0 ? 0 : Math.round((c.correct / c.total) * 100)
     }));
 
@@ -613,29 +684,54 @@ router.get('/assignments/:id/items', async (req, res, next) => {
     });
 
     const analysis = questions.map(q => {
+      const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL' || q.correctAnswer === 'DESARROLLO' || q.correctAnswer === 'ORAL';
+      const maxPts = q.maxPoints != null && q.maxPoints > 0 ? Number(q.maxPoints) : 1;
       const stats = {
+        id: q.id,
         questionNumber: q.questionNumber,
+        questionType: q.questionType || 'MULTIPLE_CHOICE',
+        maxPoints: maxPts,
         skill: q.skill,
         axis: q.axis,
         correctAnswer: q.correctAnswer,
         totalAnswers: submissions.length,
         correctCount: 0,
         omittedCount: submissions.length,
+        gradedCount: 0,
+        avgPoints: null,
         options: { 'A': 0, 'B': 0, 'C': 0, 'D': 0, 'E': 0 }
       };
 
-      submissions.forEach(sub => {
-        const ans = sub.answers.find(a => a.questionId === q.id);
-        if (ans && ans.selectedAnswer) {
-          stats.omittedCount--;
-          if (stats.options[ans.selectedAnswer] !== undefined) {
-            stats.options[ans.selectedAnswer]++;
+      if (isOpen) {
+        let sumPts = 0;
+        submissions.forEach(sub => {
+          const ans = sub.answers.find(a => a.questionId === q.id);
+          if (ans && (ans.awardedPoints != null || (ans.selectedAnswer && String(ans.selectedAnswer).trim()))) {
+            stats.omittedCount--;
           }
-          if (ans.isCorrect) stats.correctCount++;
-        }
-      });
+          if (ans && ans.awardedPoints != null && !isNaN(Number(ans.awardedPoints))) {
+            const pts = Math.max(0, Math.min(maxPts, Number(ans.awardedPoints)));
+            stats.gradedCount++;
+            sumPts += pts;
+            if (pts >= maxPts * 0.6) stats.correctCount++;
+          }
+        });
+        stats.avgPoints = stats.gradedCount > 0 ? Math.round((sumPts / stats.gradedCount) * 100) / 100 : null;
+        stats.percent = stats.totalAnswers > 0 ? sumPts / (stats.totalAnswers * maxPts) : 0;
+      } else {
+        submissions.forEach(sub => {
+          const ans = sub.answers.find(a => a.questionId === q.id);
+          if (ans && ans.selectedAnswer) {
+            stats.omittedCount--;
+            if (stats.options[ans.selectedAnswer] !== undefined) {
+              stats.options[ans.selectedAnswer]++;
+            }
+            if (ans.isCorrect) stats.correctCount++;
+          }
+        });
+        stats.percent = stats.totalAnswers > 0 ? stats.correctCount / stats.totalAnswers : 0;
+      }
 
-      stats.percent = stats.totalAnswers > 0 ? stats.correctCount / stats.totalAnswers : 0;
       return stats;
     });
 
@@ -680,7 +776,11 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       { header: '% Logro', key: 'percent', width: 12 }
     ];
     questions.forEach(q => {
-      columns1.push({ header: `P${q.questionNumber} (${q.correctAnswer})`, key: `q_${q.id}`, width: 10 });
+      const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
+      const label = isOpen
+        ? `${q.questionType === 'ORAL' ? 'Oral' : 'Des.'} ${q.maxPoints || 1}pts`
+        : q.correctAnswer;
+      columns1.push({ header: `P${q.questionNumber} (${label})`, key: `q_${q.id}`, width: isOpen ? 16 : 10 });
     });
     sheet1.columns = columns1;
 
@@ -699,7 +799,14 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       };
       if (sub) {
         sub.answers.forEach(a => {
-          row[`q_${a.questionId}`] = a.selectedAnswer || 'Omitida';
+          const q = a.question;
+          if (q && (q.questionType === 'WRITTEN' || q.questionType === 'ORAL')) {
+            row[`q_${a.questionId}`] = a.awardedPoints != null
+              ? `${a.awardedPoints}/${q.maxPoints || 1} pts`
+              : (a.selectedAnswer ? '[Sin calificar]' : 'Omitida');
+          } else {
+            row[`q_${a.questionId}`] = a.selectedAnswer || 'Omitida';
+          }
         });
       }
       sheet1.addRow(row);
@@ -746,54 +853,61 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       { header: 'Dimensión Curricular', key: 'dim', width: 20 },
       { header: 'Nombre de Habilidad / Eje', key: 'name', width: 35 },
       { header: 'Preguntas Asociadas', key: 'qCount', width: 22 },
-      { header: 'Respuestas Correctas', key: 'correct', width: 22 },
-      { header: 'Total Oportunidades', key: 'total', width: 22 },
+      { header: 'Puntos Obtenidos', key: 'correct', width: 22 },
+      { header: 'Puntos Posibles', key: 'total', width: 22 },
       { header: '% Logro del Curso', key: 'percent', width: 20 }
     ];
 
     const skillMap = {};
     const axisMap = {};
     questions.forEach(q => {
+      const qMax = (q.questionType === 'WRITTEN' || q.questionType === 'ORAL') ? (q.maxPoints || 1) : 1;
       if (q.skill) {
         if (!skillMap[q.skill]) skillMap[q.skill] = { questions: 0, correct: 0, total: 0 };
         skillMap[q.skill].questions += 1;
-        skillMap[q.skill].total += submissions.length;
+        skillMap[q.skill].total += submissions.length * qMax;
       }
       if (q.axis) {
         if (!axisMap[q.axis]) axisMap[q.axis] = { questions: 0, correct: 0, total: 0 };
         axisMap[q.axis].questions += 1;
-        axisMap[q.axis].total += submissions.length;
+        axisMap[q.axis].total += submissions.length * qMax;
       }
     });
 
     submissions.forEach(sub => {
       sub.answers.forEach(a => {
-        if (a.isCorrect) {
-          if (a.question?.skill && skillMap[a.question.skill]) skillMap[a.question.skill].correct += 1;
-          if (a.question?.axis && axisMap[a.question.axis]) axisMap[a.question.axis].correct += 1;
-        }
+        const q = a.question;
+        if (!q) return;
+        const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
+        const qMax = isOpen ? (q.maxPoints || 1) : 1;
+        const earned = isOpen
+          ? (a.awardedPoints != null ? Math.max(0, Math.min(qMax, Number(a.awardedPoints))) : 0)
+          : (a.isCorrect ? 1 : 0);
+        if (q.skill && skillMap[q.skill]) skillMap[q.skill].correct += earned;
+        if (q.axis && axisMap[q.axis]) axisMap[q.axis].correct += earned;
       });
     });
 
     Object.entries(skillMap).forEach(([name, st]) => {
       const pct = st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0;
-      sheet3.addRow({ dim: 'Habilidad', name, qCount: st.questions, correct: st.correct, total: st.total, percent: `${pct}%` });
+      sheet3.addRow({ dim: 'Habilidad', name, qCount: st.questions, correct: Math.round(st.correct * 10) / 10, total: st.total, percent: `${pct}%` });
     });
 
     Object.entries(axisMap).forEach(([name, st]) => {
       const pct = st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0;
-      sheet3.addRow({ dim: 'Eje Temático', name, qCount: st.questions, correct: st.correct, total: st.total, percent: `${pct}%` });
+      sheet3.addRow({ dim: 'Eje Temático', name, qCount: st.questions, correct: Math.round(st.correct * 10) / 10, total: st.total, percent: `${pct}%` });
     });
 
     // HOJA 4: Análisis de Preguntas
     const sheet4 = workbook.addWorksheet('Análisis de Preguntas');
     sheet4.columns = [
       { header: 'N°', key: 'num', width: 8 },
+      { header: 'Tipo', key: 'qType', width: 18 },
       { header: 'Habilidad', key: 'skill', width: 25 },
       { header: 'Eje Temático', key: 'axis', width: 25 },
-      { header: 'Clave', key: 'correctAnswer', width: 10 },
-      { header: 'Correctas', key: 'correctCount', width: 12 },
-      { header: 'Total', key: 'total', width: 12 },
+      { header: 'Clave / Pts Máx', key: 'correctAnswer', width: 16 },
+      { header: 'Logro / Correctas', key: 'correctCount', width: 16 },
+      { header: 'Total Evaluados', key: 'total', width: 14 },
       { header: '% Logro', key: 'percent', width: 12 },
       { header: 'A', key: 'optA', width: 8 },
       { header: 'B', key: 'optB', width: 8 },
@@ -803,35 +917,51 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
     ];
 
     questions.forEach(q => {
+      const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
+      const maxPts = isOpen ? (q.maxPoints || 1) : 1;
       let correctCount = 0;
+      let sumPts = 0;
       const opts = { A: 0, B: 0, C: 0, D: 0 };
       let omitted = 0;
 
       submissions.forEach(sub => {
         const ans = sub.answers.find(a => a.questionId === q.id);
-        if (ans && ans.selectedAnswer) {
-          if (opts[ans.selectedAnswer] !== undefined) opts[ans.selectedAnswer]++;
-          if (ans.isCorrect) correctCount++;
+        if (isOpen) {
+          if (ans && ans.awardedPoints != null) {
+            const pts = Math.max(0, Math.min(maxPts, Number(ans.awardedPoints)));
+            sumPts += pts;
+            if (pts >= maxPts * 0.6) correctCount++;
+          } else {
+            omitted++;
+          }
         } else {
-          omitted++;
+          if (ans && ans.selectedAnswer) {
+            if (opts[ans.selectedAnswer] !== undefined) opts[ans.selectedAnswer]++;
+            if (ans.isCorrect) correctCount++;
+          } else {
+            omitted++;
+          }
         }
       });
 
       const totalAns = submissions.length;
-      const pct = totalAns > 0 ? Math.round((correctCount / totalAns) * 100) : 0;
+      const pct = totalAns > 0
+        ? (isOpen ? Math.round((sumPts / (totalAns * maxPts)) * 100) : Math.round((correctCount / totalAns) * 100))
+        : 0;
 
       sheet4.addRow({
         num: q.questionNumber,
+        qType: q.questionType === 'ORAL' ? 'Desarrollo Oral' : q.questionType === 'WRITTEN' ? 'Desarrollo Escrito' : 'Selección Múltiple',
         skill: q.skill || 'Sin habilidad',
         axis: q.axis || 'Sin eje',
-        correctAnswer: q.correctAnswer,
-        correctCount,
+        correctAnswer: isOpen ? `${maxPts} pts máx.` : q.correctAnswer,
+        correctCount: isOpen ? `Prom: ${(totalAns > 0 ? sumPts / totalAns : 0).toFixed(1)} pts` : correctCount,
         total: totalAns,
         percent: `${pct}%`,
-        optA: opts.A,
-        optB: opts.B,
-        optC: opts.C,
-        optD: opts.D,
+        optA: isOpen ? '-' : opts.A,
+        optB: isOpen ? '-' : opts.B,
+        optC: isOpen ? '-' : opts.C,
+        optD: isOpen ? '-' : opts.D,
         omitted
       });
     });
@@ -1186,7 +1316,7 @@ router.get('/assignments/:id/printable-sheet-data', async (req, res, next) => {
           include: {
             questions: {
               orderBy: { questionNumber: 'asc' },
-              select: { id: true, questionNumber: true, correctAnswer: true }
+              select: { id: true, questionNumber: true, correctAnswer: true, questionType: true, maxPoints: true }
             }
           }
         },
@@ -1284,10 +1414,11 @@ router.get('/assignments/:id/template-answers.xlsx', async (req, res, next) => {
     ];
 
     assignment.exam.questions.forEach(q => {
+      const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
       columns.push({
-        header: `P${q.questionNumber}`,
+        header: isOpen ? `P${q.questionNumber} (Pts 0-${q.maxPoints || 1})` : `P${q.questionNumber}`,
         key: `p${q.questionNumber}`,
-        width: 8
+        width: isOpen ? 16 : 8
       });
     });
 
@@ -1391,21 +1522,39 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
         }
 
         const incomingAnswers = subItem.answers || {};
+        const incomingOpenScores = subItem.openScores || {};
         const answersMap = {};
+        const openScoresMap = {};
 
         for (const [key, rawVal] of Object.entries(incomingAnswers)) {
+          const q = questionsByNum[key] || questionsById[key];
+          if (!q) continue;
+          const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
+          if (isOpen) {
+            const num = parseFloat(String(rawVal ?? '').replace(',', '.'));
+            if (!isNaN(num)) {
+              openScoresMap[q.id] = Math.max(0, Math.min(q.maxPoints || 1, num));
+            }
+            continue;
+          }
           const val = String(rawVal || '').trim().toUpperCase();
           if (!val || val === '-' || val === 'BLANCO' || val === 'DOBLE_MARCA') continue;
+          answersMap[q.id] = val;
+        }
 
-          if (questionsByNum[key]) {
-            answersMap[questionsByNum[key].id] = val;
-          } else if (questionsById[key]) {
-            answersMap[key] = val;
+        for (const [key, rawScore] of Object.entries(incomingOpenScores)) {
+          const q = questionsByNum[key] || questionsById[key];
+          if (!q) continue;
+          if (rawScore === null || rawScore === '') continue;
+          const num = parseFloat(String(rawScore).replace(',', '.'));
+          if (!isNaN(num)) {
+            openScoresMap[q.id] = Math.max(0, Math.min(q.maxPoints || 1, num));
           }
         }
 
         let submission = await prisma.submission.findUnique({
-          where: { studentRut_assignmentId: { studentRut: rut, assignmentId: assignment.id } }
+          where: { studentRut_assignmentId: { studentRut: rut, assignmentId: assignment.id } },
+          include: { answers: true }
         });
 
         const isNew = !submission;
@@ -1416,11 +1565,43 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
               assignmentId: assignment.id,
               startedAt: new Date(),
               status: 'IN_PROGRESS'
-            }
+            },
+            include: { answers: true }
           });
         }
 
+        const existingAnswersByQId = Object.fromEntries((submission.answers || []).map(a => [a.questionId, a]));
+        const finalAwardedMap = {};
+
         for (const q of questions) {
+          const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
+          if (isOpen) {
+            const existing = existingAnswersByQId[q.id];
+            const incomingPts = openScoresMap[q.id];
+            const finalPts = incomingPts !== undefined ? incomingPts : (existing?.awardedPoints ?? null);
+            if (finalPts !== null) {
+              finalAwardedMap[q.id] = finalPts;
+              const isCorrect = finalPts >= (q.maxPoints || 1);
+              await prisma.submissionAnswer.upsert({
+                where: {
+                  submissionId_questionId: {
+                    submissionId: submission.id,
+                    questionId: q.id
+                  }
+                },
+                update: { awardedPoints: finalPts, isCorrect },
+                create: {
+                  submissionId: submission.id,
+                  questionId: q.id,
+                  selectedAnswer: existing?.selectedAnswer || null,
+                  awardedPoints: finalPts,
+                  isCorrect
+                }
+              });
+            }
+            continue;
+          }
+
           const selected = answersMap[q.id] || null;
           if (selected) {
             const isCorrect = selected === q.correctAnswer;
@@ -1449,7 +1630,7 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
           }
         }
 
-        const computed = computeResults(questions, answersMap, assignment.exam);
+        const computed = computeResults(questions, answersMap, assignment.exam, finalAwardedMap);
 
         await prisma.submission.update({
           where: { id: submission.id },
@@ -1512,12 +1693,12 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
     const questionsByNum = {};
     questions.forEach(q => { questionsByNum[q.questionNumber] = q; });
 
-    // Map column headers (e.g., P1, P2... or index based)
+    // Map column headers (e.g., P1, P2, P25 (Pts 0-7)... or index based)
     const headerRow = worksheet.getRow(1);
     const colToQNum = {};
     for (let c = 1; c <= headerRow.cellCount; c++) {
       const headerVal = String(headerRow.getCell(c).text || '').trim().toUpperCase();
-      const match = headerVal.match(/^P?(\d+)$/);
+      const match = headerVal.match(/^P?(\d+)\b/);
       if (match && parseInt(match[1], 10) in questionsByNum) {
         colToQNum[c] = parseInt(match[1], 10);
       }
@@ -1549,31 +1730,39 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
           });
         }
 
-        // Map answers
+        // Map answers and open question scores
         const answersMap = {};
+        const openScoresMap = {};
+        const readCellForQuestion = (q, cellText) => {
+          const val = String(cellText || '').trim();
+          if (!val || val === '-') return;
+          const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
+          if (isOpen) {
+            const num = parseFloat(val.replace(',', '.'));
+            if (!isNaN(num)) {
+              openScoresMap[q.id] = Math.max(0, Math.min(q.maxPoints || 1, num));
+            }
+          } else {
+            answersMap[q.id] = val.toUpperCase();
+          }
+        };
+
         if (Object.keys(colToQNum).length > 0) {
           for (const [colIdx, qNum] of Object.entries(colToQNum)) {
             const q = questionsByNum[qNum];
-            if (q) {
-              const val = String(row.getCell(parseInt(colIdx, 10)).text || '').trim().toUpperCase();
-              if (val && val !== '-') {
-                answersMap[q.id] = val;
-              }
-            }
+            if (q) readCellForQuestion(q, row.getCell(parseInt(colIdx, 10)).text);
           }
         } else {
           // Fallback: columns 3 onwards are questions in order
           questions.forEach((q, idx) => {
-            const val = String(row.getCell(3 + idx).text || '').trim().toUpperCase();
-            if (val && val !== '-') {
-              answersMap[q.id] = val;
-            }
+            readCellForQuestion(q, row.getCell(3 + idx).text);
           });
         }
 
         // Upsert Submission
         let submission = await prisma.submission.findUnique({
-          where: { studentRut_assignmentId: { studentRut: rut, assignmentId: assignment.id } }
+          where: { studentRut_assignmentId: { studentRut: rut, assignmentId: assignment.id } },
+          include: { answers: true }
         });
 
         if (!submission) {
@@ -1583,12 +1772,44 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
               assignmentId: assignment.id,
               startedAt: new Date(),
               status: 'IN_PROGRESS'
-            }
+            },
+            include: { answers: true }
           });
         }
 
+        const existingAnswersByQId = Object.fromEntries((submission.answers || []).map(a => [a.questionId, a]));
+        const finalAwardedMap = {};
+
         // Upsert Answers
         for (const q of questions) {
+          const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
+          if (isOpen) {
+            const existing = existingAnswersByQId[q.id];
+            const incomingPts = openScoresMap[q.id];
+            const finalPts = incomingPts !== undefined ? incomingPts : (existing?.awardedPoints ?? null);
+            if (finalPts !== null) {
+              finalAwardedMap[q.id] = finalPts;
+              const isCorrect = finalPts >= (q.maxPoints || 1);
+              await prisma.submissionAnswer.upsert({
+                where: {
+                  submissionId_questionId: {
+                    submissionId: submission.id,
+                    questionId: q.id
+                  }
+                },
+                update: { awardedPoints: finalPts, isCorrect },
+                create: {
+                  submissionId: submission.id,
+                  questionId: q.id,
+                  selectedAnswer: existing?.selectedAnswer || null,
+                  awardedPoints: finalPts,
+                  isCorrect
+                }
+              });
+            }
+            continue;
+          }
+
           const selected = answersMap[q.id] || null;
           if (selected) {
             const isCorrect = selected === q.correctAnswer;
@@ -1618,7 +1839,7 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
         }
 
         // Compute scores
-        const computed = computeResults(questions, answersMap, assignment.exam);
+        const computed = computeResults(questions, answersMap, assignment.exam, finalAwardedMap);
 
         // Finalize submission with 3PL TRI & SIMCE Score
         await prisma.submission.update({
@@ -1646,6 +1867,144 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
     res.json(results);
   } catch (error) {
     next(error);
+  }
+});
+
+// ==========================================
+// Calificación Manual de Preguntas Abiertas (Desarrollo Escrito / Oral)
+// ==========================================
+router.post('/assignments/:id/grade-open-questions', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { studentRut, scores } = req.body;
+    if (!studentRut || !scores || typeof scores !== 'object') {
+      return res.status(400).json({ error: 'Debe especificar el RUT del estudiante y los puntajes a asignar' });
+    }
+
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+    const rut = normalizeRut(studentRut);
+
+    const questions = await prisma.question.findMany({
+      where: { examId: assignment.examId },
+      orderBy: { questionNumber: 'asc' }
+    });
+    const questionsByNum = {};
+    const questionsById = {};
+    questions.forEach(q => {
+      questionsByNum[q.questionNumber] = q;
+      questionsById[q.id] = q;
+    });
+
+    let submission = await prisma.submission.findUnique({
+      where: { studentRut_assignmentId: { studentRut: rut, assignmentId: assignment.id } },
+      include: { answers: true }
+    });
+
+    if (!submission) {
+      submission = await prisma.submission.create({
+        data: {
+          studentRut: rut,
+          assignmentId: assignment.id,
+          startedAt: new Date(),
+          submittedAt: new Date(),
+          status: 'SUBMITTED'
+        },
+        include: { answers: true }
+      });
+    }
+
+    // Apply incoming scores for open questions
+    for (const [key, rawPts] of Object.entries(scores)) {
+      const q = questionsByNum[key] || questionsById[key];
+      if (!q) continue;
+      const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL' || q.correctAnswer === 'DESARROLLO' || q.correctAnswer === 'ORAL';
+      if (!isOpen) continue;
+
+      if (rawPts === null || rawPts === '') {
+        // Clear awardedPoints while keeping any digital text answer
+        const existing = (submission.answers || []).find(a => a.questionId === q.id);
+        if (existing) {
+          if (existing.selectedAnswer) {
+            await prisma.submissionAnswer.update({
+              where: { id: existing.id },
+              data: { awardedPoints: null, isCorrect: null }
+            });
+          } else {
+            await prisma.submissionAnswer.delete({ where: { id: existing.id } });
+          }
+        }
+        continue;
+      }
+
+      const num = parseFloat(String(rawPts).replace(',', '.'));
+      if (isNaN(num)) continue;
+      const maxPts = q.maxPoints != null && q.maxPoints > 0 ? Number(q.maxPoints) : 1;
+      const clampedPts = Math.round(Math.max(0, Math.min(maxPts, num)) * 100) / 100;
+      const isCorrect = clampedPts >= maxPts;
+
+      await prisma.submissionAnswer.upsert({
+        where: {
+          submissionId_questionId: {
+            submissionId: submission.id,
+            questionId: q.id
+          }
+        },
+        update: {
+          awardedPoints: clampedPts,
+          isCorrect
+        },
+        create: {
+          submissionId: submission.id,
+          questionId: q.id,
+          selectedAnswer: null,
+          awardedPoints: clampedPts,
+          isCorrect
+        }
+      });
+    }
+
+    // Reload all answers for this submission and recompute total score & grade
+    const allAnswers = await prisma.submissionAnswer.findMany({
+      where: { submissionId: submission.id }
+    });
+    const answersMap = Object.fromEntries(allAnswers.map(a => [a.questionId, a.selectedAnswer]));
+    const awardedPointsMap = Object.fromEntries(
+      allAnswers.filter(a => a.awardedPoints != null).map(a => [a.questionId, a.awardedPoints])
+    );
+
+    const computed = computeResults(questions, answersMap, assignment.exam, awardedPointsMap);
+
+    const updatedSubmission = await prisma.submission.update({
+      where: { id: submission.id },
+      data: {
+        status: 'SUBMITTED',
+        submittedAt: submission.submittedAt || new Date(),
+        correctCount: computed.correctCount,
+        percent: computed.percent,
+        grade: computed.grade,
+        achievementLevel: computed.achievementLevel,
+        simceScore: computed.simceScore,
+        theta: computed.theta,
+        seTheta: computed.seTheta
+      }
+    });
+
+    res.json({
+      message: 'Puntajes guardados y nota recalculada',
+      submission: {
+        id: updatedSubmission.id,
+        studentRut: rut,
+        correctCount: updatedSubmission.correctCount,
+        totalMaxPoints: computed.total,
+        percent: updatedSubmission.percent,
+        grade: updatedSubmission.grade,
+        achievementLevel: updatedSubmission.achievementLevel,
+        simceScore: updatedSubmission.simceScore,
+        theta: updatedSubmission.theta
+      }
+    });
+  } catch (error) {
+    handleAssignmentError(error, res, next);
   }
 });
 

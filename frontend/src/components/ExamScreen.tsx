@@ -25,7 +25,7 @@ interface StartData {
   submissionId: number;
   assignmentId: number;
   exam: { id: number; title: string; subject: string; optionsCount: number };
-  questions: { id: number; questionNumber: number }[];
+  questions: { id: number; questionNumber: number; questionType?: string; maxPoints?: number }[];
   answers: Record<string, string>;
   serverNow: string;
   deadline: string;
@@ -123,6 +123,18 @@ export default function ExamScreen({ assignmentId }: { assignmentId: number }) {
     flush();
   };
 
+  const handleWrittenChange = (questionId: number, text: string) => {
+    if (finished.current) return;
+    const trimmed = text.trim();
+    setAnswers((prev) => {
+      const copy = { ...prev };
+      if (!trimmed) delete copy[questionId];
+      else copy[questionId] = text;
+      return copy;
+    });
+    pending.current.set(questionId, trimmed ? text : null);
+  };
+
   // --- Entrega ---
   const submitExam = useCallback(
     async (auto = false) => {
@@ -208,8 +220,9 @@ export default function ExamScreen({ assignmentId }: { assignmentId: number }) {
   }
 
   const options = ALL_OPTIONS.slice(0, data.exam.optionsCount);
-  const answeredCount = Object.keys(answers).length;
-  const progress = data.questions.length ? Math.round((answeredCount / data.questions.length) * 100) : 0;
+  const answerableQuestions = data.questions.filter((q) => q.questionType !== "ORAL");
+  const answeredCount = answerableQuestions.filter((q) => Boolean(answers[q.id]?.trim())).length;
+  const progress = answerableQuestions.length ? Math.round((answeredCount / answerableQuestions.length) * 100) : 100;
   const lowTime = remaining !== null && remaining < 5 * 60 * 1000;
 
   return (
@@ -301,7 +314,7 @@ export default function ExamScreen({ assignmentId }: { assignmentId: number }) {
         <div className="p-4 border-b bg-gray-50">
           <div className="flex justify-between text-xs font-medium text-gray-500 mb-1">
             <span>
-              {answeredCount} de {data.questions.length} respondidas
+              {answeredCount} de {answerableQuestions.length} respondidas
             </span>
             <span>{progress}%</span>
           </div>
@@ -311,27 +324,59 @@ export default function ExamScreen({ assignmentId }: { assignmentId: number }) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {data.questions.map((q) => (
-            <div key={q.id} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-lg border">
-              <span className="font-bold text-gray-700 w-8">{q.questionNumber}.</span>
-              <div className="flex gap-1.5">
-                {options.map((option) => (
-                  <button
-                    key={option}
-                    onClick={() => handleAnswerSelect(q.id, option)}
-                    aria-label={`Pregunta ${q.questionNumber}, alternativa ${option}`}
-                    className={`w-9 h-9 rounded-full font-bold border-2 flex items-center justify-center transition-colors ${
-                      answers[q.id] === option
-                        ? "bg-blue-600 border-blue-600 text-white"
-                        : "bg-white border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-500"
-                    }`}
-                  >
-                    {option}
-                  </button>
-                ))}
+          {data.questions.map((q) => {
+            if (q.questionType === "WRITTEN") {
+              return (
+                <div key={q.id} className="bg-amber-50/60 px-3 py-2.5 rounded-lg border border-amber-200 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-gray-800 text-sm">{q.questionNumber}.</span>
+                    <span className="text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                      📝 Desarrollo Escrito ({q.maxPoints ?? 1} pts)
+                    </span>
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={answers[q.id] || ""}
+                    onChange={(e) => handleWrittenChange(q.id, e.target.value)}
+                    onBlur={() => flush()}
+                    placeholder="Escribe tu respuesta de desarrollo aquí..."
+                    className="w-full text-xs border border-amber-300 rounded-md p-2 bg-white text-gray-800 focus:ring-2 focus:ring-amber-500 outline-none resize-y"
+                  />
+                </div>
+              );
+            }
+            if (q.questionType === "ORAL") {
+              return (
+                <div key={q.id} className="flex items-center justify-between bg-purple-50/70 px-3 py-2.5 rounded-lg border border-purple-200">
+                  <span className="font-bold text-gray-800 w-8">{q.questionNumber}.</span>
+                  <span className="text-xs font-semibold text-purple-800 bg-purple-100 px-2.5 py-1 rounded-md">
+                    🗣️ Respuesta Oral ({q.maxPoints ?? 1} pts) — Evaluada por el profesor
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <div key={q.id} className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-lg border">
+                <span className="font-bold text-gray-700 w-8">{q.questionNumber}.</span>
+                <div className="flex gap-1.5">
+                  {options.map((option) => (
+                    <button
+                      key={option}
+                      onClick={() => handleAnswerSelect(q.id, option)}
+                      aria-label={`Pregunta ${q.questionNumber}, alternativa ${option}`}
+                      className={`w-9 h-9 rounded-full font-bold border-2 flex items-center justify-center transition-colors ${
+                        answers[q.id] === option
+                          ? "bg-blue-600 border-blue-600 text-white"
+                          : "bg-white border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-500"
+                      }`}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="p-4 border-t bg-gray-50">
@@ -351,11 +396,11 @@ export default function ExamScreen({ assignmentId }: { assignmentId: number }) {
           <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
             <h3 className="text-lg font-bold text-gray-900 mb-2">¿Entregar el ensayo?</h3>
             <p className="text-sm text-gray-600 mb-1">
-              Respondiste <b>{answeredCount}</b> de <b>{data.questions.length}</b> preguntas.
+              Respondiste <b>{answeredCount}</b> de <b>{answerableQuestions.length}</b> preguntas.
             </p>
-            {answeredCount < data.questions.length && (
+            {answeredCount < answerableQuestions.length && (
               <p className="text-sm text-amber-700 bg-amber-50 p-2 rounded mt-2">
-                Tienes {data.questions.length - answeredCount} pregunta(s) sin responder.
+                Tienes {answerableQuestions.length - answeredCount} pregunta(s) sin responder.
               </p>
             )}
             <p className="text-sm text-gray-600 mt-3">Una vez entregado no podrás modificar tus respuestas.</p>

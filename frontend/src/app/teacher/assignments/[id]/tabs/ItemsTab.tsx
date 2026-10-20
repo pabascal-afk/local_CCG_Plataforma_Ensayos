@@ -21,48 +21,101 @@ export default function ItemsTab({ id }: { id: number }) {
           <tr>
             <th className="p-3">N°</th>
             <th className="p-3">Eje / Habilidad</th>
-            <th className="p-3">Correcta</th>
-            <th className="p-3">% Acierto</th>
+            <th className="p-3">Clave / Tipo</th>
+            <th className="p-3">% Logro</th>
             <th className="p-3">A</th>
             <th className="p-3">B</th>
             <th className="p-3">C</th>
             <th className="p-3">D</th>
             <th className="p-3">E</th>
-            <th className="p-3">Omitida</th>
+            <th className="p-3">Omitida / Sin Calif.</th>
           </tr>
         </thead>
         <tbody className="divide-y">
           {data.map((q) => {
             const pct = Math.round(q.percent * 100);
+            const isOpen = q.questionType === "WRITTEN" || q.questionType === "ORAL" || q.correctAnswer === "DESARROLLO" || q.correctAnswer === "ORAL";
+            const isOral = q.questionType === "ORAL" || q.correctAnswer === "ORAL";
+            const maxPts = q.maxPoints || 1;
+
             return (
-              <tr key={q.questionNumber} className="hover:bg-gray-50">
+              <tr key={q.questionNumber} className={`hover:bg-gray-50 ${isOpen ? "bg-amber-50/20" : ""}`}>
                 <td className="p-3 font-bold text-gray-800">{q.questionNumber}</td>
                 <td className="p-3">
-                  <div className="font-medium text-gray-800">{q.axis || '-'}</div>
-                  <div className="text-xs text-gray-500">{q.skill || '-'}</div>
+                  <div className="font-medium text-gray-800">{q.axis || "-"}</div>
+                  <div className="text-xs text-gray-500">{q.skill || "-"}</div>
                 </td>
-                <td className="p-3 font-bold text-blue-600">{q.correctAnswer}</td>
                 <td className="p-3">
-                  <span className={`px-2 py-1 rounded text-xs font-bold ${pct >= 75 ? 'bg-green-100 text-green-700' : pct >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                  {isOpen ? (
+                    <div className="flex flex-col gap-0.5">
+                      <span
+                        className={`inline-flex items-center w-fit px-2 py-0.5 rounded text-[11px] font-extrabold border ${
+                          isOral
+                            ? "bg-purple-100 text-purple-900 border-purple-300"
+                            : "bg-amber-100 text-amber-900 border-amber-300"
+                        }`}
+                      >
+                        {isOral ? "🗣️ Desarrollo Oral" : "📝 Desarrollo Escrito"}
+                      </span>
+                      <span className="text-[11px] font-bold text-slate-600">Máx: {maxPts} pts</span>
+                    </div>
+                  ) : (
+                    <span className="font-bold text-blue-600">{q.correctAnswer}</span>
+                  )}
+                </td>
+                <td className="p-3">
+                  <span
+                    className={`px-2 py-1 rounded text-xs font-bold ${
+                      pct >= 75
+                        ? "bg-green-100 text-green-700"
+                        : pct >= 50
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-red-100 text-red-700"
+                    }`}
+                  >
                     {pct}%
                   </span>
                 </td>
-                {['A', 'B', 'C', 'D', 'E'].map(opt => {
-                  const isCorrect = opt === q.correctAnswer;
-                  const count = q.options[opt];
-                  if (count === undefined) return <td key={opt} className="p-3 text-gray-300">-</td>;
-                  
-                  return (
-                    <td key={opt} className={`p-3 ${isCorrect ? 'bg-blue-50 font-bold' : ''}`}>
-                      {count > 0 ? (
-                        <span className={count > q.correctCount && !isCorrect ? 'text-red-600 font-bold' : ''}>
-                          {Math.round((count / q.totalAnswers) * 100)}%
+                {isOpen ? (
+                  <td colSpan={5} className="p-3 text-xs text-slate-700 font-semibold">
+                    {q.gradedCount > 0 ? (
+                      <span>
+                        Promedio:{" "}
+                        <strong className="text-indigo-700">
+                          {q.avgPoints} de {maxPts} pts
+                        </strong>{" "}
+                        <span className="text-slate-500 font-normal">
+                          ({q.gradedCount}/{q.totalAnswers} calificados)
                         </span>
-                      ) : '-'}
-                    </td>
-                  );
-                })}
-                <td className="p-3 text-gray-500">{q.omittedCount > 0 ? Math.round((q.omittedCount / q.totalAnswers) * 100) + '%' : '-'}</td>
+                      </span>
+                    ) : (
+                      <span className="text-amber-700">Pendiente de calificación por el profesor</span>
+                    )}
+                  </td>
+                ) : (
+                  ["A", "B", "C", "D", "E"].map((opt) => {
+                    const isCorrect = opt === q.correctAnswer;
+                    const count = q.options[opt];
+                    if (count === undefined) return <td key={opt} className="p-3 text-gray-300">-</td>;
+
+                    return (
+                      <td key={opt} className={`p-3 ${isCorrect ? "bg-blue-50 font-bold" : ""}`}>
+                        {count > 0 ? (
+                          <span className={count > q.correctCount && !isCorrect ? "text-red-600 font-bold" : ""}>
+                            {Math.round((count / q.totalAnswers) * 100)}%
+                          </span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                    );
+                  })
+                )}
+                <td className="p-3 text-gray-500">
+                  {q.omittedCount > 0 && q.totalAnswers > 0
+                    ? Math.round((q.omittedCount / q.totalAnswers) * 100) + "%"
+                    : "-"}
+                </td>
               </tr>
             );
           })}

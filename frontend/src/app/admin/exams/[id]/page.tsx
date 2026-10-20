@@ -17,6 +17,8 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const [showAiModal, setShowAiModal] = useState(false);
   
   const [answerKey, setAnswerKey] = useState<Record<string, string>>({});
+  const [questionTypesKeys, setQuestionTypesKeys] = useState<Record<string, string>>({});
+  const [maxPointsKeys, setMaxPointsKeys] = useState<Record<string, number>>({});
   const [skillsKeys, setSkillsKeys] = useState<Record<string, string>>({});
   const [axesKeys, setAxesKeys] = useState<Record<string, string>>({});
   const [learningObjectivesKeys, setLearningObjectivesKeys] = useState<Record<string, string>>({});
@@ -27,6 +29,44 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
 
   const [pasteText, setPasteText] = useState("");
   const [showPaste, setShowPaste] = useState(false);
+
+  const normalizeDifficultySelectValue = (raw: any): string => {
+    if (raw === undefined || raw === null || raw === "") return "0.0";
+    const num = parseFloat(String(raw).replace(",", "."));
+    if (isNaN(num)) return "0.0";
+    if (num < -0.4) return "-1.5";
+    if (num > 0.4) return "1.5";
+    return "0.0";
+  };
+
+  const applyExamState = (e: any) => {
+    setExam(e);
+    const ak: Record<string, string> = { ...(e.answerKey || {}) };
+    const qtk: Record<string, string> = { ...(e.questionTypesKeys || {}) };
+    const mpk: Record<string, number> = {};
+    if (e.maxPointsKeys) {
+      Object.entries(e.maxPointsKeys).forEach(([k, v]) => {
+        mpk[k] = Number(v) || 1;
+      });
+    }
+    Object.entries(qtk).forEach(([qNum, qType]) => {
+      if (qType === "WRITTEN") ak[qNum] = "DESARROLLO";
+      else if (qType === "ORAL") ak[qNum] = "ORAL";
+    });
+    const dk: Record<string, string> = {};
+    if (e.difficultiesKeys) {
+      Object.entries(e.difficultiesKeys).forEach(([k, v]) => {
+        dk[k] = normalizeDifficultySelectValue(v);
+      });
+    }
+    setAnswerKey(ak);
+    setQuestionTypesKeys(qtk);
+    setMaxPointsKeys(mpk);
+    setSkillsKeys(e.skillsKeys || {});
+    setAxesKeys(e.axesKeys || {});
+    setLearningObjectivesKeys(e.learningObjectivesKeys || {});
+    setDifficultiesKeys(dk);
+  };
 
   const handleDownloadTemplate = async () => {
     try {
@@ -54,12 +94,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
       try {
         const e = await apiFetch<any>(`/admin/exams/${id}`);
         if (!e) throw new Error("Ensayo no encontrado");
-        setExam(e);
-        setAnswerKey(e.answerKey || {});
-        setSkillsKeys(e.skillsKeys || {});
-        setAxesKeys(e.axesKeys || {});
-        setLearningObjectivesKeys(e.learningObjectivesKeys || {});
-        setDifficultiesKeys(e.difficultiesKeys || {});
+        applyExamState(e);
       } catch (err: any) {
         alert(err.message);
       } finally {
@@ -74,7 +109,15 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     try {
       await apiFetch(`/admin/exams/${id}/answer-key`, {
         method: "PUT",
-        body: { answerKey, skillsKeys, axesKeys, learningObjectivesKeys, difficultiesKeys }
+        body: {
+          answerKey,
+          questionTypesKeys,
+          maxPointsKeys,
+          skillsKeys,
+          axesKeys,
+          learningObjectivesKeys,
+          difficultiesKeys
+        }
       });
       alert("Pauta guardada correctamente");
     } catch (err: any) {
@@ -107,12 +150,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
       setImportFile(null);
       const eData = await apiFetch<any>(`/admin/exams/${id}`);
       if (eData) {
-        setExam(eData);
-        setAnswerKey(eData.answerKey || {});
-        setSkillsKeys(eData.skillsKeys || {});
-        setAxesKeys(eData.axesKeys || {});
-        setLearningObjectivesKeys(eData.learningObjectivesKeys || {});
-        setDifficultiesKeys(eData.difficultiesKeys || {});
+        applyExamState(eData);
       }
     } catch (err: any) {
       alert(err.message);
@@ -124,14 +162,33 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const applyPaste = () => {
     const letters = pasteText.replace(/[^A-E]/gi, "").toUpperCase();
     const newKey = { ...answerKey };
+    const newTypes = { ...questionTypesKeys };
     for (let i = 0; i < letters.length; i++) {
-      if (i < 45) { // asumiendo max 45
-        newKey[String(i + 1)] = letters[i];
+      const qNum = String(i + 1);
+      if (newTypes[qNum] === "WRITTEN" || newTypes[qNum] === "ORAL") continue;
+      if (i < 100) {
+        newKey[qNum] = letters[i];
+        newTypes[qNum] = "MULTIPLE_CHOICE";
       }
     }
     setAnswerKey(newKey);
+    setQuestionTypesKeys(newTypes);
     setShowPaste(false);
     setPasteText("");
+  };
+
+  const handleSelectAnswerOrType = (qNum: string, val: string) => {
+    setAnswerKey(prev => ({ ...prev, [qNum]: val }));
+    if (val === "DESARROLLO") {
+      setQuestionTypesKeys(prev => ({ ...prev, [qNum]: "WRITTEN" }));
+      setMaxPointsKeys(prev => ({ ...prev, [qNum]: prev[qNum] && prev[qNum] > 1 ? prev[qNum] : 5 }));
+    } else if (val === "ORAL") {
+      setQuestionTypesKeys(prev => ({ ...prev, [qNum]: "ORAL" }));
+      setMaxPointsKeys(prev => ({ ...prev, [qNum]: prev[qNum] && prev[qNum] > 1 ? prev[qNum] : 4 }));
+    } else {
+      setQuestionTypesKeys(prev => ({ ...prev, [qNum]: "MULTIPLE_CHOICE" }));
+      setMaxPointsKeys(prev => ({ ...prev, [qNum]: 1 }));
+    }
   };
 
   if (loading) return <div className="p-8">Cargando...</div>;
@@ -151,7 +208,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                   <ArrowLeft className="w-4 h-4" /> Volver a Ensayos
                 </Link>
                 <h1 className="text-2xl font-bold">Pauta: {exam.title}</h1>
-                <p className="text-gray-500">Completa las respuestas correctas, ejes, OAs y habilidades.</p>
+                <p className="text-gray-500">Completa las respuestas correctas o marca preguntas de Desarrollo Escrito / Respuesta Oral con su puntaje máximo.</p>
               </div>
               
               <button 
@@ -195,7 +252,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                     <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Importar Pauta
                   </h3>
                   <p className="text-xs text-emerald-700 mb-3">
-                    Sube la pauta en Excel (.xlsx) o CSV con claves, habilidades, ejes, OAs y dificultad TRI.
+                    Sube la pauta en Excel (.xlsx) o CSV con claves (A-E, DESARROLLO, ORAL), habilidades, ejes, OAs y dificultad TRI.
                   </p>
                   <form onSubmit={handleImportQuestions} className="space-y-2">
                     <input 
@@ -240,7 +297,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                     <thead className="bg-gray-50 border-b text-gray-600">
                       <tr>
                         <th className="p-3 font-semibold w-12 text-center">Nº</th>
-                        <th className="p-3 font-semibold w-24">Clave</th>
+                        <th className="p-3 font-semibold w-52">Clave / Clasificación</th>
                         <th className="p-3 font-semibold">Eje / Tema</th>
                         <th className="p-3 font-semibold w-20">OA</th>
                         <th className="p-3 font-semibold">Habilidad Cognitiva</th>
@@ -248,61 +305,95 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {questions.map((qNum) => (
-                        <tr key={qNum} className="hover:bg-blue-50/30 transition-colors">
-                          <td className="p-3 text-center font-bold text-gray-500">{qNum}</td>
-                          <td className="p-3">
-                            <select
-                              value={answerKey[qNum] || ""}
-                              onChange={e => setAnswerKey({ ...answerKey, [qNum]: e.target.value })}
-                              className={`border rounded px-2 py-1.5 w-full font-bold focus:ring-2 focus:ring-blue-500 outline-none ${answerKey[qNum] ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-white'}`}
-                            >
-                              <option value="">-</option>
-                              {Array.from({length: exam.optionsCount || 4}, (_, i) => String.fromCharCode(65 + i)).map(opt => (
-                                <option key={opt} value={opt}>{opt}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="p-3">
-                            <input 
-                              type="text" 
-                              value={axesKeys[qNum] || ""} 
-                              onChange={e => setAxesKeys({ ...axesKeys, [qNum]: e.target.value })}
-                              placeholder="Ej: Geometría"
-                              className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <input 
-                              type="text" 
-                              value={learningObjectivesKeys[qNum] || ""} 
-                              onChange={e => setLearningObjectivesKeys({ ...learningObjectivesKeys, [qNum]: e.target.value })}
-                              placeholder="OA 14"
-                              className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <input 
-                              type="text" 
-                              value={skillsKeys[qNum] || ""} 
-                              onChange={e => setSkillsKeys({ ...skillsKeys, [qNum]: e.target.value })}
-                              placeholder="Ej: Argumentar y comunicar"
-                              className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none"
-                            />
-                          </td>
-                          <td className="p-3">
-                            <select
-                              value={difficultiesKeys[qNum] !== undefined ? String(difficultiesKeys[qNum]) : "0.0"}
-                              onChange={e => setDifficultiesKeys({ ...difficultiesKeys, [qNum]: e.target.value })}
-                              className="border rounded px-2 py-1.5 w-full text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                            >
-                              <option value="-1.5">Fácil (-1.5)</option>
-                              <option value="0.0">Media (0.0)</option>
-                              <option value="1.5">Difícil (+1.5)</option>
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
+                      {questions.map((qNum) => {
+                        const currentKey = answerKey[qNum] || "";
+                        const qType = questionTypesKeys[qNum] || (currentKey === "DESARROLLO" ? "WRITTEN" : currentKey === "ORAL" ? "ORAL" : "MULTIPLE_CHOICE");
+                        const isOpen = qType === "WRITTEN" || qType === "ORAL" || currentKey === "DESARROLLO" || currentKey === "ORAL";
+                        const selectVal = qType === "WRITTEN" ? "DESARROLLO" : qType === "ORAL" ? "ORAL" : currentKey;
+                        const maxPts = maxPointsKeys[qNum] ?? (isOpen ? 5 : 1);
+
+                        return (
+                          <tr key={qNum} className={`hover:bg-blue-50/30 transition-colors ${isOpen ? "bg-amber-50/20" : ""}`}>
+                            <td className="p-3 text-center font-bold text-gray-500">{qNum}</td>
+                            <td className="p-3">
+                              <div className="flex items-center gap-1.5">
+                                <select
+                                  value={selectVal}
+                                  onChange={e => handleSelectAnswerOrType(qNum, e.target.value)}
+                                  className={`border rounded px-2 py-1.5 font-bold focus:ring-2 focus:ring-blue-500 outline-none text-xs ${
+                                    selectVal === "ORAL"
+                                      ? "bg-purple-50 border-purple-300 text-purple-900 flex-1"
+                                      : selectVal === "DESARROLLO"
+                                      ? "bg-amber-50 border-amber-300 text-amber-900 flex-1"
+                                      : selectVal
+                                      ? "bg-blue-50 border-blue-300 text-blue-800 w-full"
+                                      : "bg-white w-full"
+                                  }`}
+                                >
+                                  <option value="">-</option>
+                                  {Array.from({length: exam.optionsCount || 4}, (_, i) => String.fromCharCode(65 + i)).map(opt => (
+                                    <option key={opt} value={opt}>Alternativa {opt}</option>
+                                  ))}
+                                  <option value="DESARROLLO">📝 Desarrollo Escrito</option>
+                                  <option value="ORAL">🗣️ Desarrollo Oral</option>
+                                </select>
+                                {isOpen && (
+                                  <div className="flex items-center gap-1 bg-white border border-slate-300 rounded px-1.5 py-1" title="Puntaje máximo de esta pregunta">
+                                    <input
+                                      type="number"
+                                      min={0.5}
+                                      max={100}
+                                      step="0.5"
+                                      value={maxPts}
+                                      onChange={e => setMaxPointsKeys(prev => ({ ...prev, [qNum]: Math.max(0.5, parseFloat(e.target.value) || 1) }))}
+                                      className="w-11 text-center font-black text-xs text-slate-900 outline-none"
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-500">pts</span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <input 
+                                type="text" 
+                                value={axesKeys[qNum] || ""} 
+                                onChange={e => setAxesKeys({ ...axesKeys, [qNum]: e.target.value })}
+                                placeholder="Ej: Geometría"
+                                className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none"
+                              />
+                            </td>
+                            <td className="p-3">
+                              <input 
+                                type="text" 
+                                value={learningObjectivesKeys[qNum] || ""} 
+                                onChange={e => setLearningObjectivesKeys({ ...learningObjectivesKeys, [qNum]: e.target.value })}
+                                placeholder="OA 14"
+                                className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none"
+                              />
+                            </td>
+                            <td className="p-3">
+                              <input 
+                                type="text" 
+                                value={skillsKeys[qNum] || ""} 
+                                onChange={e => setSkillsKeys({ ...skillsKeys, [qNum]: e.target.value })}
+                                placeholder="Ej: Argumentar y comunicar"
+                                className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none"
+                              />
+                            </td>
+                            <td className="p-3">
+                              <select
+                                value={normalizeDifficultySelectValue(difficultiesKeys[qNum])}
+                                onChange={e => setDifficultiesKeys({ ...difficultiesKeys, [qNum]: e.target.value })}
+                                className="border rounded px-2 py-1.5 w-full text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                              >
+                                <option value="-1.5">Fácil (-1.5)</option>
+                                <option value="0.0">Media (0.0)</option>
+                                <option value="1.5">Difícil (+1.5)</option>
+                              </select>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
