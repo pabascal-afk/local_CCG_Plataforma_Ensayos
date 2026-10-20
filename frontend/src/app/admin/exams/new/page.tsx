@@ -2,12 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Save, Sparkles } from "lucide-react";
+import { ArrowLeft, Save, Sparkles, Plus, Trash2, PenTool, Mic } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import AiPromptModal from "@/components/AiPromptModal";
 import { getToken } from "@/lib/session";
 import { useIsPruebas } from "@/lib/useIsPruebas";
+
+interface OpenQuestionItem {
+  questionNumber: number;
+  questionType: "WRITTEN" | "ORAL";
+  maxPoints: number;
+}
 
 export default function NewExamPage() {
   const router = useRouter();
@@ -18,10 +24,35 @@ export default function NewExamPage() {
   const [optionCount, setOptionCount] = useState(4);
   const [orderNumber, setOrderNumber] = useState(1);
   const [examType, setExamType] = useState("ENSAYO");
+  const [openQuestions, setOpenQuestions] = useState<OpenQuestionItem[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showAiModal, setShowAiModal] = useState(false);
+
+  const addOpenQuestion = (type: "WRITTEN" | "ORAL") => {
+    const usedNums = new Set(openQuestions.map((q) => q.questionNumber));
+    let suggestedNum = questionCount;
+    while (usedNums.has(suggestedNum) && suggestedNum > 1) {
+      suggestedNum--;
+    }
+    if (usedNums.has(suggestedNum)) {
+      suggestedNum = Math.min(100, Math.max(...Array.from(usedNums), questionCount) + 1);
+    }
+    setOpenQuestions((prev) =>
+      [...prev, { questionNumber: suggestedNum, questionType: type, maxPoints: type === "WRITTEN" ? 5 : 4 }].sort(
+        (a, b) => a.questionNumber - b.questionNumber
+      )
+    );
+  };
+
+  const updateOpenQuestion = (idx: number, patch: Partial<OpenQuestionItem>) => {
+    setOpenQuestions((prev) => prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)));
+  };
+
+  const removeOpenQuestion = (idx: number) => {
+    setOpenQuestions((prev) => prev.filter((_, i) => i !== idx));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +76,18 @@ export default function NewExamPage() {
     formData.append("optionsCount", optionCount.toString());
     formData.append("orderNumber", orderNumber.toString());
     formData.append("examType", examType);
+    if (openQuestions.length > 0) {
+      const openMap: Record<number, { questionType: string; maxPoints: number }> = {};
+      openQuestions.forEach((oq) => {
+        if (oq.questionNumber >= 1 && oq.questionNumber <= questionCount) {
+          openMap[oq.questionNumber] = {
+            questionType: oq.questionType,
+            maxPoints: Math.max(0.5, Number(oq.maxPoints) || 1),
+          };
+        }
+      });
+      formData.append("openQuestions", JSON.stringify(openMap));
+    }
     formData.append("pdf", file);
 
     try {
@@ -207,19 +250,116 @@ export default function NewExamPage() {
 
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Cantidad de Preguntas</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Cantidad Total de Preguntas</label>
                   <input 
-                    type="number" required min="1" max="100" value={questionCount} onChange={e=>setQuestionCount(parseInt(e.target.value))}
+                    type="number" required min="1" max="100" value={questionCount} onChange={e=>setQuestionCount(parseInt(e.target.value) || 1)}
                     className="w-full border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" 
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Alternativas</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Alternativas (Selección Múltiple)</label>
                   <select value={optionCount} onChange={e=>setOptionCount(parseInt(e.target.value))} className="w-full border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
                     <option value={4}>4 (A, B, C, D)</option>
                     <option value={5}>5 (A, B, C, D, E)</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Preguntas de Desarrollo Escrito / Respuesta Oral */}
+              <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                      <PenTool className="w-4 h-4 text-amber-600" />
+                      Preguntas de Desarrollo Escrito y Respuesta Oral (Opcional)
+                    </h3>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Marca aquí las preguntas que el profesor revisará a posteriori asignando puntaje manual (ej: Pregunta 28 Desarrollo Escrito 7 pts, Pregunta 29 Desarrollo Oral 5 pts).
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => addOpenQuestion("WRITTEN")}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>📝 Desarrollo Escrito</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => addOpenQuestion("ORAL")}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition"
+                    >
+                      <Mic className="w-3.5 h-3.5" />
+                      <span>🗣️ Desarrollo Oral</span>
+                    </button>
+                  </div>
+                </div>
+
+                {openQuestions.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-amber-200/80">
+                    {openQuestions.map((oq, idx) => (
+                      <div
+                        key={idx}
+                        className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600">Pregunta N°:</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={questionCount}
+                            value={oq.questionNumber}
+                            onChange={(e) =>
+                              updateOpenQuestion(idx, { questionNumber: Math.max(1, Math.min(questionCount, parseInt(e.target.value) || 1)) })
+                            }
+                            className="w-16 border border-slate-300 rounded-md px-2 py-1 text-xs font-black text-center text-slate-900"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600">Clasificación:</span>
+                          <select
+                            value={oq.questionType}
+                            onChange={(e) => updateOpenQuestion(idx, { questionType: e.target.value as "WRITTEN" | "ORAL" })}
+                            className={`border rounded-md px-2.5 py-1 text-xs font-bold ${
+                              oq.questionType === "ORAL"
+                                ? "bg-purple-50 border-purple-300 text-purple-900"
+                                : "bg-amber-50 border-amber-300 text-amber-900"
+                            }`}
+                          >
+                            <option value="WRITTEN">📝 Desarrollo Escrito</option>
+                            <option value="ORAL">🗣️ Desarrollo Oral</option>
+                          </select>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600">Puntaje Máx:</span>
+                          <input
+                            type="number"
+                            min={0.5}
+                            max={100}
+                            step="0.5"
+                            value={oq.maxPoints}
+                            onChange={(e) => updateOpenQuestion(idx, { maxPoints: Math.max(0.5, parseFloat(e.target.value) || 1) })}
+                            className="w-16 border border-slate-300 rounded-md px-2 py-1 text-xs font-black text-center text-slate-900"
+                          />
+                          <span className="text-xs font-semibold text-slate-500">pts</span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => removeOpenQuestion(idx)}
+                          className="ml-auto p-1 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50 transition"
+                          title="Quitar"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>

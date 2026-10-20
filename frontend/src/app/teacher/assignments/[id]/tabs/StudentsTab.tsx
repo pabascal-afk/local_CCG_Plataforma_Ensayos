@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/session";
 import Link from "next/link";
-import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check } from "lucide-react";
+import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check, PenTool } from "lucide-react";
 import OmrScannerModal from "@/components/OmrScannerModal";
 import FastDigitizerModal from "@/components/FastDigitizerModal";
+import OpenQuestionsGradingModal from "@/components/OpenQuestionsGradingModal";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function StudentsTab({ id }: { id: number }) {
@@ -15,6 +16,8 @@ export default function StudentsTab({ id }: { id: number }) {
   const [importingAnswers, setImportingAnswers] = useState(false);
   const [showOmrModal, setShowOmrModal] = useState(false);
   const [showDigitizerModal, setShowDigitizerModal] = useState(false);
+  const [showOpenGradingModal, setShowOpenGradingModal] = useState(false);
+  const [selectedGradingRut, setSelectedGradingRut] = useState<string | null>(null);
   const [showModeConfirmModal, setShowModeConfirmModal] = useState(false);
   const [isUpdatingMode, setIsUpdatingMode] = useState(false);
 
@@ -106,10 +109,12 @@ export default function StudentsTab({ id }: { id: number }) {
 
   const students = data.students.filter((s: any) => s.state === "SUBMITTED").sort((a: any, b: any) => (b.grade || 0) - (a.grade || 0));
   const pending = data.students.filter((s: any) => s.state !== "SUBMITTED");
+  const openQuestions = data.openQuestions || [];
+  const hasOpenQuestions = openQuestions.length > 0;
 
   return (
     <div>
-      {/* Modales OMR y Digitador */}
+      {/* Modales OMR, Digitador y Calificador Desarrollo/Oral */}
       <OmrScannerModal
         assignmentId={id}
         isOpen={showOmrModal}
@@ -120,6 +125,15 @@ export default function StudentsTab({ id }: { id: number }) {
         assignmentId={id}
         isOpen={showDigitizerModal}
         onClose={() => setShowDigitizerModal(false)}
+        onSuccess={refreshData}
+      />
+      <OpenQuestionsGradingModal
+        assignmentId={id}
+        isOpen={showOpenGradingModal}
+        onClose={() => setShowOpenGradingModal(false)}
+        openQuestions={openQuestions}
+        students={data.students || []}
+        initialStudentRut={selectedGradingRut}
         onSuccess={refreshData}
       />
 
@@ -259,6 +273,21 @@ export default function StudentsTab({ id }: { id: number }) {
             >
               <Keyboard className="w-4 h-4 text-purple-200" /> Digitador Teclado
             </button>
+
+            {/* Botón Revisar Desarrollo / Oral */}
+            {hasOpenQuestions && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedGradingRut(null);
+                  setShowOpenGradingModal(true);
+                }}
+                className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2.5 rounded-xl text-xs font-black shadow transition"
+                title="Ingresar puntaje de preguntas de Desarrollo Escrito y Respuesta Oral por estudiante"
+              >
+                <PenTool className="w-4 h-4" /> Calificar Desarrollo / Oral ({openQuestions.length})
+              </button>
+            )}
           </div>
         </div>
 
@@ -307,16 +336,26 @@ export default function StudentsTab({ id }: { id: number }) {
               <th className="p-4">Nombre</th>
               <th className="p-4 text-center">Nota</th>
               <th className="p-4 text-center">{isPruebas ? "Puntaje" : "Puntaje SIMCE"}</th>
+              {hasOpenQuestions && <th className="p-4 text-center">Desarrollo / Oral</th>}
               <th className="p-4">Nivel de Logro</th>
               <th className="p-4">Entrega</th>
               <th className="p-4"></th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {students.length === 0 && <tr><td colSpan={7} className="p-4 text-center text-gray-500">Nadie ha entregado aún.</td></tr>}
+            {students.length === 0 && (
+              <tr>
+                <td colSpan={hasOpenQuestions ? 8 : 7} className="p-4 text-center text-gray-500">
+                  Nadie ha entregado aún.
+                </td>
+              </tr>
+            )}
             {students.map((st: any) => {
               const g = st.grade || 0;
               const level = st.achievementLevel || (g >= 6.0 ? "ADECUADO" : g >= 4.0 ? "ELEMENTAL" : "INSUFICIENTE");
+              const openGraded = st.openGradedCount || 0;
+              const openTotal = openQuestions.length;
+
               return (
                 <tr key={st.rut} className="hover:bg-gray-50">
                   <td className="p-4 font-mono text-gray-600">{st.rut}</td>
@@ -325,6 +364,29 @@ export default function StudentsTab({ id }: { id: number }) {
                   <td className="p-4 text-center font-bold text-emerald-700">
                     {st.simceScore ? `${st.simceScore} pts` : "-"}
                   </td>
+                  {hasOpenQuestions && (
+                    <td className="p-4 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedGradingRut(st.rut);
+                          setShowOpenGradingModal(true);
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-extrabold border transition ${
+                          openGraded >= openTotal
+                            ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+                            : "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100"
+                        }`}
+                      >
+                        <PenTool className="w-3.5 h-3.5" />
+                        <span>
+                          {openGraded >= openTotal
+                            ? `Calificado (${openGraded}/${openTotal})`
+                            : `Calificar (${openGraded}/${openTotal})`}
+                        </span>
+                      </button>
+                    </td>
+                  )}
                   <td className="p-4">
                     {level === "ADECUADO" ? <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">Adecuado</span> :
                      level === "ELEMENTAL" ? <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold">Elemental</span> :
@@ -351,10 +413,17 @@ export default function StudentsTab({ id }: { id: number }) {
               <th className="p-4">RUT</th>
               <th className="p-4">Nombre</th>
               <th className="p-4">Estado</th>
+              {hasOpenQuestions && <th className="p-4 text-right">Acción</th>}
             </tr>
           </thead>
           <tbody className="divide-y">
-            {pending.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">Todos han entregado.</td></tr>}
+            {pending.length === 0 && (
+              <tr>
+                <td colSpan={hasOpenQuestions ? 4 : 3} className="p-4 text-center text-gray-500">
+                  Todos han entregado.
+                </td>
+              </tr>
+            )}
             {pending.map((st: any) => (
               <tr key={st.rut} className="hover:bg-gray-50 text-gray-500">
                 <td className="p-4 font-mono">{st.rut}</td>
@@ -362,6 +431,20 @@ export default function StudentsTab({ id }: { id: number }) {
                 <td className="p-4">
                   {st.state === "NOT_STARTED" ? "Sin comenzar" : `En curso (${st.answersCount} resp.)`}
                 </td>
+                {hasOpenQuestions && (
+                  <td className="p-4 text-right">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedGradingRut(st.rut);
+                        setShowOpenGradingModal(true);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition"
+                    >
+                      <PenTool className="w-3 h-3" /> Ingresar Puntaje Desarrollo / Oral
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

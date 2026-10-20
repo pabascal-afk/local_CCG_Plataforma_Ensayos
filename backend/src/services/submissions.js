@@ -28,14 +28,20 @@ async function finalizeSubmission(submissionId, { auto = false } = {}) {
 
     const exam = submission.assignment.exam;
     const answersMap = {};
-    for (const a of submission.answers) answersMap[a.questionId] = a.selectedAnswer;
+    const awardedPointsMap = {};
+    for (const a of submission.answers) {
+      answersMap[a.questionId] = a.selectedAnswer;
+      if (a.awardedPoints !== null && a.awardedPoints !== undefined) {
+        awardedPointsMap[a.questionId] = a.awardedPoints;
+      }
+    }
 
-    const results = computeResults(exam.questions, answersMap, exam);
+    const results = computeResults(exam.questions, answersMap, exam, awardedPointsMap);
 
     for (const pq of results.perQuestion) {
-      if (pq.selected === null) continue;
-      await tx.submissionAnswer.update({
-        where: { submissionId_questionId: { submissionId, questionId: pq.questionId } },
+      if (pq.selected === null && pq.awardedPoints === null) continue;
+      await tx.submissionAnswer.updateMany({
+        where: { submissionId, questionId: pq.questionId },
         data: { isCorrect: pq.isCorrect },
       });
     }

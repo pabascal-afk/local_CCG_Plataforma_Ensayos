@@ -31,16 +31,39 @@ function achievementLevel(p, cutElemental = 0.5, cutAdecuado = 0.75) {
   return 'INSUFICIENTE';
 }
 
-function groupStats(questions, answers, key) {
+function isOpenQuestion(q) {
+  return q && (q.questionType === 'WRITTEN' || q.questionType === 'ORAL');
+}
+
+function getQuestionMaxPoints(q) {
+  const mp = Number(q?.maxPoints);
+  return Number.isFinite(mp) && mp > 0 ? mp : 1;
+}
+
+function groupStats(questions, answers, key, awardedPointsMap = {}) {
   const groups = {};
   for (const q of questions) {
     const name = q[key] || 'Sin clasificar';
     if (!groups[name]) groups[name] = { name, total: 0, correct: 0 };
-    groups[name].total += 1;
-    if (answers[q.id] && answers[q.id] === q.correctAnswer) groups[name].correct += 1;
+    const maxPts = getQuestionMaxPoints(q);
+    groups[name].total += maxPts;
+
+    if (isOpenQuestion(q)) {
+      const rawAwarded = awardedPointsMap[q.id];
+      if (rawAwarded !== undefined && rawAwarded !== null && !Number.isNaN(Number(rawAwarded))) {
+        const earned = Math.max(0, Math.min(maxPts, Number(rawAwarded)));
+        groups[name].correct += earned;
+      }
+    } else {
+      if (answers[q.id] && answers[q.id] === q.correctAnswer) {
+        groups[name].correct += maxPts;
+      }
+    }
   }
   return Object.values(groups).map((g) => ({
-    ...g,
+    name: g.name,
+    total: round1(g.total),
+    correct: round1(g.correct),
     percent: g.total ? Math.round((g.correct / g.total) * 1000) / 10 : 0,
   }));
 }
@@ -48,28 +71,61 @@ function groupStats(questions, answers, key) {
 const { estimateThetaEAP, thetaToSimceScore, simceAchievementLevel } = require('./irt');
 
 /**
- * @param {Array<{id:number, correctAnswer:string, skill?:string, axis?:string, difficulty?:number, discrimination?:number, guessing?:number}>} questions
- * @param {Record<number,string>} answers  mapa questionId -> alternativa marcada
+ * @param {Array<{id:number, correctAnswer:string, questionType?:string, maxPoints?:number, skill?:string, axis?:string, difficulty?:number, discrimination?:number, guessing?:number}>} questions
+ * @param {Record<number,string>} answers  mapa questionId -> alternativa marcada o respuesta
  * @param {{passThreshold?:number, minGrade?:number, cutElemental?:number, cutAdecuado?:number, simceCutElemental?:number, simceCutAdecuado?:number}} exam
+ * @param {Record<number,number|null>} awardedPointsMap  mapa questionId -> puntos otorgados por el docente en preguntas WRITTEN / ORAL
  */
-function computeResults(questions, answers, exam = {}) {
-  const total = questions.length;
-  let correctCount = 0;
-  const isCorrectMap = {};
+function computeResults(questions, answers, exam = {}, awardedPointsMap = {}) {
+  let totalMaxPoints = 0;
+  let totalEarnedPoints = 0;
+  const irtResponsesMap = {};
 
   const perQuestion = questions.map((q) => {
-    const selected = answers[q.id] || null;
+    const maxPts = getQuestionMaxPoints(q);
+    totalMaxPoints += maxPts;
+
+    const selected = answers[q.id] !== undefined ? answers[q.id] : null;
+
+    if (isOpenQuestion(q)) {
+      const rawAwarded = awardedPointsMap[q.id];
+      const hasAwarded = rawAwarded !== undefined && rawAwarded !== null && rawAwarded !== '' && !Number.isNaN(Number(rawAwarded));
+      const earnedPoints = hasAwarded ? Math.max(0, Math.min(maxPts, Number(rawAwarded))) : 0;
+      totalEarnedPoints += earnedPoints;
+
+      const isCorrect = hasAwarded ? earnedPoints >= maxPts * (exam.passThreshold ?? 0.6) : null;
+      if (hasAwarded) {
+        irtResponsesMap[q.id] = maxPts > 0 ? earnedPoints / maxPts : 0;
+      }
+
+      return {
+        questionId: q.id,
+        selected,
+        isCorrect,
+        awardedPoints: hasAwarded ? earnedPoints : null,
+        maxPoints: maxPts,
+      };
+    }
+
     const isCorrect = selected !== null && selected === q.correctAnswer;
-    if (isCorrect) correctCount += 1;
-    isCorrectMap[q.id] = isCorrect;
-    return { questionId: q.id, selected, isCorrect };
+    const earnedPoints = isCorrect ? maxPts : 0;
+    totalEarnedPoints += earnedPoints;
+    irtResponsesMap[q.id] = isCorrect ? 1.0 : 0.0;
+
+    return {
+      questionId: q.id,
+      selected,
+      isCorrect,
+      awardedPoints: earnedPoints,
+      maxPoints: maxPts,
+    };
   });
 
-  const ratio = total ? correctCount / total : 0;
+  const ratio = totalMaxPoints > 0 ? totalEarnedPoints / totalMaxPoints : 0;
 
   // Cálculo psicométrico TRI / Modelo 3PL
-  const { theta, seTheta } = estimateThetaEAP(questions, isCorrectMap);
-  const simceScore = total ? thetaToSimceScore(theta) : 100;
+  const { theta, seTheta } = estimateThetaEAP(questions, irtResponsesMap);
+  const simceScore = totalMaxPoints > 0 ? thetaToSimceScore(theta) : 100;
   
   // Nivel de logro:
   // Si el examen define cortes SIMCE explícitos, clasifica por escala SIMCE.
@@ -82,8 +138,10 @@ function computeResults(questions, answers, exam = {}) {
   }
 
   return {
-    total,
-    correctCount,
+    total: Math.round(totalMaxPoints),
+    maxPoints: round1(totalMaxPoints),
+    earnedPoints: round1(totalEarnedPoints),
+    correctCount: Math.round(totalEarnedPoints),
     percent: Math.round(ratio * 1000) / 10,
     grade: chileanGrade(ratio, exam.passThreshold ?? 0.6, exam.minGrade ?? 1.0),
     achievementLevel: level,
@@ -91,9 +149,10 @@ function computeResults(questions, answers, exam = {}) {
     theta,
     seTheta,
     perQuestion,
-    bySkill: groupStats(questions, answers, 'skill'),
-    byAxis: groupStats(questions, answers, 'axis'),
+    bySkill: groupStats(questions, answers, 'skill', awardedPointsMap),
+    byAxis: groupStats(questions, answers, 'axis', awardedPointsMap),
   };
 }
 
-module.exports = { chileanGrade, achievementLevel, computeResults };
+module.exports = { chileanGrade, achievementLevel, computeResults, isOpenQuestion, getQuestionMaxPoints };
+

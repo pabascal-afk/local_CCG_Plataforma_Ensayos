@@ -77,11 +77,16 @@ function estimateThetaEAP(questions, responses) {
 
     for (let i = 0; i < validQuestions.length; i++) {
       const q = validQuestions[i];
-      const isCorrect = Boolean(responses[q.id]);
-      const p = prob3PL(theta, q.discrimination ?? 1.0, q.difficulty ?? 0.0, q.guessing ?? 0.25);
+      const rawResp = responses[q.id];
+      const propCorrect = typeof rawResp === 'number'
+        ? Math.max(0, Math.min(1, rawResp))
+        : (rawResp ? 1.0 : 0.0);
+      const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
+      const guessingVal = isOpen ? 0.0 : (q.guessing ?? 0.25);
+      const p = prob3PL(theta, q.discrimination ?? 1.0, q.difficulty ?? 0.0, guessingVal);
       const safeP = Math.max(1e-12, Math.min(1 - 1e-12, p));
 
-      logL += isCorrect ? Math.log(safeP) : Math.log(1 - safeP);
+      logL += propCorrect * Math.log(safeP) + (1 - propCorrect) * Math.log(1 - safeP);
     }
 
     logLikelihoods[k] = logL;

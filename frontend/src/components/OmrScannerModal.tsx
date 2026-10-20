@@ -47,6 +47,7 @@ interface ProcessedSheetItem {
   selectedRut: string;
   studentName: string;
   answers: Record<number, string>;
+  openScores: Record<number, number | "">;
   isReviewed: boolean;
 }
 
@@ -69,6 +70,9 @@ export default function OmrScannerModal({
     questionCount: number;
     optionsCount: number;
   } | null>(null);
+  const [questionsMeta, setQuestionsMeta] = useState<
+    Record<number, { questionType: string; maxPoints: number }>
+  >({});
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState("");
@@ -261,6 +265,15 @@ export default function OmrScannerModal({
         }
       }
 
+      const cleanedAnswers: Record<number, string> = {};
+      for (const [k, v] of Object.entries(omrResult.answers || {})) {
+        const qNum = Number(k);
+        const qMeta = questionsMeta[qNum];
+        if (!qMeta || qMeta.questionType === "MULTIPLE_CHOICE") {
+          cleanedAnswers[qNum] = v;
+        }
+      }
+
       const newItem: ProcessedSheetItem = {
         id: `cam-${Date.now()}-${Math.random()}`,
         pageIndex: nextIndex,
@@ -268,7 +281,8 @@ export default function OmrScannerModal({
         result: omrResult,
         selectedRut: matchedRut,
         studentName: matchedName,
-        answers: { ...omrResult.answers },
+        answers: cleanedAnswers,
+        openScores: {},
         isReviewed: false,
       };
 
@@ -291,7 +305,7 @@ export default function OmrScannerModal({
       });
 
       setSelectedSheetId(newItem.id);
-      const answeredCount = Object.keys(omrResult.answers).length;
+      const answeredCount = Object.keys(cleanedAnswers).length;
       const totalQ = examMeta?.questionCount || omrResult.totalQuestions || 30;
 
       setLastScannedToast({
@@ -306,7 +320,7 @@ export default function OmrScannerModal({
       setIsCapturingFrame(false);
       alignedStreakRef.current = 0;
     }
-  }, [assignmentId, courseStudents, examMeta?.questionCount, isCapturingFrame, playScanBeep, processedSheets.length]);
+  }, [assignmentId, courseStudents, examMeta?.questionCount, isCapturingFrame, playScanBeep, processedSheets.length, questionsMeta]);
 
   // Bucle de análisis en tiempo real cada 220ms mientras la cámara en vivo está abierta
   useEffect(() => {
@@ -370,6 +384,16 @@ export default function OmrScannerModal({
             optionsCount: data.exam.optionsCount || 4,
           });
         }
+        if (data && Array.isArray(data.questions)) {
+          const qMap: Record<number, { questionType: string; maxPoints: number }> = {};
+          for (const q of data.questions) {
+            qMap[Number(q.questionNumber)] = {
+              questionType: q.questionType || "MULTIPLE_CHOICE",
+              maxPoints: Number(q.maxPoints) > 0 ? Number(q.maxPoints) : 1.0,
+            };
+          }
+          setQuestionsMeta(qMap);
+        }
       })
       .catch((err) => {
         console.error("Error cargando datos de hoja:", err);
@@ -377,6 +401,18 @@ export default function OmrScannerModal({
   }, [assignmentId, isOpen]);
 
   if (!isOpen) return null;
+
+  const filterMcAnswers = (raw: Record<number, string>) => {
+    const out: Record<number, string> = {};
+    for (const [k, v] of Object.entries(raw || {})) {
+      const qNum = Number(k);
+      const qMeta = questionsMeta[qNum];
+      if (!qMeta || qMeta.questionType === "MULTIPLE_CHOICE") {
+        out[qNum] = v;
+      }
+    }
+    return out;
+  };
 
   // Procesar archivo PDF
   const processPdfFile = async (file: File) => {
@@ -426,7 +462,8 @@ export default function OmrScannerModal({
           result: omrResult,
           selectedRut: matchedRut,
           studentName: matchedName,
-          answers: { ...omrResult.answers },
+          answers: filterMcAnswers(omrResult.answers),
+          openScores: {},
           isReviewed: false,
         });
       }
@@ -482,7 +519,8 @@ export default function OmrScannerModal({
         result: omrResult,
         selectedRut: matchedRut,
         studentName: matchedName,
-        answers: { ...omrResult.answers },
+        answers: filterMcAnswers(omrResult.answers),
+        openScores: {},
         isReviewed: false,
       },
     ];
@@ -564,6 +602,28 @@ export default function OmrScannerModal({
     );
   };
 
+  const handleOpenScoreChange = (sheetId: string, qNum: number, valStr: string, maxPoints: number) => {
+    setProcessedSheets((prev) =>
+      prev.map((item) => {
+        if (item.id !== sheetId) return item;
+        const updated = { ...(item.openScores || {}) };
+        if (valStr.trim() === "") {
+          delete updated[qNum];
+        } else {
+          const num = Math.max(0, Math.min(maxPoints, Number(valStr.replace(",", "."))));
+          if (!Number.isNaN(num)) {
+            updated[qNum] = num;
+          }
+        }
+        return {
+          ...item,
+          openScores: updated,
+          isReviewed: true,
+        };
+      })
+    );
+  };
+
   const handleRemoveSheet = (sheetId: string) => {
     setProcessedSheets((prev) => prev.filter((s) => s.id !== sheetId));
     if (selectedSheetId === sheetId) {
@@ -593,6 +653,7 @@ export default function OmrScannerModal({
       .map((s) => ({
         studentRut: s.selectedRut,
         answers: s.answers,
+        openScores: s.openScores,
       }));
 
     if (validSubmissions.length === 0) {
@@ -1037,6 +1098,61 @@ export default function OmrScannerModal({
 
                             {/* Filas de preguntas en orden vertical descendente (01..10, 11..20, etc.) */}
                             {colQuestions.map((qNum) => {
+                              const qMeta = questionsMeta[qNum];
+                              const isOpen =
+                                qMeta && (qMeta.questionType === "WRITTEN" || qMeta.questionType === "ORAL");
+
+                              if (isOpen) {
+                                const openVal = activeSheet.openScores?.[qNum] ?? "";
+                                return (
+                                  <div
+                                    key={qNum}
+                                    className={`p-1.5 px-2 rounded-lg border text-xs flex items-center justify-between transition-colors ${
+                                      qMeta.questionType === "ORAL"
+                                        ? "bg-purple-50/70 border-purple-200"
+                                        : "bg-amber-50/70 border-amber-200"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-bold text-gray-800 w-6 font-mono text-[11px]">
+                                        {String(qNum).padStart(2, "0")}
+                                      </span>
+                                      <span
+                                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                          qMeta.questionType === "ORAL"
+                                            ? "bg-purple-100 text-purple-800"
+                                            : "bg-amber-100 text-amber-800"
+                                        }`}
+                                      >
+                                        {qMeta.questionType === "ORAL" ? "🗣️ Oral" : "📝 Des."}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        max={qMeta.maxPoints}
+                                        step={0.5}
+                                        placeholder="Pts"
+                                        value={openVal}
+                                        onChange={(e) =>
+                                          handleOpenScoreChange(
+                                            activeSheet.id,
+                                            qNum,
+                                            e.target.value,
+                                            qMeta.maxPoints
+                                          )
+                                        }
+                                        className="w-14 h-6 text-center font-bold text-[11px] bg-white border border-gray-300 rounded px-1 text-gray-800 outline-none focus:ring-2 focus:ring-blue-500"
+                                      />
+                                      <span className="text-[10px] font-bold text-gray-500 font-mono">
+                                        / {qMeta.maxPoints}p
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+
                               const selected = activeSheet.answers[qNum];
                               const detail = activeSheet.result.questionsDetail?.find(
                                 (d) => d.questionNumber === qNum

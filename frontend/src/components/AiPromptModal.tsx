@@ -55,6 +55,10 @@ export default function AiPromptModal({
   const [examType, setExamType] = useState(defaultExType);
   const [questionCount, setQuestionCount] = useState<number>(isPruebas ? 20 : 30);
   const [optionCount, setOptionCount] = useState<number>(4);
+  const [writtenCount, setWrittenCount] = useState<number>(0);
+  const [writtenPoints, setWrittenPoints] = useState<number>(5);
+  const [oralCount, setOralCount] = useState<number>(0);
+  const [oralPoints, setOralPoints] = useState<number>(4);
   const [targetOa, setTargetOa] = useState(initialDescendedOa || "");
   const [courseName, setCourseName] = useState(initialCourseName || (isPruebas ? "5° Básico A" : "4° Básico B"));
   const [examOriginTitle, setExamOriginTitle] = useState(initialExamTitle || (isPruebas ? "Prueba Regular N°1" : "Ensayo SIMCE Oficial N°1"));
@@ -160,7 +164,42 @@ export default function AiPromptModal({
     const isEnglish = subject.toLowerCase().includes("ingl") || subject.toLowerCase().includes("english");
     const isMath = subject.toLowerCase().includes("matem");
     const isGeneral = examType.includes("Generales");
-    const isQuiz = examType.includes("Quiz") || examType.includes("Control");
+
+    const safeWritten = Math.max(0, Math.min(questionCount, writtenCount));
+    const safeOral = Math.max(0, Math.min(questionCount - safeWritten, oralCount));
+    const mcCount = Math.max(0, questionCount - safeWritten - safeOral);
+    const hasOpen = safeWritten > 0 || safeOral > 0;
+
+    const compositionSummary = hasOpen
+      ? `compuesta por un total de **${questionCount} preguntas**, distribuidas en:\n  - **${mcCount} preguntas de selección múltiple** (${optionsText}, 1 pto c/u)${
+          safeWritten > 0
+            ? `\n  - **${safeWritten} pregunta(s) de Desarrollo Escrito** (preguntas N° ${mcCount + 1} a ${mcCount + safeWritten}, con un puntaje máximo de **${writtenPoints} puntos** cada una)`
+            : ""
+        }${
+          safeOral > 0
+            ? `\n  - **${safeOral} pregunta(s) de Desarrollo / Respuesta Oral** (preguntas N° ${mcCount + safeWritten + 1} a ${questionCount}, con un puntaje máximo de **${oralPoints} puntos** cada una)`
+            : ""
+        }`
+      : `de **${questionCount} preguntas de opción múltiple** (${optionsText})`;
+
+    const openQuestionsSpec = hasOpen
+      ? `\n### ESPECIFICACIÓN DE PREGUNTAS ABIERTAS (DESARROLLO ESCRITO Y/O RESPUESTA ORAL):
+${
+  safeWritten > 0
+    ? `- **Preguntas de Desarrollo Escrito (N° ${mcCount + 1} a ${mcCount + safeWritten})**: En la columna \`Clave\` escribe exactamente \`DESARROLLO (${writtenPoints} pts)\`. En \`Enunciado_Pregunta\` redacta la pregunta abierta que el estudiante debe responder por escrito, deja vacías las columnas \`Opcion_A\` a \`Opcion_D\`, y en \`Justificacion_Pedagogica\` incluye la **Rúbrica de Corrección detallada (de 0 a ${writtenPoints} puntos)** para que el profesor califique la respuesta.`
+    : ""
+}${
+  safeOral > 0
+    ? `\n- **Preguntas de Desarrollo / Respuesta Oral (N° ${mcCount + safeWritten + 1} a ${questionCount})**: En la columna \`Clave\` escribe exactamente \`ORAL (${oralPoints} pts)\`. En \`Enunciado_Pregunta\` redacta la pregunta o consigna de expresión/argumentación oral que el docente formulará al estudiante, deja vacías las columnas \`Opcion_A\` a \`Opcion_D\`, y en \`Justificacion_Pedagogica\` incluye la **Pauta / Rúbrica de Evaluación Oral (de 0 a ${oralPoints} puntos)**.`
+    : ""
+}\n`
+      : "";
+
+    const claveInstruction = hasOpen
+      ? `Para selección múltiple: letra en MAYÚSCULA (${optionCount === 4 ? "A, B, C o D" : "A, B, C, D o E"}). ${
+          safeWritten > 0 ? `Para Desarrollo Escrito: \`DESARROLLO (${writtenPoints} pts)\`. ` : ""
+        }${safeOral > 0 ? `Para Desarrollo Oral: \`ORAL (${oralPoints} pts)\`.` : ""}`
+      : `Letra de la respuesta correcta en MAYÚSCULA (${optionCount === 4 ? "A, B, C o D" : "A, B, C, D o E"}).`;
 
     // ==========================================
     // 1. MODO: CREACIÓN DE EVALUACIÓN (EXCEL)
@@ -174,7 +213,7 @@ export default function AiPromptModal({
         if (isEnglish) {
           return `Actúa como un Profesor de Idioma Extranjero Inglés Senior y Diseñador Curricular en Chile para **${level}**.
 
-Tu misión es crear una **${examType}** de **${questionCount} preguntas de opción múltiple** (${optionsText}), alineada con los Objetivos de Aprendizaje de Inglés del MINEDUC para ${level}.
+Tu misión es crear una **${examType}** ${compositionSummary}, alineada con los Objetivos de Aprendizaje de Inglés del MINEDUC para ${level}.
 
 ### OBJETIVOS DE APRENDIZAJE (OA) Y CONTENIDOS EVALUADOS:
 **${targetOa || "Comprensión lectora, gramática en contexto y vocabulario clave del nivel"}**
@@ -184,14 +223,14 @@ Tu misión es crear una **${examType}** de **${questionCount} preguntas de opci�
    - Educación Básica (1° a 8°): Nivel CEFR A1 a A2 (instrucciones claras, vocabulario cotidiano, oraciones directas).
    - Educación Media (1° a 4°): Nivel CEFR B1 (textos de lectura de 150-250 palabras, tiempos verbales contextualizados y análisis inferencial).
 2. **Estructura Equilibrada de Ítems**:
-   - Reading Comprehension (40%): Preguntas basadas en un texto de lectura o diálogo en inglés.
-   - Use of English / Grammar (30%): Oraciones incompletas o identificación de estructuras en contexto real.
-   - Vocabulary (30%): Significado, opuestos o aplicación de palabras clave.
-3. **Calidad de Opciones**:
+   - Reading Comprehension: Preguntas basadas en un texto de lectura o diálogo en inglés.
+   - Use of English / Grammar: Oraciones incompletas o identificación de estructuras en contexto real.
+   - Vocabulary: Significado, opuestos o aplicación de palabras clave.${hasOpen ? "\n   - Productive Skills (Writing / Speaking): Preguntas abiertas según la distribución solicitada." : ""}
+3. **Calidad de Opciones (Selección Múltiple)**:
    - 1 clave correcta incuestionable.
    - Distractores basados en errores frecuentes de hispanohablantes aprendiendo inglés (falsos amigos, auxiliares faltantes, concordancia).
    - Longitud simétrica entre opciones.
-
+${openQuestionsSpec}
 ---
 
 ### FORMATO OBLIGATORIO DE SALIDA PARA EXCEL (.xlsx):
@@ -200,17 +239,17 @@ Genera una tabla perfectamente estructurada con las siguientes columnas exactas 
 | Numero | Clave | Habilidad | Eje | OA | Dificultad | ${includeExplanations ? "Enunciado_Pregunta | Opcion_A | Opcion_B | Opcion_C | Opcion_D | Justificacion_Pedagogica" : ""} |
 
 - **Numero**: 1 a ${questionCount} correlativo.
-- **Clave**: Letra de la respuesta correcta (${optionCount === 4 ? "A, B, C o D" : "A, B, C, D o E"}).
-- **Habilidad**: Reading / Language in Use / Vocabulary.
-- **Eje**: Comprensión Lectora / Manejo de la Lengua.
+- **Clave**: ${claveInstruction}
+- **Habilidad**: Reading / Language in Use / Vocabulary${safeWritten > 0 ? " / Writing" : ""}${safeOral > 0 ? " / Speaking" : ""}.
+- **Eje**: Comprensión Lectora / Manejo de la Lengua${hasOpen ? " / Expresión Escrita u Oral" : ""}.
 - **OA**: Código del OA (ej: OA 1, OA 3, OA 8).
-- **Dificultad**: -1.0 (Básica/A1), 0.0 (Intermedia/A2), +1.0 (Avanzada/B1).
+- **Dificultad**: Usa exclusivamente uno de estos tres valores numéricos exactos: **-1.5** (Fácil/A1), **0.0** (Media/A2) o **1.5** (Difícil/B1).
 ${includeExplanations ? `- **Enunciado_Pregunta**: Pregunta o instrucción en inglés (e incluir el texto de lectura breve si aplica).
-- **Opcion_A**: Opción A en inglés.
-- **Opcion_B**: Opción B en inglés.
-- **Opcion_C**: Opción C en inglés.
-- **Opcion_D**: Opción D en inglés.
-- **Justificacion_Pedagogica**: Breve explicación en español de la respuesta correcta y del error típico en los distractores.` : ""}
+- **Opcion_A**: Opción A en inglés (vacío si es Desarrollo/Oral).
+- **Opcion_B**: Opción B en inglés (vacío si es Desarrollo/Oral).
+- **Opcion_C**: Opción C en inglés (vacío si es Desarrollo/Oral).
+- **Opcion_D**: Opción D en inglés (vacío si es Desarrollo/Oral).
+- **Justificacion_Pedagogica**: Breve explicación en español de la respuesta correcta (o Rúbrica de Puntaje para preguntas de Desarrollo Escrito / Oral).` : ""}
 
 Entrega las ${questionCount} filas completas desarrolladas en la tabla, listas para ser copiadas a Excel o importadas.`;
         }
@@ -219,7 +258,7 @@ Entrega las ${questionCount} filas completas desarrolladas en la tabla, listas p
         if (isMath && isGeneral) {
           return `Actúa como un Docente Especialista en Educación Matemática en Chile para **${level}**.
 
-Tu misión es crear una **Prueba Sumativa de Conocimientos Matemáticos Generales** de **${questionCount} preguntas de opción múltiple** (${optionsText}), representativa del currículum escolar para ${level}.
+Tu misión es crear una **Prueba Sumativa de Conocimientos Matemáticos Generales** ${compositionSummary}, representativa del currículum escolar para ${level}.
 
 ### CONTENIDOS Y EJES MATEMÁTICOS DEL NIVEL:
 **${targetOa || "Conocimientos generales: Números y Operaciones, Patrones y Álgebra, Geometría, Medición, Datos y Probabilidades"}**
@@ -234,24 +273,24 @@ Tu misión es crear una **Prueba Sumativa de Conocimientos Matemáticos Generale
    - Resolver Problemas, Modelar, Representar y Argumentar.
 3. **Distractores Basados en Errores Típicos**:
    - Errores comunes de cálculo aritmético, confusión de operaciones inversas o aplicación errónea de fórmulas.
-
+${openQuestionsSpec}
 ---
 
 ### FORMATO OBLIGATORIO DE SALIDA PARA EXCEL (.xlsx):
 | Numero | Clave | Habilidad | Eje | OA | Dificultad | ${includeExplanations ? "Enunciado_Pregunta | Opcion_A | Opcion_B | Opcion_C | Opcion_D | Justificacion_Pedagogica" : ""} |
 
 - **Numero**: 1 a ${questionCount} correlativo.
-- **Clave**: ${optionCount === 4 ? "A, B, C o D" : "A, B, C, D o E"}.
+- **Clave**: ${claveInstruction}
 - **Habilidad**: Resolver Problemas / Modelar / Argumentar / Representar / Calcular.
 - **Eje**: Números y Operaciones / Patrones y Álgebra / Geometría / Medición / Datos.
 - **OA**: Código del OA (ej: OA 1, OA 3, OA 8).
-- **Dificultad**: -1.0 Fácil, 0.0 Media, +1.0 Difícil.
+- **Dificultad**: Usa exclusivamente uno de estos tres valores numéricos exactos: **-1.5** (Fácil), **0.0** (Media) o **1.5** (Difícil).
 ${includeExplanations ? `- **Enunciado_Pregunta**: El texto del problema o ejercicio matemático claro y contextualizado.
-- **Opcion_A**: Opción A.
-- **Opcion_B**: Opción B.
-- **Opcion_C**: Opción C.
-- **Opcion_D**: Opción D.
-- **Justificacion_Pedagogica**: Breve justificación del procedimiento correcto y del error asociado a cada distractor.` : ""}
+- **Opcion_A**: Opción A (vacío si es Desarrollo/Oral).
+- **Opcion_B**: Opción B (vacío si es Desarrollo/Oral).
+- **Opcion_C**: Opción C (vacío si es Desarrollo/Oral).
+- **Opcion_D**: Opción D (vacío si es Desarrollo/Oral).
+- **Justificacion_Pedagogica**: Breve justificación del procedimiento correcto (o Rúbrica de Puntaje paso a paso para preguntas de Desarrollo Escrito / Oral).` : ""}
 
 Entrega las ${questionCount} preguntas completas desarrolladas en la tabla.`;
         }
@@ -259,7 +298,7 @@ Entrega las ${questionCount} preguntas completas desarrolladas en la tabla.`;
         // Sub-caso A3: Prueba Regular con Selección de OAs (Lenguaje, Ciencias, Historia, etc.)
         return `Actúa como un Docente de Aula y Diseñador Pedagógico Senior en Chile de la asignatura de **${subject}** para **${level}**.
 
-Tu misión es crear una **${examType}** de **${questionCount} preguntas de opción múltiple** (${optionsText}), perfectamente alineada a las Bases Curriculares oficiales del MINEDUC para ${level}.
+Tu misión es crear una **${examType}** ${compositionSummary}, perfectamente alineada a las Bases Curriculares oficiales del MINEDUC para ${level}.
 
 ### OBJETIVOS DE APRENDIZAJE (OA) Y CONTENIDOS PRIORIZADOS A EVALUAR:
 **${targetOa || "Objetivos de Aprendizaje prioritarios de la Unidad"}**
@@ -270,12 +309,12 @@ Tu misión es crear una **${examType}** de **${questionCount} preguntas de opci�
 3. **Distribución de Habilidades Cognitivas**:
    - 35% Conocer / Localizar / Identificar
    - 45% Aplicar / Procedimientos / Interpretar y Relacionar
-   - 20% Analizar / Evaluar / Resolver Problemas
+   - 20% Analizar / Evaluar / Resolver Problemas / Argumentar
 4. **Calidad de Ítems y Distractores**:
-   - Clave única indiscutible.
+   - Clave única indiscutible en preguntas cerradas.
    - Distractores pedagógicos plausibles (sin opciones "todas las anteriores" ni "ninguna de las anteriores").
    - Longitud y complejidad equilibrada en las alternativas.
-
+${openQuestionsSpec}
 ---
 
 ### FORMATO OBLIGATORIO DE SALIDA PARA EXCEL (.xlsx):
@@ -284,17 +323,17 @@ Genera una tabla perfectamente estructurada con las siguientes columnas exactas 
 | Numero | Clave | Habilidad | Eje | OA | Dificultad | ${includeExplanations ? "Enunciado_Pregunta | Opcion_A | Opcion_B | Opcion_C | Opcion_D | Justificacion_Pedagogica" : ""} |
 
 - **Numero**: 1 a ${questionCount} correlativo.
-- **Clave**: ${optionCount === 4 ? "A, B, C o D" : "A, B, C, D o E"}.
+- **Clave**: ${claveInstruction}
 - **Habilidad**: Habilidad curricular evaluada (ej: ${getSkillsExample(subject)}).
 - **Eje**: Eje temático o Unidad curricular de ${level}.
 - **OA**: Código del OA (ej: OA 1, OA 3, OA 5).
-- **Dificultad**: -1.0 Fácil, 0.0 Media, +1.0 Difícil.
+- **Dificultad**: Usa exclusivamente uno de estos tres valores numéricos exactos: **-1.5** (Fácil), **0.0** (Media) o **1.5** (Difícil).
 ${includeExplanations ? `- **Enunciado_Pregunta**: El texto claro y contextualizado de la pregunta.
-- **Opcion_A**: Opción A.
-- **Opcion_B**: Opción B.
-- **Opcion_C**: Opción C.
-- **Opcion_D**: Opción D.
-- **Justificacion_Pedagogica**: Breve explicación de por qué la clave es correcta y qué error pedagógico evidencia cada distractor.` : ""}
+- **Opcion_A**: Opción A (vacío si es Desarrollo/Oral).
+- **Opcion_B**: Opción B (vacío si es Desarrollo/Oral).
+- **Opcion_C**: Opción C (vacío si es Desarrollo/Oral).
+- **Opcion_D**: Opción D (vacío si es Desarrollo/Oral).
+- **Justificacion_Pedagogica**: Breve explicación de por qué la clave es correcta (o Rúbrica de Corrección por puntos si es Desarrollo Escrito / Oral).` : ""}
 
 Entrega el resultado completo con las ${questionCount} filas desarrolladas, listo para copiar a Excel.`;
       }
@@ -304,21 +343,21 @@ Entrega el resultado completo con las ${questionCount} filas desarrolladas, list
       // ----------------------------------------------------
       return `Actúa como un Especialista Curricular y Metodólogo Senior de Evaluación Estandarizada SIMCE de la Agencia de Calidad de la Educación y el MINEDUC de Chile.
 
-Tu misión es crear una evaluación completa y rigurosa con su correspondiente pauta técnica para el nivel **${level}** en la asignatura de **${subject}**, bajo la modalidad de **${examType}**, compuesta por **${questionCount} preguntas**.
+Tu misión es crear una evaluación completa y rigurosa con su correspondiente pauta técnica para el nivel **${level}** en la asignatura de **${subject}**, bajo la modalidad de **${examType}**, ${compositionSummary}.
 
 ### REQUISITOS PSICOMÉTRICOS Y METODOLÓGICOS SIMCE:
 1. **Alineación Curricular**: Basar cada ítem en los Objetivos de Aprendizaje (OA) y Ejes Temáticos oficiales vigentes de ${level}.
-2. **Estructura de Ítems**: Preguntas de opción múltiple con ${optionsText}.
+2. **Estructura de Ítems**: ${hasOpen ? `${mcCount} preguntas cerradas con ${optionsText} más las preguntas abiertas solicitadas.` : `Preguntas de opción múltiple con ${optionsText}.`}
 3. **Calidad de Distractores**:
-   - Una única clave correcta indiscutible.
+   - Una única clave correcta indiscutible en ítems de opción múltiple.
    - Distractores plausibles que capturen errores conceptuales típicos o procedimientos incompletos de estudiantes de ${level}.
    - Ninguna opción del tipo "todas las anteriores" ni "ninguna de las anteriores".
    - Opciones con longitud y estructura gramatical simétrica.
 4. **Distribución de Dificultad (TRI - Teoría de Respuesta al Ítem)**:
-   - 30% Fácil (Dificultad TRI -1.5 a -0.5)
-   - 50% Media (Dificultad TRI -0.4 a +0.6)
-   - 20% Difícil (Dificultad TRI +0.7 a +1.8)
-
+   - 30% Fácil (Dificultad TRI **-1.5**)
+   - 50% Media (Dificultad TRI **0.0**)
+   - 20% Difícil (Dificultad TRI **1.5**)
+${openQuestionsSpec}
 ---
 
 ### FORMATO OBLIGATORIO DE SALIDA PARA EXCEL (.xlsx):
@@ -328,17 +367,17 @@ Por favor, genera un archivo Excel (.xlsx) o una tabla completa perfectamente es
 
 **Detalle de las columnas de la Pauta Oficial**:
 - **Numero**: 1 a ${questionCount} correlativo.
-- **Clave**: Letra de la respuesta correcta en MAYÚSCULA (${optionCount === 4 ? "A, B, C o D" : "A, B, C, D o E"}).
+- **Clave**: ${claveInstruction}
 - **Habilidad**: Habilidad curricular evaluada (ej: ${getSkillsExample(subject)}).
 - **Eje**: Eje temático oficial de ${level}.
 - **OA**: Código del Objetivo de Aprendizaje (ej: OA 1, OA 3, OA 5, OA 12).
-- **Dificultad**: Valor numérico TRI (ej: -1.2, 0.0, 1.4).
+- **Dificultad**: Usa exclusivamente uno de estos tres valores numéricos exactos: **-1.5** (Fácil), **0.0** (Media) o **1.5** (Difícil).
 ${includeExplanations ? `- **Enunciado_Pregunta**: El texto claro y contextualizado de la pregunta.
-- **Opcion_A**: Texto de la opción A.
-- **Opcion_B**: Texto de la opción B.
-- **Opcion_C**: Texto de la opción C.
-- **Opcion_D**: Texto de la opción D.
-- **Justificacion_Pedagogica**: Breve explicación de por qué la clave es correcta y qué error pedagógico evidencia cada distractor.` : ""}
+- **Opcion_A**: Texto de la opción A (vacío si es Desarrollo/Oral).
+- **Opcion_B**: Texto de la opción B (vacío si es Desarrollo/Oral).
+- **Opcion_C**: Texto de la opción C (vacío si es Desarrollo/Oral).
+- **Opcion_D**: Texto de la opción D (vacío si es Desarrollo/Oral).
+- **Justificacion_Pedagogica**: Breve explicación de por qué la clave es correcta y qué error pedagógico evidencia cada distractor (o Rúbrica de Puntaje detallada para ítems de Desarrollo Escrito / Oral).` : ""}
 
 Entrega el resultado completo con las ${questionCount} filas desarrolladas sin omitir ninguna pregunta, listo para ser copiado a Excel o descargado.`;
     }
@@ -353,18 +392,18 @@ Entrega el resultado completo con las ${questionCount} filas desarrolladas sin o
 El curso **${courseName}** rindió la evaluación **"${examOriginTitle}"** en la asignatura de **${subject}** (${level}) y los resultados de la plataforma arrojaron una alerta temprana por Objetivos de Aprendizaje descendidos, requiriendo un Plan Remedial de nivelación urgente.
 
 ### OBJETIVO DE LA EVALUACIÓN REMEDIAL:
-Crear una evaluación formativa remedial concentrada de **10 preguntas de opción múltiple** con 4 alternativas (A-D) enfocada principalmente en reforzar y nivelar el siguiente Objetivo de Aprendizaje prioritario:
+Crear una evaluación formativa remedial concentrada de **10 preguntas** (${safeWritten > 0 || safeOral > 0 ? `incluyendo ${safeWritten} de Desarrollo Escrito y ${safeOral} de Respuesta Oral` : "de opción múltiple con 4 alternativas A-D"}) enfocada principalmente en reforzar y nivelar el siguiente Objetivo de Aprendizaje prioritario:
 **${targetOaText}**
 
 ### REQUERIMIENTOS DIDÁCTICOS DEL PLAN REMEDIAL:
 1. **Gradualidad Cognitiva**:
-   - Ítems 1-3: Activación y concepto base (Habilidad Conocer / Localizar información elemental).
-   - Ítems 4-7: Aplicación guiada en contextos cotidianos (Habilidad Aplicar / Interpretar y relacionar).
-   - Ítems 8-10: Desafío de razonamiento y resolución de problemas (Habilidad Razonar / Reflexionar y evaluar).
+   - Ítems 1-3: Activación y concepto base (Habilidad Conocer / Localizar información elemental, Dificultad **-1.5**).
+   - Ítems 4-7: Aplicación guiada en contextos cotidianos (Habilidad Aplicar / Interpretar y relacionar, Dificultad **0.0**).
+   - Ítems 8-10: Desafío de razonamiento y resolución de problemas (Habilidad Razonar / Reflexionar y evaluar, Dificultad **1.5**).
 2. **Análisis de Error Didáctico**: Cada distractor debe reflejar específicamente el error de concepción más recurrente que tienen los alumnos en este OA.
 
 ### SALIDA REQUERIDA (FORMATO EXCEL .xlsx PARA IMPORTACIÓN):
-Entrega una tabla con las 10 preguntas con las siguientes columnas exactas:
+Entrega una tabla con las 10 preguntas con las siguientes columnas exactas (en \`Dificultad\` usa exclusivamente **-1.5**, **0.0** o **1.5**):
 | Numero | Clave | Habilidad | Eje | OA | Dificultad | Enunciado | Opcion_A | Opcion_B | Opcion_C | Opcion_D | Error_Asociado_Distractor |
 
 Al final de la tabla, incluye una breve **Estrategia Didáctica de 3 pasos** que el docente de ${courseName} puede ejecutar en los primeros 15 minutos de la clase para asegurar que todos los estudiantes superen este OA descendido.`;
@@ -440,7 +479,7 @@ Entrega todo el material listo para imprimir o proyectar en clase.`;
     }
 
     return "";
-  }, [activeTab, level, subject, examType, questionCount, optionCount, targetOa, courseName, examOriginTitle, includeExplanations, isPruebas]);
+  }, [activeTab, level, subject, examType, questionCount, optionCount, writtenCount, writtenPoints, oralCount, oralPoints, targetOa, courseName, examOriginTitle, includeExplanations, isPruebas]);
 
   const handleCopy = async () => {
     await copyToClipboard(generatedPrompt);
@@ -709,6 +748,71 @@ Entrega todo el material listo para imprimir o proyectar en clase.`;
                       />
                       <span>Incluir textos de preguntas y opciones</span>
                     </label>
+                  </div>
+                </div>
+
+                {/* Configuración de Preguntas de Desarrollo Escrito y Respuesta Oral */}
+                <div className="border border-amber-200 bg-amber-50/60 rounded-xl p-2.5 space-y-2">
+                  <div className="text-[11px] font-extrabold text-amber-950 flex items-center justify-between">
+                    <span>📝🗣️ Preguntas de Desarrollo Escrito / Oral</span>
+                    <span className="text-[10px] font-semibold text-amber-700">Opcional</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-white border border-amber-200 rounded-lg p-2 space-y-1">
+                      <span className="block text-[10px] font-extrabold text-amber-900">📝 Desarrollo Escrito</span>
+                      <div className="flex items-center gap-1.5">
+                        <div className="flex-1">
+                          <label className="block text-[9px] text-slate-500 font-semibold">Cant.</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={questionCount}
+                            value={writtenCount}
+                            onChange={(e) => setWrittenCount(Math.max(0, Math.min(questionCount, parseInt(e.target.value) || 0)))}
+                            className="w-full border border-slate-300 rounded px-1.5 py-1 text-xs font-bold text-center"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-[9px] text-slate-500 font-semibold">Pts c/u</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={writtenPoints}
+                            onChange={(e) => setWrittenPoints(Math.max(1, parseInt(e.target.value) || 5))}
+                            className="w-full border border-slate-300 rounded px-1.5 py-1 text-xs font-bold text-center"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white border border-purple-200 rounded-lg p-2 space-y-1">
+                      <span className="block text-[10px] font-extrabold text-purple-900">🗣️ Desarrollo Oral</span>
+                      <div className="flex items-center gap-1.5">
+                        <div className="flex-1">
+                          <label className="block text-[9px] text-slate-500 font-semibold">Cant.</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={questionCount}
+                            value={oralCount}
+                            onChange={(e) => setOralCount(Math.max(0, Math.min(questionCount, parseInt(e.target.value) || 0)))}
+                            className="w-full border border-slate-300 rounded px-1.5 py-1 text-xs font-bold text-center"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-[9px] text-slate-500 font-semibold">Pts c/u</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={oralPoints}
+                            onChange={(e) => setOralPoints(Math.max(1, parseInt(e.target.value) || 4))}
+                            className="w-full border border-slate-300 rounded px-1.5 py-1 text-xs font-bold text-center"
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

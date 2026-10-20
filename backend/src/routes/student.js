@@ -108,7 +108,7 @@ router.post('/assignments/:id/start', async (req, res) => {
   const [questions, answers] = await Promise.all([
     prisma.question.findMany({
       where: { examId: assignment.examId },
-      select: { id: true, questionNumber: true }, // ¡nunca la pauta!
+      select: { id: true, questionNumber: true, questionType: true, maxPoints: true }, // ¡nunca la pauta!
       orderBy: { questionNumber: 'asc' },
     }),
     prisma.submissionAnswer.findMany({
@@ -157,7 +157,7 @@ router.get('/assignments/:id/pdf', async (req, res) => {
 const answersSchema = z.object({
   answers: z.array(z.object({
     questionId: z.number().int(),
-    selectedAnswer: z.enum(['A', 'B', 'C', 'D', 'E']).nullable(),
+    selectedAnswer: z.string().max(4000).nullable(),
   })).min(1).max(200),
 });
 
@@ -179,21 +179,27 @@ router.put('/submissions/:id/answers', async (req, res) => {
     return res.status(409).json({ error: 'El tiempo terminó; tu ensayo fue entregado' });
   }
 
-  const validQuestionIds = new Set(
-    (await prisma.question.findMany({ where: { examId: exam.id }, select: { id: true } })).map((q) => q.id)
-  );
+  const examQuestions = await prisma.question.findMany({
+    where: { examId: exam.id },
+    select: { id: true, questionType: true },
+  });
+  const questionById = Object.fromEntries(examQuestions.map((q) => [q.id, q]));
   const allowed = OPTIONS.slice(0, exam.optionsCount);
 
   for (const a of parsed.data.answers) {
-    if (!validQuestionIds.has(a.questionId)) return res.status(400).json({ error: 'Pregunta inválida' });
-    if (a.selectedAnswer && !allowed.includes(a.selectedAnswer)) {
-      return res.status(400).json({ error: 'Alternativa inválida' });
+    const q = questionById[a.questionId];
+    if (!q) return res.status(400).json({ error: 'Pregunta inválida' });
+    const qType = q.questionType || 'MULTIPLE_CHOICE';
+    if (qType === 'MULTIPLE_CHOICE') {
+      if (a.selectedAnswer && !allowed.includes(a.selectedAnswer)) {
+        return res.status(400).json({ error: 'Alternativa inválida' });
+      }
     }
   }
 
   await prisma.$transaction(parsed.data.answers.map((a) => {
     const where = { submissionId_questionId: { submissionId: submission.id, questionId: a.questionId } };
-    if (a.selectedAnswer === null) {
+    if (a.selectedAnswer === null || a.selectedAnswer === '') {
       return prisma.submissionAnswer.deleteMany({ where: { submissionId: submission.id, questionId: a.questionId } });
     }
     return prisma.submissionAnswer.upsert({
@@ -231,10 +237,14 @@ router.get('/submissions/:id/result', async (req, res) => {
     include: { questions: true },
   });
   const answers = await prisma.submissionAnswer.findMany({ where: { submissionId: submission.id } });
+  const awardedPointsMap = Object.fromEntries(
+    answers.filter((a) => a.awardedPoints != null).map((a) => [a.questionId, a.awardedPoints])
+  );
   const results = computeResults(
     exam.questions,
     Object.fromEntries(answers.map((a) => [a.questionId, a.selectedAnswer])),
-    exam
+    exam,
+    awardedPointsMap
   );
 
   // No se incluye la pauta ni el detalle por pregunta (evita que circule entre cursos).

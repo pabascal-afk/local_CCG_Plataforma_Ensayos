@@ -76,11 +76,12 @@ router.get('/templates/exam_questions.xlsx', async (req, res, next) => {
   try {
     const columns = [
       { header: 'Numero', key: 'number', width: 10 },
-      { header: 'Clave', key: 'key', width: 10 },
+      { header: 'Clave', key: 'key', width: 22 },
       { header: 'Habilidad', key: 'skill', width: 28 },
       { header: 'Eje', key: 'axis', width: 28 },
       { header: 'OA', key: 'oa', width: 16 },
-      { header: 'Dificultad', key: 'difficulty', width: 16 }
+      { header: 'Dificultad', key: 'difficulty', width: 16 },
+      { header: 'Puntos_Max', key: 'maxPoints', width: 14 }
     ];
     const buffer = await createEmptyTemplate(columns, 'Formato_Pauta');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -1416,6 +1417,94 @@ const uploadDisk = multer({
   }
 });
 
+// Helper para normalizar valores de Dificultad TRI a los presets (-1.5, 0.0, 1.5)
+function parseDifficultyValue(raw) {
+  if (raw === undefined || raw === null) return 0.0;
+  const str = String(raw).trim();
+  if (!str) return 0.0;
+
+  const upper = str.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (upper.includes('FACIL') || upper.includes('BAJA') || upper.includes('BASICA') || upper === 'A1') {
+    return -1.5;
+  }
+  if (upper.includes('DIFICIL') || upper.includes('ALTA') || upper.includes('AVANZADA') || upper === 'B1') {
+    return 1.5;
+  }
+  if (upper.includes('MEDIA') || upper.includes('INTERMEDIA') || upper.includes('MEDIO') || upper.includes('NORMAL') || upper === 'A2') {
+    return 0.0;
+  }
+
+  // Reemplazar coma decimal por punto y limpiar caracteres no numéricos salvo signo y punto
+  const normalizedNumStr = str.replace(',', '.').replace(/[^0-9.\-+]/g, '');
+  const num = parseFloat(normalizedNumStr);
+  if (Number.isNaN(num)) return 0.0;
+
+  // Mapear rangos numéricos (-1, -1.5, etc. -> -1.5; 0 -> 0.0; 1, 1.5, etc. -> 1.5)
+  if (num < -0.4) return -1.5;
+  if (num > 0.4) return 1.5;
+  return 0.0;
+}
+
+function formatDifficultyKey(val) {
+  const num = parseDifficultyValue(val);
+  if (num < -0.4) return "-1.5";
+  if (num > 0.4) return "1.5";
+  return "0.0";
+}
+
+// Helper para interpretar tipo de pregunta, clave y puntaje máximo desde celda Clave / Puntos
+function parseQuestionKeyAndType(rawAns, rawMaxPts) {
+  const cleanAns = String(rawAns || '').trim().toUpperCase();
+  const cleanAnsNoAccents = cleanAns.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  let parsedPts = rawMaxPts !== undefined && rawMaxPts !== null && String(rawMaxPts).trim() !== ''
+    ? parseFloat(String(rawMaxPts).replace(',', '.').replace(/[^0-9.]/g, ''))
+    : NaN;
+
+  // Extraer puntaje si viene embebido en la columna Clave, ej: "DESARROLLO ESCRITO (7 pts)" o "ORAL: 5"
+  const embeddedMatch = cleanAnsNoAccents.match(/(\d+(?:[.,]\d+)?)/);
+  const embeddedPts = embeddedMatch ? parseFloat(embeddedMatch[1].replace(',', '.')) : NaN;
+
+  if (cleanAnsNoAccents.includes('ORAL')) {
+    const maxPoints = (!Number.isNaN(parsedPts) && parsedPts > 0)
+      ? parsedPts
+      : ((!Number.isNaN(embeddedPts) && embeddedPts > 0) ? embeddedPts : 5);
+    return {
+      questionType: 'ORAL',
+      correctAnswer: 'ORAL',
+      maxPoints
+    };
+  }
+
+  if (
+    cleanAnsNoAccents.includes('DESARROLLO') ||
+    cleanAnsNoAccents.includes('ESCRITO') ||
+    cleanAnsNoAccents.includes('ESCRITA') ||
+    cleanAnsNoAccents.includes('ABIERTA') ||
+    cleanAnsNoAccents === 'WRITTEN'
+  ) {
+    const maxPoints = (!Number.isNaN(parsedPts) && parsedPts > 0)
+      ? parsedPts
+      : ((!Number.isNaN(embeddedPts) && embeddedPts > 0) ? embeddedPts : 5);
+    return {
+      questionType: 'WRITTEN',
+      correctAnswer: 'DESARROLLO',
+      maxPoints
+    };
+  }
+
+  // Pregunta de selección múltiple (A, B, C, D, E)
+  const letterMatch = cleanAnsNoAccents.match(/^[A-E]$/);
+  const letter = letterMatch ? letterMatch[0] : (cleanAnsNoAccents.replace(/[^A-E]/g, '')[0] || '');
+  const maxPoints = (!Number.isNaN(parsedPts) && parsedPts > 0) ? parsedPts : 1;
+
+  return {
+    questionType: 'MULTIPLE_CHOICE',
+    correctAnswer: letter,
+    maxPoints
+  };
+}
+
 router.get('/exams', async (req, res, next) => {
   try {
     const exams = await prisma.exam.findMany({
@@ -1434,6 +1523,8 @@ router.get('/exams', async (req, res, next) => {
     // Transform to expected frontend shape
     const result = (exams || []).map(e => {
       const answerKey = {};
+      const questionTypesKeys = {};
+      const maxPointsKeys = {};
       const skillsKeys = {};
       const axesKeys = {};
       const learningObjectivesKeys = {};
@@ -1442,10 +1533,12 @@ router.get('/exams', async (req, res, next) => {
       (e.questions || []).forEach(q => {
         if (!q) return;
         answerKey[q.questionNumber] = q.correctAnswer;
+        questionTypesKeys[q.questionNumber] = q.questionType || 'MULTIPLE_CHOICE';
+        maxPointsKeys[q.questionNumber] = q.maxPoints ?? 1;
         if (q.skill) skillsKeys[q.questionNumber] = q.skill;
         if (q.axis) axesKeys[q.questionNumber] = q.axis;
         if (q.learningObjective) learningObjectivesKeys[q.questionNumber] = q.learningObjective;
-        if (q.difficulty !== null && q.difficulty !== undefined) difficultiesKeys[q.questionNumber] = q.difficulty;
+        difficultiesKeys[q.questionNumber] = formatDifficultyKey(q.difficulty);
       });
 
       const assignedCourses = (e.assignments || [])
@@ -1471,6 +1564,8 @@ router.get('/exams', async (req, res, next) => {
         createdAt: e.createdAt,
         assignedCourses,
         answerKey,
+        questionTypesKeys,
+        maxPointsKeys,
         skillsKeys,
         axesKeys,
         learningObjectivesKeys,
@@ -1535,21 +1630,25 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
     const id = parseInt(req.params.id, 10);
     const e = await prisma.exam.findUnique({
       where: { id },
-      include: { questions: true }
+      include: { questions: { orderBy: { questionNumber: 'asc' } } }
     });
     if (!e) return res.status(404).json({ error: 'Ensayo no encontrado' });
     
     const answerKey = {};
+    const questionTypesKeys = {};
+    const maxPointsKeys = {};
     const skillsKeys = {};
     const axesKeys = {};
     const learningObjectivesKeys = {};
     const difficultiesKeys = {};
     e.questions.forEach(q => {
       answerKey[q.questionNumber] = q.correctAnswer;
+      questionTypesKeys[q.questionNumber] = q.questionType || 'MULTIPLE_CHOICE';
+      maxPointsKeys[q.questionNumber] = q.maxPoints ?? 1;
       if (q.skill) skillsKeys[q.questionNumber] = q.skill;
       if (q.axis) axesKeys[q.questionNumber] = q.axis;
       if (q.learningObjective) learningObjectivesKeys[q.questionNumber] = q.learningObjective;
-      if (q.difficulty !== null && q.difficulty !== undefined) difficultiesKeys[q.questionNumber] = q.difficulty;
+      difficultiesKeys[q.questionNumber] = formatDifficultyKey(q.difficulty);
     });
     res.json({
       id: e.id,
@@ -1559,6 +1658,8 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
       optionsCount: e.optionsCount,
       questionCount: e.questions.length,
       answerKey,
+      questionTypesKeys,
+      maxPointsKeys,
       skillsKeys,
       axesKeys,
       learningObjectivesKeys,
@@ -1582,7 +1683,7 @@ router.post('/exams', checkAdmin, (req, res, next) => {
   });
 }, async (req, res, next) => {
   try {
-    const { title, subject, level, questionCount, optionsCount, orderNumber, examType } = req.body;
+    const { title, subject, level, questionCount, optionsCount, orderNumber, examType, openQuestions } = req.body;
     if (!req.file) {
       return res.status(400).json({ error: 'Debes seleccionar y subir un archivo PDF para el ensayo' });
     }
@@ -1599,12 +1700,49 @@ router.post('/exams', checkAdmin, (req, res, next) => {
     const eType = examType || 'ENSAYO';
     const lvl = level || '4B';
 
+    // Mapa de preguntas abiertas (Desarrollo Escrito / Desarrollo Oral) configuradas desde la creación
+    const openQMap = new Map();
+    if (openQuestions) {
+      try {
+        const parsed = typeof openQuestions === 'string' ? JSON.parse(openQuestions) : openQuestions;
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            const qn = parseInt(item.questionNumber, 10);
+            const qt = item.questionType === 'ORAL' ? 'ORAL' : 'WRITTEN';
+            const mp = parseFloat(item.maxPoints);
+            if (!isNaN(qn) && qn >= 1 && qn <= qCount) {
+              openQMap.set(qn, {
+                questionType: qt,
+                maxPoints: !isNaN(mp) && mp > 0 ? mp : 5,
+                correctAnswer: qt === 'ORAL' ? 'ORAL' : 'DESARROLLO'
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error parseando openQuestions en creación de examen:', e.message);
+      }
+    }
+
     const questions = [];
     for (let i = 1; i <= qCount; i++) {
-      questions.push({
-        questionNumber: i,
-        correctAnswer: 'A', // default placeholder
-      });
+      const customOpen = openQMap.get(i);
+      if (customOpen) {
+        questions.push({
+          questionNumber: i,
+          correctAnswer: customOpen.correctAnswer,
+          questionType: customOpen.questionType,
+          maxPoints: customOpen.maxPoints,
+          guessing: 0.0
+        });
+      } else {
+        questions.push({
+          questionNumber: i,
+          correctAnswer: 'A', // default placeholder
+          questionType: 'MULTIPLE_CHOICE',
+          maxPoints: 1.0,
+        });
+      }
     }
 
     const exam = await prisma.exam.create({
@@ -1665,22 +1803,61 @@ router.delete('/exams/:id', checkAdmin, async (req, res, next) => {
 router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
   try {
     const examId = parseInt(req.params.id, 10);
-    const { answerKey, skillsKeys, axesKeys, learningObjectivesKeys, difficultiesKeys } = req.body; 
+    const {
+      answerKey,
+      questionTypesKeys,
+      maxPointsKeys,
+      skillsKeys,
+      axesKeys,
+      learningObjectivesKeys,
+      difficultiesKeys
+    } = req.body;
     
-    // For each question, update or create
-    for (const [qNumStr, ans] of Object.entries(answerKey)) {
+    const allQNums = new Set([
+      ...Object.keys(answerKey || {}),
+      ...Object.keys(questionTypesKeys || {})
+    ]);
+
+    for (const qNumStr of allQNums) {
       const qNum = parseInt(qNumStr, 10);
+      if (isNaN(qNum)) continue;
+
+      const rawAns = answerKey ? answerKey[qNumStr] : '';
+      const explicitType = questionTypesKeys ? questionTypesKeys[qNumStr] : undefined;
+      const rawMaxPts = maxPointsKeys ? maxPointsKeys[qNumStr] : undefined;
+
+      let questionType = 'MULTIPLE_CHOICE';
+      let correctAnswer = String(rawAns || '').trim().toUpperCase();
+      let maxPoints = 1.0;
+
+      if (explicitType === 'WRITTEN' || correctAnswer === 'DESARROLLO' || correctAnswer === 'WRITTEN') {
+        questionType = 'WRITTEN';
+        correctAnswer = 'DESARROLLO';
+        const mp = parseFloat(rawMaxPts);
+        maxPoints = !isNaN(mp) && mp > 0 ? mp : 5.0;
+      } else if (explicitType === 'ORAL' || correctAnswer === 'ORAL') {
+        questionType = 'ORAL';
+        correctAnswer = 'ORAL';
+        const mp = parseFloat(rawMaxPts);
+        maxPoints = !isNaN(mp) && mp > 0 ? mp : 5.0;
+      } else {
+        questionType = 'MULTIPLE_CHOICE';
+        const mp = parseFloat(rawMaxPts);
+        maxPoints = !isNaN(mp) && mp > 0 ? mp : 1.0;
+      }
+
       const skill = skillsKeys ? skillsKeys[qNumStr] || null : null;
       const axis = axesKeys ? axesKeys[qNumStr] || null : null;
       const learningObjective = learningObjectivesKeys ? learningObjectivesKeys[qNumStr] || null : null;
-      const difficulty = difficultiesKeys && difficultiesKeys[qNumStr] !== undefined && difficultiesKeys[qNumStr] !== ""
-        ? parseFloat(difficultiesKeys[qNumStr])
+      const difficulty = difficultiesKeys && difficultiesKeys[qNumStr] !== undefined
+        ? parseDifficultyValue(difficultiesKeys[qNumStr])
         : 0.0;
+      const guessing = (questionType === 'WRITTEN' || questionType === 'ORAL') ? 0.0 : 0.25;
       
       await prisma.question.upsert({
         where: { examId_questionNumber: { examId, questionNumber: qNum } },
-        update: { correctAnswer: ans, skill, axis, learningObjective, difficulty },
-        create: { examId, questionNumber: qNum, correctAnswer: ans, skill, axis, learningObjective, difficulty }
+        update: { correctAnswer, questionType, maxPoints, skill, axis, learningObjective, difficulty, guessing },
+        create: { examId, questionNumber: qNum, correctAnswer, questionType, maxPoints, skill, axis, learningObjective, difficulty, guessing }
       });
     }
 
@@ -1706,27 +1883,85 @@ router.post('/exams/:id/import-questions', checkAdmin, uploadMemory.single('file
     const exam = await prisma.exam.findUnique({ where: { id: examId } });
     if (!exam) return res.status(404).json({ error: 'Ensayo no encontrado' });
 
+    // Helper robusto para leer texto o valor numérico de cualquier celda ExcelJS
+    const getCleanCell = (cell) => {
+      if (!cell) return '';
+      const val = cell.value;
+      if (typeof val === 'number') return String(val);
+      if (cell.text !== undefined && cell.text !== null && String(cell.text).trim() !== '') {
+        return String(cell.text).trim();
+      }
+      if (val === undefined || val === null) return '';
+      if (typeof val === 'object') {
+        if (val.result !== undefined && val.result !== null) return String(val.result).trim();
+        if (val.text !== undefined && val.text !== null) return String(val.text).trim();
+        if (Array.isArray(val.richText)) return val.richText.map(r => r.text || '').join('').trim();
+      }
+      return String(val).trim();
+    };
+
+    const normalizeHeader = (s) => String(s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+
+    const colMap = {
+      number: 1,
+      key: 2,
+      skill: 3,
+      axis: 4,
+      oa: 5,
+      difficulty: 6,
+      maxPoints: null
+    };
+
+    const detectColumnsFromRow = (row) => {
+      for (let c = 1; c <= Math.min(worksheet.columnCount || 15, 20); c++) {
+        const hRaw = getCleanCell(row.getCell(c));
+        if (!hRaw) continue;
+        const h = normalizeHeader(hRaw);
+        if (h === 'numero' || h === 'n' || h === 'num' || h === 'pregunta') colMap.number = c;
+        else if (h.includes('clave') || h.includes('respuesta') || h === 'tipo') colMap.key = c;
+        else if (h.includes('habilidad') || h.includes('skill')) colMap.skill = c;
+        else if (h === 'eje' || h.includes('ejetematico') || h === 'tema') colMap.axis = c;
+        else if (h === 'oa' || h.includes('objetivo')) colMap.oa = c;
+        else if (h.includes('dificultad') || h.includes('difficulty') || h === 'tri') colMap.difficulty = c;
+        else if (h.includes('punto') || h.includes('puntaje') || h.includes('maxpoints') || h.includes('pts')) colMap.maxPoints = c;
+      }
+    };
+
+    detectColumnsFromRow(worksheet.getRow(1));
+
     const results = { imported: 0, errors: [] };
 
     for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
       try {
         const row = worksheet.getRow(rowNumber);
-        let qNumStr = String(row.getCell(1).text || row.getCell(1).value || '').trim();
-        let qNum = parseInt(qNumStr, 10);
-        let ans = String(row.getCell(2).text || row.getCell(2).value || '').trim().toUpperCase();
-        let skill = String(row.getCell(3).text || row.getCell(3).value || '').trim() || null;
-        let axis = String(row.getCell(4).text || row.getCell(4).value || '').trim() || null;
-        let oa = String(row.getCell(5).text || row.getCell(5).value || '').trim() || null;
-        let diffStr = String(row.getCell(6).text || row.getCell(6).value || '').trim();
-        let difficulty = diffStr !== '' ? parseFloat(diffStr) : 0.0;
-        if (isNaN(difficulty)) difficulty = 0.0;
+        let qNumStr = getCleanCell(row.getCell(colMap.number));
 
-        if (isNaN(qNum) || !ans) continue;
+        // Si es una fila repetida de encabezado (ej. "Numero,Clave,Habilidad..."), actualizar mapa y saltar
+        if (normalizeHeader(qNumStr) === 'numero' || normalizeHeader(qNumStr) === 'pregunta') {
+          detectColumnsFromRow(row);
+          continue;
+        }
+
+        let qNum = parseInt(qNumStr, 10);
+        let rawAns = getCleanCell(row.getCell(colMap.key));
+        let skill = getCleanCell(row.getCell(colMap.skill)) || null;
+        let axis = getCleanCell(row.getCell(colMap.axis)) || null;
+        let oa = getCleanCell(row.getCell(colMap.oa)) || null;
+        let diffStr = getCleanCell(row.getCell(colMap.difficulty));
+        let rawMaxPts = colMap.maxPoints ? getCleanCell(row.getCell(colMap.maxPoints)) : '';
+
+        if (isNaN(qNum) || !rawAns) continue;
+
+        const difficulty = parseDifficultyValue(diffStr);
+        const { questionType, correctAnswer, maxPoints } = parseQuestionKeyAndType(rawAns, rawMaxPts);
+        if (!correctAnswer) continue;
+
+        const guessing = (questionType === 'WRITTEN' || questionType === 'ORAL') ? 0.0 : 0.25;
 
         await prisma.question.upsert({
           where: { examId_questionNumber: { examId, questionNumber: qNum } },
-          update: { correctAnswer: ans, skill, axis, learningObjective: oa, difficulty },
-          create: { examId, questionNumber: qNum, correctAnswer: ans, skill, axis, learningObjective: oa, difficulty }
+          update: { correctAnswer, questionType, maxPoints, skill, axis, learningObjective: oa, difficulty, guessing },
+          create: { examId, questionNumber: qNum, correctAnswer, questionType, maxPoints, skill, axis, learningObjective: oa, difficulty, guessing }
         });
         results.imported++;
       } catch (err) {

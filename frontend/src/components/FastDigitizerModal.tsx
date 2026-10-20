@@ -45,6 +45,7 @@ export default function FastDigitizerModal({
     title: string;
     questionCount: number;
     optionsCount: number;
+    questionsByNum: Record<number, { questionType: string; maxPoints: number }>;
   } | null>(null);
 
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -64,10 +65,18 @@ export default function FastDigitizerModal({
       ]);
 
       if (sheetData && sheetData.exam) {
+        const qByNum: Record<number, { questionType: string; maxPoints: number }> = {};
+        (sheetData.exam.questions || []).forEach((q: any) => {
+          qByNum[q.questionNumber] = {
+            questionType: q.questionType || (q.correctAnswer === "DESARROLLO" ? "WRITTEN" : q.correctAnswer === "ORAL" ? "ORAL" : "MULTIPLE_CHOICE"),
+            maxPoints: q.maxPoints != null && q.maxPoints > 0 ? Number(q.maxPoints) : 1,
+          };
+        });
         setExamMeta({
           title: sheetData.exam.title,
-          questionCount: sheetData.questions?.length || sheetData.exam.questionCount || 30,
+          questionCount: sheetData.exam.questions?.length || sheetData.exam.questionCount || 30,
           optionsCount: sheetData.exam.optionsCount || 4,
+          questionsByNum: qByNum,
         });
       }
 
@@ -110,7 +119,7 @@ export default function FastDigitizerModal({
     }
   }, [isOpen, loadData]);
 
-  // Manejar teclado para digitación ultra-rápida (A, B, C, D, E, Flechas, Backspace)
+  // Manejar teclado para digitación ultra-rápida (A, B, C, D, E, Números para Desarrollo, Flechas, Backspace)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -124,10 +133,12 @@ export default function FastDigitizerModal({
       const qCount = examMeta?.questionCount || 30;
       const oCount = examMeta?.optionsCount || 4;
       const validLetters = ["A", "B", "C", "D", "E"].slice(0, oCount);
+      const activeQMeta = examMeta?.questionsByNum?.[activeQuestion];
+      const isOpenActive = activeQMeta?.questionType === "WRITTEN" || activeQMeta?.questionType === "ORAL";
 
       const key = e.key.toUpperCase();
 
-      if (validLetters.includes(key)) {
+      if (!isOpenActive && validLetters.includes(key)) {
         e.preventDefault();
         setAnswers((prev) => ({
           ...prev,
@@ -135,6 +146,19 @@ export default function FastDigitizerModal({
         }));
         if (activeQuestion < qCount) {
           setActiveQuestion((q) => q + 1);
+        }
+      } else if (isOpenActive && /^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        const digit = parseInt(e.key, 10);
+        const maxPts = activeQMeta?.maxPoints || 1;
+        if (digit <= maxPts) {
+          setAnswers((prev) => ({
+            ...prev,
+            [activeQuestion]: String(digit),
+          }));
+          if (activeQuestion < qCount) {
+            setActiveQuestion((q) => q + 1);
+          }
         }
       } else if (e.key === "Backspace" || e.key === "Delete") {
         e.preventDefault();
@@ -196,7 +220,7 @@ export default function FastDigitizerModal({
 
     const answeredCount = Object.keys(answers).length;
     if (answeredCount === 0) {
-      alert("No has ingresado ninguna alternativa para este alumno.");
+      alert("No has ingresado ninguna alternativa o puntaje para este alumno.");
       return;
     }
 
@@ -281,7 +305,7 @@ export default function FastDigitizerModal({
                 </span>
               </div>
               <p className="text-xs text-indigo-200">
-                Presiona A, B, C, D en tu teclado físico para avanzar automáticamente de pregunta.
+                Presiona A, B, C, D en tu teclado físico (o puntaje numérico en preguntas de Desarrollo/Oral) para avanzar.
               </p>
             </div>
           </div>
@@ -379,6 +403,10 @@ export default function FastDigitizerModal({
                 const qNum = idx + 1;
                 const selected = answers[qNum];
                 const isActive = activeQuestion === qNum;
+                const qMeta = examMeta?.questionsByNum?.[qNum];
+                const isOpen = qMeta?.questionType === "WRITTEN" || qMeta?.questionType === "ORAL";
+                const isOral = qMeta?.questionType === "ORAL";
+                const maxPts = qMeta?.maxPoints || 1;
 
                 return (
                   <div
@@ -387,39 +415,79 @@ export default function FastDigitizerModal({
                     className={`p-2.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
                       isActive
                         ? "bg-indigo-50/90 border-indigo-500 shadow ring-2 ring-indigo-400"
+                        : isOpen
+                        ? isOral
+                          ? "bg-purple-50/50 border-purple-200 hover:border-purple-400"
+                          : "bg-amber-50/50 border-amber-200 hover:border-amber-400"
                         : selected
                         ? "bg-slate-50 border-gray-300 hover:border-indigo-300"
                         : "bg-white border-dashed border-gray-200 hover:bg-slate-50 text-gray-400"
                     }`}
                   >
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                       <span className={`text-xs font-bold w-6 text-right ${isActive ? "text-indigo-900" : "text-gray-700"}`}>
                         {qNum}.
                       </span>
+                      {isOpen && (
+                        <span
+                          className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded ${
+                            isOral ? "bg-purple-100 text-purple-900" : "bg-amber-100 text-amber-900"
+                          }`}
+                        >
+                          {isOral ? "🗣️ Oral" : "📝 Des."}
+                        </span>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-1">
-                      {letters.map((letra) => {
-                        const isChecked = selected === letra;
-                        return (
-                          <button
-                            key={letra}
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOptionClick(qNum, letra);
-                            }}
-                            className={`w-7 h-7 rounded-full font-bold text-xs transition flex items-center justify-center ${
-                              isChecked
-                                ? "bg-indigo-600 text-white shadow ring-2 ring-indigo-300"
-                                : "bg-white border border-gray-300 text-gray-700 hover:bg-indigo-50 hover:border-indigo-400"
-                            }`}
-                          >
-                            {letra}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    {isOpen ? (
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="number"
+                          min={0}
+                          max={maxPts}
+                          step="0.5"
+                          placeholder="0"
+                          value={selected ?? ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setAnswers((prev) => {
+                              if (val === "") {
+                                const next = { ...prev };
+                                delete next[qNum];
+                                return next;
+                              }
+                              const num = Math.max(0, Math.min(maxPts, parseFloat(val) || 0));
+                              return { ...prev, [qNum]: String(num) };
+                            });
+                          }}
+                          className="w-12 border border-slate-300 rounded-md px-1 py-0.5 text-center text-xs font-black text-slate-900 bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <span className="text-[10px] font-bold text-slate-500">/{maxPts}p</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        {letters.map((letra) => {
+                          const isChecked = selected === letra;
+                          return (
+                            <button
+                              key={letra}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOptionClick(qNum, letra);
+                              }}
+                              className={`w-7 h-7 rounded-full font-bold text-xs transition flex items-center justify-center ${
+                                isChecked
+                                  ? "bg-indigo-600 text-white shadow ring-2 ring-indigo-300"
+                                  : "bg-white border border-gray-300 text-gray-700 hover:bg-indigo-50 hover:border-indigo-400"
+                              }`}
+                            >
+                              {letra}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
