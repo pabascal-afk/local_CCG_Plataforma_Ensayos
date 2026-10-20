@@ -1417,6 +1417,41 @@ const uploadDisk = multer({
   }
 });
 
+const uploadAudioDisk = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const uploadPath = path.resolve(process.env.UPLOADS_DIR || path.join(__dirname, '../../uploads'));
+      if (!fs.existsSync(uploadPath)) {
+        fs.mkdirSync(uploadPath, { recursive: true });
+      }
+      cb(null, uploadPath);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase() || '.mp3';
+      cb(null, `audio-${Date.now()}-${Math.round(Math.random() * 1e4)}${ext}`);
+    }
+  }),
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB máx.
+  fileFilter: (req, file, cb) => {
+    const original = String(file.originalname || '').toLowerCase();
+    if (original.endsWith('.wav') || file.mimetype === 'audio/wav' || file.mimetype === 'audio/x-wav') {
+      const err = new Error('Los archivos .wav no están permitidos por su gran peso. Por favor sube el audio comprimido en formato MP3 o M4A.');
+      err.status = 400;
+      return cb(err);
+    }
+    const isAllowedExt = /\.(mp3|m4a|aac|ogg|oga|webm|opus)$/i.test(original);
+    const isAllowedMime = /^audio\/(mpeg|mp3|mp4|x-m4a|aac|ogg|webm|opus)$/i.test(file.mimetype) ||
+                          file.mimetype === 'application/octet-stream';
+    if (isAllowedExt || isAllowedMime) {
+      cb(null, true);
+    } else {
+      const err = new Error('Formato no soportado. Solo se permiten audios comprimidos (.mp3, .m4a, .aac, .ogg, .webm).');
+      err.status = 400;
+      cb(err);
+    }
+  }
+});
+
 // Helper para normalizar valores de Dificultad TRI a los presets (-1.5, 0.0, 1.5)
 function parseDifficultyValue(raw) {
   if (raw === undefined || raw === null) return 0.0;
@@ -1788,13 +1823,238 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
 router.delete('/exams/:id', checkAdmin, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const exam = await prisma.exam.findUnique({ where: { id } });
+    const exam = await prisma.exam.findUnique({
+      where: { id },
+      include: { audioClips: true }
+    });
+    const uploadsDir = path.resolve(process.env.UPLOADS_DIR || path.join(__dirname, '../../uploads'));
     if (exam && exam.pdfPath) {
-      const fullPath = path.join(__dirname, '../../uploads', exam.pdfPath);
-      if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+      const fullPath = path.join(uploadsDir, path.basename(exam.pdfPath));
+      if (fs.existsSync(fullPath)) {
+        try { fs.unlinkSync(fullPath); } catch {}
+      }
+    }
+    if (exam && Array.isArray(exam.audioClips)) {
+      for (const clip of exam.audioClips) {
+        if (clip.audioPath) {
+          const audioFile = path.join(uploadsDir, path.basename(clip.audioPath));
+          if (fs.existsSync(audioFile)) {
+            try { fs.unlinkSync(audioFile); } catch {}
+          }
+        }
+      }
     }
     await prisma.exam.delete({ where: { id } });
     res.json({ message: 'Ensayo eliminado' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// =======================
+// AUDIO CLIPS (AUDIOS POR PREGUNTA / CORTADOR)
+// =======================
+router.get('/exams/:id/audios', async (req, res, next) => {
+  try {
+    const examId = parseInt(req.params.id, 10);
+    const clips = await prisma.examAudioClip.findMany({
+      where: { examId },
+      orderBy: [{ orderIndex: 'asc' }, { id: 'asc' }]
+    });
+    const formatted = clips.map((c) => {
+      let qNums = [];
+      try {
+        qNums = JSON.parse(c.questionNumbers || '[]');
+      } catch {
+        qNums = [];
+      }
+      return {
+        ...c,
+        questionNumbers: qNums
+      };
+    });
+    res.json(formatted);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/exams/:id/audios', checkAdmin, (req, res, next) => {
+  uploadAudioDisk.single('audio')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'El archivo excede el tamaño máximo permitido de 15 MB' });
+      }
+      return res.status(400).json({ error: err.message || 'Error al subir el archivo de audio' });
+    }
+    next();
+  });
+}, async (req, res, next) => {
+  try {
+    const examId = parseInt(req.params.id, 10);
+    const exam = await prisma.exam.findUnique({ where: { id: examId } });
+    if (!exam) return res.status(404).json({ error: 'Evaluación no encontrada' });
+
+    let audioPath = req.file ? req.file.filename : (req.body.existingAudioPath ? path.basename(req.body.existingAudioPath) : null);
+    if (!audioPath) {
+      return res.status(400).json({ error: 'Debes seleccionar y subir un archivo de audio (.mp3, .m4a, .ogg)' });
+    }
+
+    const fileSize = req.file ? req.file.size : 0;
+
+    // Procesar lista de clips o clip único
+    let rawClips = [];
+    if (req.body.clips) {
+      try {
+        rawClips = typeof req.body.clips === 'string' ? JSON.parse(req.body.clips) : req.body.clips;
+      } catch {
+        rawClips = [];
+      }
+    } else {
+      rawClips = [{
+        title: req.body.title || 'Audio',
+        startSec: req.body.startSec,
+        endSec: req.body.endSec,
+        questionNumbers: req.body.questionNumbers,
+        maxPlays: req.body.maxPlays
+      }];
+    }
+
+    if (!Array.isArray(rawClips) || rawClips.length === 0) {
+      rawClips = [{ title: 'Audio General', questionNumbers: [] }];
+    }
+
+    const createdClips = [];
+    for (let i = 0; i < rawClips.length; i++) {
+      const c = rawClips[i];
+      let qNums = [];
+      if (Array.isArray(c.questionNumbers)) {
+        qNums = c.questionNumbers.map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+      } else if (typeof c.questionNumbers === 'string') {
+        try {
+          const parsed = JSON.parse(c.questionNumbers);
+          if (Array.isArray(parsed)) qNums = parsed.map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+        } catch {
+          qNums = c.questionNumbers.split(',').map(n => parseInt(n.trim(), 10)).filter(n => !isNaN(n));
+        }
+      }
+
+      const startSec = (c.startSec !== undefined && c.startSec !== null && String(c.startSec).trim() !== '')
+        ? Math.max(0, parseFloat(c.startSec)) : null;
+      const endSec = (c.endSec !== undefined && c.endSec !== null && String(c.endSec).trim() !== '')
+        ? Math.max(0, parseFloat(c.endSec)) : null;
+      const maxPlays = (c.maxPlays !== undefined && c.maxPlays !== null && String(c.maxPlays).trim() !== '')
+        ? parseInt(c.maxPlays, 10) : null;
+
+      const title = (c.title && String(c.title).trim())
+        ? String(c.title).trim()
+        : (qNums.length === 1 ? `Audio Pregunta ${qNums[0]}` : (qNums.length > 1 ? `Audio Preguntas ${qNums.join(', ')}` : `Pista ${i + 1}`));
+
+      const created = await prisma.examAudioClip.create({
+        data: {
+          examId,
+          title,
+          audioPath,
+          fileSize,
+          startSec,
+          endSec,
+          questionNumbers: JSON.stringify(qNums),
+          maxPlays,
+          orderIndex: i + 1
+        }
+      });
+      createdClips.push({ ...created, questionNumbers: qNums });
+    }
+
+    res.json({ message: `${createdClips.length} fragmento(s) guardado(s)`, clips: createdClips });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/exams/:id/audios/:clipId', checkAdmin, async (req, res, next) => {
+  try {
+    const examId = parseInt(req.params.id, 10);
+    const clipId = parseInt(req.params.clipId, 10);
+    const { title, startSec, endSec, questionNumbers, maxPlays } = req.body;
+
+    let qNums = [];
+    if (Array.isArray(questionNumbers)) {
+      qNums = questionNumbers.map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+    } else if (typeof questionNumbers === 'string') {
+      try {
+        const parsed = JSON.parse(questionNumbers);
+        if (Array.isArray(parsed)) qNums = parsed.map(n => parseInt(n, 10)).filter(n => !isNaN(n));
+      } catch {
+        qNums = questionNumbers.split(',').map(n => parseInt(n.trim(), 10)).filter(n => !isNaN(n));
+      }
+    }
+
+    const updated = await prisma.examAudioClip.update({
+      where: { id: clipId },
+      data: {
+        title: title ? String(title).trim() : undefined,
+        startSec: (startSec !== undefined && startSec !== null && String(startSec).trim() !== '') ? Math.max(0, parseFloat(startSec)) : null,
+        endSec: (endSec !== undefined && endSec !== null && String(endSec).trim() !== '') ? Math.max(0, parseFloat(endSec)) : null,
+        questionNumbers: JSON.stringify(qNums),
+        maxPlays: (maxPlays !== undefined && maxPlays !== null && String(maxPlays).trim() !== '') ? parseInt(maxPlays, 10) : null
+      }
+    });
+
+    res.json({ ...updated, questionNumbers: qNums });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/exams/:id/audios/:clipId', checkAdmin, async (req, res, next) => {
+  try {
+    const examId = parseInt(req.params.id, 10);
+    const clipId = parseInt(req.params.clipId, 10);
+
+    const clip = await prisma.examAudioClip.findFirst({
+      where: { id: clipId, examId }
+    });
+    if (!clip) return res.status(404).json({ error: 'Fragmento no encontrado' });
+
+    const audioPath = clip.audioPath;
+    await prisma.examAudioClip.delete({ where: { id: clipId } });
+
+    // Si ningún otro clip utiliza este mismo archivo físico, eliminarlo del disco
+    if (audioPath) {
+      const remainingWithSameFile = await prisma.examAudioClip.count({
+        where: { audioPath }
+      });
+      if (remainingWithSameFile === 0) {
+        const uploadsDir = path.resolve(process.env.UPLOADS_DIR || path.join(__dirname, '../../uploads'));
+        const filePath = path.join(uploadsDir, path.basename(audioPath));
+        if (fs.existsSync(filePath)) {
+          try { fs.unlinkSync(filePath); } catch {}
+        }
+      }
+    }
+
+    res.json({ message: 'Fragmento eliminado correctamente' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/exams/:id/audios/:clipId/stream', async (req, res, next) => {
+  try {
+    const examId = parseInt(req.params.id, 10);
+    const clipId = parseInt(req.params.clipId, 10);
+    const clip = await prisma.examAudioClip.findFirst({
+      where: { id: clipId, examId }
+    });
+    if (!clip || !clip.audioPath) return res.status(404).json({ error: 'Audio no encontrado' });
+
+    const uploadsDir = path.resolve(process.env.UPLOADS_DIR || path.join(__dirname, '../../uploads'));
+    const filePath = path.join(uploadsDir, path.basename(clip.audioPath));
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Archivo de audio no encontrado' });
+
+    res.setHeader('Cache-Control', 'private, max-age=7200');
+    return res.sendFile(filePath);
   } catch (error) {
     next(error);
   }

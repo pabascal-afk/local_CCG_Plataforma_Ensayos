@@ -17,7 +17,9 @@ import {
   Copy,
   Check,
   Sparkles,
-  Tv
+  Tv,
+  Headphones,
+  Scissors
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -25,6 +27,7 @@ import { apiFetch } from "@/lib/api";
 import { copyToClipboard as safeCopyToClipboard } from "@/lib/clipboard";
 import { useParams } from "next/navigation";
 import AiPromptModal from "@/components/AiPromptModal";
+import AudioCutterModal from "@/components/AudioCutterModal";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 // Sub-components for tabs
@@ -50,6 +53,7 @@ export default function TeacherAssignmentPage() {
   const [copiedPin, setCopiedPin] = useState(false);
   const [showProjectorModal, setShowProjectorModal] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
+  const [showAudioModal, setShowAudioModal] = useState(false);
 
   const loadBase = () => {
     apiFetch(`/teacher/assignments`).then(data => {
@@ -169,6 +173,15 @@ export default function TeacherAssignmentPage() {
                   title="Asistente de Prompts para Agentes de IA: Generar Taller de Refuerzo o Guía de Aula"
                 >
                   <Sparkles className="w-4 h-4 text-amber-300" />
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setShowAudioModal(true)}
+                  className="px-3 py-2 bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 text-xs font-semibold"
+                  title="Gestionar y Recortar Audios por Pregunta"
+                >
+                  <Headphones className="w-4 h-4 text-purple-600" />
+                  <span>Audios</span>
                 </button>
                 <button 
                   type="button"
@@ -340,6 +353,18 @@ export default function TeacherAssignmentPage() {
             initialCourseName={assignment?.courseName || (assignment?.Course ? `${assignment.Course.level?.replace('B', '° Básico').replace('M', '° Medio')} ${assignment.Course.letter}` : "Curso")}
             initialExamTitle={assignment?.title || assignment?.Exam?.title}
           />
+
+          {/* Modal Recortador y Gestor de Audios */}
+          {assignment && (
+            <AudioCutterModal
+              isOpen={showAudioModal}
+              onClose={() => setShowAudioModal(false)}
+              assignmentId={Number(id)}
+              examId={assignment.examId || assignment.Exam?.id}
+              examTitle={assignment.title || assignment.Exam?.title}
+              questionCount={assignment.Exam?.questionCount || 30}
+            />
+          )}
         </AppShell>
       )}
     </RequireRole>

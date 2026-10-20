@@ -67,6 +67,7 @@ model Exam {
   questions       Question[]
   assignments     ExamAssignment[]
   remedialProposals RemedialProposal[]
+  audioClips      ExamAudioClip[]
 }
 
 model Question {
@@ -185,3 +186,19 @@ model RemedialProposal {
   teacher             User           @relation("ProposedRemedials", fields: [teacherRut], references: [rut], onDelete: Cascade)
   remedialExam        Exam?          @relation(fields: [remedialExamId], references: [id], onDelete: SetNull)
 }
+
+model ExamAudioClip {
+  id              Int      @id @default(autoincrement())
+  examId          Int
+  title           String   // Ej: "Audio Preguntas 1 a 3"
+  audioPath       String   // Nombre del archivo físico en backend/uploads
+  fileSize        Int      @default(0)
+  startSec        Float?   // Inicio del corte en segundos (null o 0 = inicio)
+  endSec          Float?   // Fin del corte en segundos (null = hasta el final)
+  questionNumbers String   @default("[]") // JSON string, ej: "[1,2,3]"
+  maxPlays        Int?     // null = ilimitado, o ej. 1, 2, 3
+  orderIndex      Int      @default(1)
+  createdAt       DateTime @default(now())
+  exam            Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+}
+
