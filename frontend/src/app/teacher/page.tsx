@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Users, Clock, CheckCircle2, ChevronRight, BarChart2, Download } from "lucide-react";
+import { BookOpen, Users, Clock, CheckCircle2, ChevronRight, BarChart2, Download, Headphones } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import { useIsPruebas } from "@/lib/useIsPruebas";
+import AudioCutterModal from "@/components/AudioCutterModal";
 
 type Assignment = {
   id: number;
@@ -28,6 +29,7 @@ function TeacherDashboard() {
   const { selectedYear } = useSchoolYear();
   const isPruebas = useIsPruebas();
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
+  const [selectedAudioAssignment, setSelectedAudioAssignment] = useState<Assignment | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -123,16 +125,39 @@ function TeacherDashboard() {
                   </div>
                 </div>
                 
-                <Link 
-                  href={`/teacher/assignments/${a.id}`} 
-                  className="w-full inline-flex items-center justify-center bg-gray-50 hover:bg-blue-50 text-blue-600 font-semibold py-2.5 rounded-lg border border-transparent group-hover:border-blue-200 transition-colors"
-                >
-                  Ver Reporte <ChevronRight className="w-4 h-4 ml-1" />
-                </Link>
+                <div className="flex gap-2">
+                  <button 
+                    type="button"
+                    onClick={() => setSelectedAudioAssignment(a)}
+                    className="inline-flex items-center justify-center bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold px-3 py-2.5 rounded-lg text-xs gap-1.5 transition shadow-2xs"
+                    title="Gestionar y cortar audios para este examen"
+                  >
+                    <Headphones className="w-4 h-4 text-purple-600" />
+                    <span>Audios</span>
+                  </button>
+                  <Link 
+                    href={`/teacher/assignments/${a.id}`} 
+                    className="flex-1 inline-flex items-center justify-center bg-gray-50 hover:bg-blue-50 text-blue-600 font-semibold py-2.5 rounded-lg border border-transparent group-hover:border-blue-200 transition-colors text-sm"
+                  >
+                    Ver Reporte <ChevronRight className="w-4 h-4 ml-1" />
+                  </Link>
+                </div>
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Modal Cortador de Audio */}
+      {selectedAudioAssignment && (
+        <AudioCutterModal
+          isOpen={Boolean(selectedAudioAssignment)}
+          onClose={() => setSelectedAudioAssignment(null)}
+          assignmentId={selectedAudioAssignment.id}
+          examId={selectedAudioAssignment.examId}
+          examTitle={selectedAudioAssignment.title}
+          questionCount={30}
+        />
       )}
     </div>
   );

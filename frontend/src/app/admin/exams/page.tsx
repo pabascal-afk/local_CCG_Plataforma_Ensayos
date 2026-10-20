@@ -8,10 +8,11 @@ import Link from "next/link";
 import { 
   ArrowLeft, Trash2, FileText, Plus, Download, Search, 
   Filter, BookOpen, Layers, Clock, X, ChevronRight, Check, Sparkles,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Headphones
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal from "@/components/AiPromptModal";
+import AudioCutterModal from "@/components/AudioCutterModal";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type CourseItem = {
@@ -51,6 +52,7 @@ export default function ExamsPage() {
   const [orderRangePreset, setOrderRangePreset] = useState<"TODOS" | "1-3" | "4-6" | "7-10" | "CUSTOM">("TODOS");
   const [selectedOrderNumbers, setSelectedOrderNumbers] = useState<number[]>([]);
   const [showAiModal, setShowAiModal] = useState(false);
+  const [selectedAudioExam, setSelectedAudioExam] = useState<Exam | null>(null);
   const isPruebas = useIsPruebas();
 
   // Tarjetas compactas por defecto (disclosure progresivo)
@@ -544,9 +546,18 @@ export default function ExamsPage() {
 
                         <div className="flex items-center gap-2 shrink-0">
                           {getExamTypeBadge(e.examType)}
-                          <span className="hidden sm:inline-block text-[11px] font-semibold text-gray-400 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded">
-                            {e.questionCount} preg
-                          </span>
+                          <button
+                            type="button"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setSelectedAudioExam(e);
+                            }}
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-md transition shadow-2xs"
+                            title="Gestionar y cortar audios por pregunta"
+                          >
+                            <Headphones className="w-3.5 h-3.5 text-purple-600" />
+                            <span className="hidden sm:inline">Audios</span>
+                          </button>
                           
                           <button 
                             type="button"
@@ -618,7 +629,15 @@ export default function ExamsPage() {
                           )}
 
                           {/* Footer y Enlace a Pauta */}
-                          <div className="pt-2 border-t border-gray-200/60 flex justify-end items-center">
+                          <div className="pt-2 border-t border-gray-200/60 flex justify-end items-center gap-2">
+                            <button 
+                              type="button"
+                              onClick={() => setSelectedAudioExam(e)}
+                              className="inline-flex items-center gap-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"
+                            >
+                              <Headphones className="w-3.5 h-3.5 text-purple-600" />
+                              <span>Gestionar Audios</span>
+                            </button>
                             <Link 
                               href={`/admin/exams/${e.id}`} 
                               className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"
@@ -643,6 +662,17 @@ export default function ExamsPage() {
             onClose={() => setShowAiModal(false)} 
             defaultMode="EXAM_XLSX" 
           />
+
+          {/* Modal Cortador de Audio por Pregunta */}
+          {selectedAudioExam && (
+            <AudioCutterModal
+              isOpen={Boolean(selectedAudioExam)}
+              onClose={() => setSelectedAudioExam(null)}
+              examId={selectedAudioExam.id}
+              examTitle={selectedAudioExam.title}
+              questionCount={selectedAudioExam.questionCount}
+            />
+          )}
         </AppShell>
       )}
     </RequireRole>
