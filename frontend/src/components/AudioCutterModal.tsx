@@ -43,6 +43,7 @@ interface AudioCutterModalProps {
   examTitle?: string;
   questionCount: number;
   onClipsUpdated?: () => void;
+  initialQuestionNumber?: number | null;
 }
 
 function formatTime(seconds: number): string {
@@ -61,6 +62,7 @@ export default function AudioCutterModal({
   examTitle,
   questionCount,
   onClipsUpdated,
+  initialQuestionNumber,
 }: AudioCutterModalProps) {
   const [existingClips, setExistingClips] = useState<AudioClipItem[]>([]);
   const [loadingClips, setLoadingClips] = useState(false);
@@ -117,6 +119,13 @@ export default function AudioCutterModal({
   useEffect(() => {
     if (isOpen) {
       loadClips();
+      if (initialQuestionNumber) {
+        setSelectedQuestions([initialQuestionNumber]);
+        setClipTitle(`Audio Pregunta ${initialQuestionNumber}`);
+      } else {
+        setSelectedQuestions([1]);
+        setClipTitle("Audio Pregunta 1");
+      }
     } else {
       // Limpiar al cerrar
       if (audioUrl) URL.revokeObjectURL(audioUrl);
@@ -129,7 +138,7 @@ export default function AudioCutterModal({
       setErrorMsg("");
       setSuccessMsg("");
     }
-  }, [isOpen, loadClips]);
+  }, [isOpen, loadClips, initialQuestionNumber]);
 
   // 2. Procesar nuevo archivo de audio subido por el usuario
   const handleFileSelected = async (file: File) => {
@@ -165,8 +174,13 @@ export default function AudioCutterModal({
       setDuration(totalDur);
       setStartSec(0);
       setEndSec(totalDur);
-      setClipTitle(`Audio Pregunta 1`);
-      setSelectedQuestions([1]);
+      if (initialQuestionNumber) {
+        setSelectedQuestions([initialQuestionNumber]);
+        setClipTitle(`Audio Pregunta ${initialQuestionNumber}`);
+      } else {
+        setSelectedQuestions([1]);
+        setClipTitle(`Audio Pregunta 1`);
+      }
     } catch (err: any) {
       setErrorMsg("Error al procesar el archivo de audio: " + (err.message || "Formato no legible"));
     } finally {
