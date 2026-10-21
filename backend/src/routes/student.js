@@ -34,7 +34,9 @@ function assignmentState(a, submission, now = new Date()) {
   if (submission?.status === 'SUBMITTED') return a.released ? 'RESULTS' : 'SUBMITTED';
   if (a.applicationMode === 'PRINTED') return 'PRINTED';
   if (now < a.opensAt) return 'UPCOMING';
-  if (now > a.closesAt) return submission ? 'SUBMITTED' : 'MISSED';
+  
+  const effectiveClosesAt = submission?.extendedDeadline ? new Date(submission.extendedDeadline) : new Date(a.closesAt);
+  if (now > effectiveClosesAt) return submission ? 'SUBMITTED' : 'MISSED';
   return submission ? 'IN_PROGRESS' : 'AVAILABLE';
 }
 
@@ -57,7 +59,8 @@ router.get('/assignments', async (req, res) => {
     return {
       id: a.id,
       opensAt: a.opensAt,
-      closesAt: a.closesAt,
+      closesAt: submission?.extendedDeadline || a.closesAt,
+      isExtended: Boolean(submission?.extendedDeadline),
       released: a.released,
       applicationMode: a.applicationMode || 'DIGITAL',
       exam: { ...a.exam, questionCount: a.exam._count.questions, _count: undefined },
@@ -84,9 +87,12 @@ router.post('/assignments/:id/start', async (req, res) => {
   if (submission?.status === 'SUBMITTED') {
     return res.status(409).json({ error: 'Ya entregaste este ensayo', submissionId: submission.id });
   }
+
+  const effectiveClosesAt = submission?.extendedDeadline ? new Date(submission.extendedDeadline) : new Date(assignment.closesAt);
+
   if (!submission) {
     if (now < assignment.opensAt) return res.status(403).json({ error: 'Este ensayo aún no está disponible' });
-    if (now > assignment.closesAt) return res.status(403).json({ error: 'Este ensayo ya cerró' });
+    if (now > effectiveClosesAt) return res.status(403).json({ error: 'Este ensayo ya cerró' });
     try {
       submission = await prisma.submission.create({
         data: { studentRut: req.user.rut, assignmentId: assignment.id },
@@ -95,6 +101,18 @@ router.post('/assignments/:id/start', async (req, res) => {
       // Doble clic / dos pestañas: el intento ya fue creado por otra petición
       submission = await prisma.submission.findUnique({
         where: { studentRut_assignmentId: { studentRut: req.user.rut, assignmentId: assignment.id } },
+      });
+    }
+  } else {
+    if (now > effectiveClosesAt) {
+      return res.status(403).json({ error: 'El plazo para este ensayo ya expiró' });
+    }
+
+    // Si fue reactivado por el profesor y esta es su primera entrada tras la reactivación:
+    if (submission.reactivatedAt && submission.startedAt < submission.reactivatedAt) {
+      submission = await prisma.submission.update({
+        where: { id: submission.id },
+        data: { startedAt: now },
       });
     }
   }

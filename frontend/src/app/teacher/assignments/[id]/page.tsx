@@ -19,7 +19,8 @@ import {
   Sparkles,
   Tv,
   Headphones,
-  Scissors
+  Scissors,
+  Zap
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -28,6 +29,7 @@ import { copyToClipboard as safeCopyToClipboard } from "@/lib/clipboard";
 import { useParams } from "next/navigation";
 import AiPromptModal from "@/components/AiPromptModal";
 import AudioCutterModal from "@/components/AudioCutterModal";
+import ReactivateCourseModal from "@/components/ReactivateCourseModal";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 // Sub-components for tabs
@@ -54,6 +56,7 @@ export default function TeacherAssignmentPage() {
   const [showProjectorModal, setShowProjectorModal] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [showAudioModal, setShowAudioModal] = useState(false);
+  const [showReactivateModal, setShowReactivateModal] = useState(false);
 
   const loadBase = () => {
     apiFetch(`/teacher/assignments`).then(data => {
@@ -182,6 +185,15 @@ export default function TeacherAssignmentPage() {
                 >
                   <Headphones className="w-4 h-4 text-purple-600" />
                   <span>Audios</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setShowReactivateModal(true)}
+                  className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-lg shadow-xs transition-all flex items-center gap-1.5 text-xs cursor-pointer"
+                  title="Extender plazo de la evaluación o reactivar para el curso"
+                >
+                  <Zap className="w-3.5 h-3.5 fill-current" />
+                  <span>Reactivar</span>
                 </button>
                 <button 
                   type="button"
@@ -363,6 +375,19 @@ export default function TeacherAssignmentPage() {
               examId={assignment.examId || assignment.Exam?.id}
               examTitle={assignment.title || assignment.Exam?.title}
               questionCount={assignment.Exam?.questionCount || 30}
+            />
+          )}
+
+          {/* Modal Reactivar Evaluación Curso */}
+          {assignment && (
+            <ReactivateCourseModal
+              isOpen={showReactivateModal}
+              onClose={() => setShowReactivateModal(false)}
+              assignmentId={Number(id)}
+              currentClosesAt={assignment.closesAt}
+              examTitle={assignment.title || assignment.Exam?.title}
+              courseName={assignment.courseName || (assignment?.Course ? `${assignment.Course.level?.replace('B', '° Básico').replace('M', '° Medio')} ${assignment.Course.letter}` : undefined)}
+              onSuccess={loadBase}
             />
           )}
         </AppShell>

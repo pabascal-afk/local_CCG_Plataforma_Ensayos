@@ -2,13 +2,17 @@ const { prisma } = require('../lib/prisma');
 const { computeResults } = require('./grading');
 
 /**
- * Momento límite de un intento: el menor entre (inicio + duración) y el cierre de la asignación.
+ * Momento límite de un intento: el menor entre (inicio + duración) y el cierre de la asignación
+ * (o plazo individual extendido si el estudiante fue reactivado).
  */
 function getDeadline(submission, assignment, exam) {
-  const closes = new Date(assignment.closesAt).getTime();
-  if (!exam.durationMinutes) return new Date(closes);
+  const effectiveCloses = submission?.extendedDeadline
+    ? new Date(submission.extendedDeadline).getTime()
+    : new Date(assignment.closesAt).getTime();
+
+  if (!exam.durationMinutes) return new Date(effectiveCloses);
   const byDuration = new Date(submission.startedAt).getTime() + exam.durationMinutes * 60 * 1000;
-  return new Date(Math.min(closes, byDuration));
+  return new Date(Math.min(effectiveCloses, byDuration));
 }
 
 /**

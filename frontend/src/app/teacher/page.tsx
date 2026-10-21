@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Users, Clock, CheckCircle2, ChevronRight, BarChart2, Download, Headphones } from "lucide-react";
+import { BookOpen, Users, Clock, CheckCircle2, ChevronRight, BarChart2, Download, Headphones, Zap } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 import AudioCutterModal from "@/components/AudioCutterModal";
+import ReactivateCourseModal from "@/components/ReactivateCourseModal";
 
 type Assignment = {
   id: number;
@@ -30,12 +31,17 @@ function TeacherDashboard() {
   const isPruebas = useIsPruebas();
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [selectedAudioAssignment, setSelectedAudioAssignment] = useState<Assignment | null>(null);
+  const [selectedReactivateAssignment, setSelectedReactivateAssignment] = useState<Assignment | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  const loadAssignments = () => {
     apiFetch<Assignment[]>(`/teacher/assignments?year=${selectedYear}`)
       .then(setAssignments)
       .catch((e) => setError(e instanceof ApiError ? e.message : "Error al cargar"));
+  };
+
+  useEffect(() => {
+    loadAssignments();
   }, [selectedYear]);
 
   return (
@@ -135,6 +141,15 @@ function TeacherDashboard() {
                     <Headphones className="w-4 h-4 text-purple-600" />
                     <span>Audios</span>
                   </button>
+                  <button 
+                    type="button"
+                    onClick={() => setSelectedReactivateAssignment(a)}
+                    className="inline-flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold px-3 py-2.5 rounded-lg text-xs gap-1.5 transition shadow-2xs cursor-pointer"
+                    title="Extender plazo o reactivar evaluación para este curso"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-600 fill-current" />
+                    <span>Reactivar</span>
+                  </button>
                   <Link 
                     href={`/teacher/assignments/${a.id}`} 
                     className="flex-1 inline-flex items-center justify-center bg-gray-50 hover:bg-blue-50 text-blue-600 font-semibold py-2.5 rounded-lg border border-transparent group-hover:border-blue-200 transition-colors text-sm"
@@ -157,6 +172,19 @@ function TeacherDashboard() {
           examId={selectedAudioAssignment.examId}
           examTitle={selectedAudioAssignment.title}
           questionCount={30}
+        />
+      )}
+
+      {/* Modal Reactivar Curso */}
+      {selectedReactivateAssignment && (
+        <ReactivateCourseModal
+          isOpen={Boolean(selectedReactivateAssignment)}
+          onClose={() => setSelectedReactivateAssignment(null)}
+          assignmentId={selectedReactivateAssignment.id}
+          currentClosesAt={selectedReactivateAssignment.closesAt}
+          examTitle={selectedReactivateAssignment.title}
+          courseName={selectedReactivateAssignment.courseName}
+          onSuccess={loadAssignments}
         />
       )}
     </div>

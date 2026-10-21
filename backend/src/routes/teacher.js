@@ -309,6 +309,9 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         state,
         startedAt,
         submittedAt,
+        extendedDeadline: sub?.extendedDeadline || null,
+        reactivatedAt: sub?.reactivatedAt || null,
+        isExtended: Boolean(sub?.extendedDeadline && new Date(sub.extendedDeadline) > new Date()),
         answersCount: sub ? sub._count.answers : 0,
         grade: sub?.grade || null,
         percent: sub?.percent ?? null,
@@ -325,6 +328,10 @@ router.get('/assignments/:id/live', async (req, res, next) => {
     res.json({
       assignment: {
         id: assignment.id,
+        opensAt: assignment.opensAt,
+        closesAt: assignment.closesAt,
+        status: assignment.status,
+        durationMinutes: assignment.exam?.durationMinutes || null,
         applicationMode: assignment.applicationMode || 'DIGITAL'
       },
       applicationMode: assignment.applicationMode || 'DIGITAL',
@@ -2071,6 +2078,203 @@ router.patch('/assignments/:id/mode', async (req, res, next) => {
       }
     });
     res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==========================================
+// Reactivación de Evaluaciones / Ensayos
+// ==========================================
+
+/**
+ * Reactivar evaluación para todo el curso (o solo alumnos pendientes)
+ * POST /api/teacher/assignments/:id/reactivate
+ */
+router.post('/assignments/:id/reactivate', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+    const { closesAt, scope = 'PENDING_ONLY', resetMode = 'KEEP_ANSWERS' } = req.body;
+
+    if (!closesAt) {
+      return res.status(400).json({ error: 'Debes especificar la nueva fecha y hora de cierre' });
+    }
+
+    const newClosesAt = new Date(closesAt);
+    if (isNaN(newClosesAt.getTime())) {
+      return res.status(400).json({ error: 'Fecha y hora de cierre inválida' });
+    }
+
+    const now = new Date();
+    if (newClosesAt <= now) {
+      return res.status(400).json({ error: 'La nueva fecha de cierre debe ser en el futuro' });
+    }
+
+    // 1. Actualizar ventana de la evaluación
+    const updateData = {
+      closesAt: newClosesAt,
+      status: 'ONGOING',
+    };
+    if (new Date(assignment.opensAt) > now) {
+      updateData.opensAt = now;
+    }
+
+    const updatedAssignment = await prisma.examAssignment.update({
+      where: { id },
+      data: updateData,
+      include: { exam: true, course: true }
+    });
+
+    let affectedSubmissions = 0;
+
+    // 2. Si se solicitó reabrir también las entregas ya enviadas (SUBMITTED)
+    if (scope === 'ALL_STUDENTS') {
+      const submitted = await prisma.submission.findMany({
+        where: { assignmentId: id, status: 'SUBMITTED' }
+      });
+
+      for (const sub of submitted) {
+        if (resetMode === 'CLEAR_ANSWERS') {
+          await prisma.submissionAnswer.deleteMany({
+            where: { submissionId: sub.id }
+          });
+        } else {
+          await prisma.submissionAnswer.updateMany({
+            where: { submissionId: sub.id },
+            data: { isCorrect: null }
+          });
+        }
+
+        await prisma.submission.update({
+          where: { id: sub.id },
+          data: {
+            status: 'IN_PROGRESS',
+            submittedAt: null,
+            autoSubmitted: false,
+            reactivatedAt: now,
+            startedAt: new Date(0), // se reiniciará cuando el alumno ingrese a /start
+            extendedDeadline: null,
+            grade: null,
+            percent: null,
+            correctCount: null,
+            simceScore: null,
+            achievementLevel: null,
+            theta: null,
+            seTheta: null
+          }
+        });
+        affectedSubmissions++;
+      }
+    }
+
+    // 3. Para cualquier alumno con intento IN_PROGRESS existente: actualizar reactivatedAt
+    await prisma.submission.updateMany({
+      where: { assignmentId: id, status: 'IN_PROGRESS' },
+      data: {
+        reactivatedAt: now,
+        startedAt: new Date(0),
+        extendedDeadline: null
+      }
+    });
+
+    res.json({
+      message: 'Evaluación reactivada con éxito para el curso',
+      assignment: updatedAssignment,
+      affectedSubmissions
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Reactivar evaluación para un estudiante específico (con plazo individual)
+ * POST /api/teacher/assignments/:id/students/:rut/reactivate
+ */
+router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const rut = req.params.rut;
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+    const { deadline, resetMode = 'KEEP_ANSWERS' } = req.body;
+
+    if (!deadline) {
+      return res.status(400).json({ error: 'Debes especificar el plazo para el estudiante' });
+    }
+
+    const newDeadline = new Date(deadline);
+    if (isNaN(newDeadline.getTime())) {
+      return res.status(400).json({ error: 'Fecha límite individual inválida' });
+    }
+
+    const now = new Date();
+    if (newDeadline <= now) {
+      return res.status(400).json({ error: 'El plazo debe ser posterior a la hora actual' });
+    }
+
+    const student = await prisma.user.findFirst({
+      where: { rut, courseId: assignment.courseId, role: 'STUDENT' }
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'Estudiante no encontrado en el curso de esta evaluación' });
+    }
+
+    let submission = await prisma.submission.findUnique({
+      where: { studentRut_assignmentId: { studentRut: rut, assignmentId: id } }
+    });
+
+    if (!submission) {
+      // Caso 1: Estudiante ausente o que no había iniciado intento
+      submission = await prisma.submission.create({
+        data: {
+          studentRut: rut,
+          assignmentId: id,
+          status: 'IN_PROGRESS',
+          startedAt: new Date(0),
+          reactivatedAt: now,
+          extendedDeadline: newDeadline,
+          autoSubmitted: false
+        }
+      });
+    } else {
+      // Caso 2: Estudiante que ya había entregado o tenía intento expirado
+      if (resetMode === 'CLEAR_ANSWERS') {
+        await prisma.submissionAnswer.deleteMany({
+          where: { submissionId: submission.id }
+        });
+      } else {
+        await prisma.submissionAnswer.updateMany({
+          where: { submissionId: submission.id },
+          data: { isCorrect: null }
+        });
+      }
+
+      submission = await prisma.submission.update({
+        where: { id: submission.id },
+        data: {
+          status: 'IN_PROGRESS',
+          submittedAt: null,
+          autoSubmitted: false,
+          reactivatedAt: now,
+          startedAt: new Date(0),
+          extendedDeadline: newDeadline,
+          grade: null,
+          percent: null,
+          correctCount: null,
+          simceScore: null,
+          achievementLevel: null,
+          theta: null,
+          seTheta: null
+        }
+      });
+    }
+
+    res.json({
+      message: `Evaluación reactivada exitosamente para ${student.name}`,
+      student: { rut: student.rut, name: student.name },
+      extendedDeadline: newDeadline
+    });
   } catch (error) {
     next(error);
   }
