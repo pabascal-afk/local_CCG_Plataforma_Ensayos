@@ -123,6 +123,8 @@ model Submission {
   startedAt        DateTime           @default(now())
   submittedAt      DateTime?
   autoSubmitted    Boolean            @default(false)
+  extendedDeadline DateTime?          // Plazo individual de extensión o reactivación
+  reactivatedAt    DateTime?          // Marca temporal de reactivación para reiniciar timer al reingreso
   correctCount     Int?
   percent          Float?
   grade            Float?

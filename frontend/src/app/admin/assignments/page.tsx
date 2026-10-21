@@ -8,7 +8,7 @@ import {
   Timer, KeyRound, RotateCcw, Sparkles, CheckCircle2, ChevronRight,
   ShieldCheck, AlertTriangle, Layers, Copy, Inbox, CheckSquare,
   XCircle, MessageSquare, AlertCircle, Bot, ChevronDown, ChevronUp,
-  Printer, ScanLine, FileText, Monitor, Laptop
+  Printer, ScanLine, FileText, Monitor, Laptop, Zap
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -19,6 +19,7 @@ import { useSchoolYear } from "@/context/SchoolYearContext";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 import AiPromptModal, { AiPromptMode } from "@/components/AiPromptModal";
 import OmrScannerModal from "@/components/OmrScannerModal";
+import ReactivateCourseModal from "@/components/ReactivateCourseModal";
 
 type Exam = { 
   id: number; 
@@ -221,6 +222,7 @@ export default function AssignmentsDashboard() {
 
   // Escaneo OMR directo y Cambio de Modalidad con Confirmación
   const [omrScanAssignmentId, setOmrScanAssignmentId] = useState<number | null>(null);
+  const [selectedReactivateAssignment, setSelectedReactivateAssignment] = useState<Assignment | null>(null);
   const [modeChangeTarget, setModeChangeTarget] = useState<{
     assignment: Assignment;
     newMode: "DIGITAL" | "PRINTED";
@@ -2122,13 +2124,23 @@ export default function AssignmentsDashboard() {
                                   </button>
                                 )}
                               </div>
-                              <button 
-                                onClick={() => handleDelete(a.id)} 
-                                className="text-gray-400 hover:text-rose-600 p-0.5 rounded transition"
-                                title="Eliminar asignación"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex items-center gap-1">
+                                <button 
+                                  type="button"
+                                  onClick={() => setSelectedReactivateAssignment(a)} 
+                                  className="text-gray-400 hover:text-amber-600 p-0.5 rounded transition cursor-pointer"
+                                  title="Reactivar evaluación o extender plazo para este curso"
+                                >
+                                  <Zap className="w-3.5 h-3.5" />
+                                </button>
+                                <button 
+                                  onClick={() => handleDelete(a.id)} 
+                                  className="text-gray-400 hover:text-rose-600 p-0.5 rounded transition cursor-pointer"
+                                  title="Eliminar asignación"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                             
                             <h4 className="font-bold text-gray-900 text-xs leading-snug mb-1" title={a.Exam?.title}>
@@ -2551,6 +2563,15 @@ export default function AssignmentsDashboard() {
                                     <Printer className="w-3.5 h-3.5 text-indigo-600" />
                                     Imprimir Hojas (PDF)
                                   </Link>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedReactivateAssignment(a)}
+                                    className="text-[11px] font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                                    title="Reactivar evaluación o extender plazo para este curso"
+                                  >
+                                    <Zap className="w-3.5 h-3.5 text-amber-600 fill-current" />
+                                    Reactivar
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => setOmrScanAssignmentId(a.id)}
@@ -3289,6 +3310,20 @@ export default function AssignmentsDashboard() {
                 loadData();
                 setOmrScanAssignmentId(null);
               }}
+            />
+          )}
+
+          {/* Modal Reactivar Asignación para Administradores */}
+          {selectedReactivateAssignment !== null && (
+            <ReactivateCourseModal
+              isOpen={Boolean(selectedReactivateAssignment)}
+              onClose={() => setSelectedReactivateAssignment(null)}
+              assignmentId={selectedReactivateAssignment.id}
+              currentClosesAt={selectedReactivateAssignment.closesAt}
+              examTitle={selectedReactivateAssignment.Exam?.title}
+              courseName={formatCourseName(selectedReactivateAssignment.Course)}
+              onSuccess={loadData}
+              apiEndpointPrefix="/admin"
             />
           )}
 

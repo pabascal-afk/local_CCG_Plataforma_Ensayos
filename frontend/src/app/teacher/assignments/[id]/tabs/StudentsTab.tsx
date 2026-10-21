@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/session";
 import Link from "next/link";
-import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check, PenTool } from "lucide-react";
+import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check, PenTool, Zap } from "lucide-react";
 import OmrScannerModal from "@/components/OmrScannerModal";
 import FastDigitizerModal from "@/components/FastDigitizerModal";
 import OpenQuestionsGradingModal from "@/components/OpenQuestionsGradingModal";
+import ReactivateCourseModal from "@/components/ReactivateCourseModal";
+import ReactivateStudentModal from "@/components/ReactivateStudentModal";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function StudentsTab({ id }: { id: number }) {
@@ -20,6 +22,8 @@ export default function StudentsTab({ id }: { id: number }) {
   const [selectedGradingRut, setSelectedGradingRut] = useState<string | null>(null);
   const [showModeConfirmModal, setShowModeConfirmModal] = useState(false);
   const [isUpdatingMode, setIsUpdatingMode] = useState(false);
+  const [showReactivateCourseModal, setShowReactivateCourseModal] = useState(false);
+  const [selectedReactivateStudent, setSelectedReactivateStudent] = useState<any>(null);
 
   const handleDownloadTemplate = async () => {
     try {
@@ -244,6 +248,16 @@ export default function StudentsTab({ id }: { id: number }) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Botón Reactivar Curso */}
+            <button
+              type="button"
+              onClick={() => setShowReactivateCourseModal(true)}
+              className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 px-3.5 py-2.5 rounded-xl text-xs font-black shadow transition cursor-pointer"
+              title="Reactivar evaluación para el curso completo o extender el plazo"
+            >
+              <Zap className="w-4 h-4 fill-current" /> Reactivar Evaluación
+            </button>
+
             {/* Botón Imprimir Hojas */}
             <Link
               href={`/teacher/assignments/${id}/print-sheets`}
@@ -393,7 +407,15 @@ export default function StudentsTab({ id }: { id: number }) {
                      <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">Insuficiente</span>}
                   </td>
                   <td className="p-4 text-gray-500 text-xs">{new Date(st.submittedAt).toLocaleString()}</td>
-                  <td className="p-4 text-right">
+                  <td className="p-4 text-right whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedReactivateStudent(st)}
+                      className="inline-flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-lg text-xs font-bold transition mr-2 cursor-pointer shadow-2xs"
+                      title="Reactivar intento para este alumno (conservar o reiniciar respuestas)"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-600 fill-current" /> Reactivar
+                    </button>
                     <Link href={`/teacher/students/${st.rut}`} className="inline-flex items-center text-blue-600 hover:underline font-medium text-xs">
                       Ver Ficha <ChevronRight className="w-4 h-4" />
                     </Link>
@@ -413,13 +435,13 @@ export default function StudentsTab({ id }: { id: number }) {
               <th className="p-4">RUT</th>
               <th className="p-4">Nombre</th>
               <th className="p-4">Estado</th>
-              {hasOpenQuestions && <th className="p-4 text-right">Acción</th>}
+              <th className="p-4 text-right">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {pending.length === 0 && (
               <tr>
-                <td colSpan={hasOpenQuestions ? 4 : 3} className="p-4 text-center text-gray-500">
+                <td colSpan={4} className="p-4 text-center text-gray-500">
                   Todos han entregado.
                 </td>
               </tr>
@@ -427,12 +449,32 @@ export default function StudentsTab({ id }: { id: number }) {
             {pending.map((st: any) => (
               <tr key={st.rut} className="hover:bg-gray-50 text-gray-500">
                 <td className="p-4 font-mono">{st.rut}</td>
-                <td className="p-4">{st.name}</td>
                 <td className="p-4">
-                  {st.state === "NOT_STARTED" ? "Sin comenzar" : `En curso (${st.answersCount} resp.)`}
+                  <span className="font-bold text-gray-800 block">{st.name}</span>
+                  {st.isExtended && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md mt-0.5">
+                      <Zap className="w-3 h-3 text-indigo-600 fill-current" />
+                      Plazo individual: {new Date(st.extendedDeadline).toLocaleDateString([], { day: "2-digit", month: "short" })} {new Date(st.extendedDeadline).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  )}
                 </td>
-                {hasOpenQuestions && (
-                  <td className="p-4 text-right">
+                <td className="p-4">
+                  {st.state === "NOT_STARTED" ? (
+                    <span className="text-gray-500">Sin comenzar</span>
+                  ) : (
+                    <span className="text-amber-700 font-semibold">En curso ({st.answersCount} resp.)</span>
+                  )}
+                </td>
+                <td className="p-4 text-right whitespace-nowrap space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedReactivateStudent(st)}
+                    className="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs"
+                    title="Otorgar plazo individual a este alumno"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-blue-600 fill-current" /> Habilitar Plazo
+                  </button>
+                  {hasOpenQuestions && (
                     <button
                       type="button"
                       onClick={() => {
@@ -441,15 +483,36 @@ export default function StudentsTab({ id }: { id: number }) {
                       }}
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition"
                     >
-                      <PenTool className="w-3 h-3" /> Ingresar Puntaje Desarrollo / Oral
+                      <PenTool className="w-3 h-3" /> Puntaje Desarrollo
                     </button>
-                  </td>
-                )}
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* Modal Reactivar Curso */}
+      <ReactivateCourseModal
+        isOpen={showReactivateCourseModal}
+        onClose={() => setShowReactivateCourseModal(false)}
+        assignmentId={id}
+        currentClosesAt={data?.assignment?.closesAt}
+        examTitle={data?.exam?.title}
+        courseName={data?.course?.fullName}
+        onSuccess={refreshData}
+      />
+
+      {/* Modal Reactivar Estudiante */}
+      <ReactivateStudentModal
+        isOpen={Boolean(selectedReactivateStudent)}
+        onClose={() => setSelectedReactivateStudent(null)}
+        assignmentId={id}
+        student={selectedReactivateStudent}
+        examDurationMinutes={data?.assignment?.durationMinutes}
+        onSuccess={refreshData}
+      />
     </div>
   );
 }

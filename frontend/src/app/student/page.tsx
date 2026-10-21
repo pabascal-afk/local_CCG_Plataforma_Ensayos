@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Clock, CheckCircle2, PlayCircle, Lock, Award, AlertCircle, CalendarClock, FileText } from "lucide-react";
+import { Clock, CheckCircle2, PlayCircle, Lock, Award, AlertCircle, CalendarClock, FileText, Zap } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -16,6 +16,7 @@ interface StudentAssignment {
   state: State;
   applicationMode?: "DIGITAL" | "PRINTED";
   submissionId: number | null;
+  isExtended?: boolean;
   exam: { title: string; subject: string; durationMinutes: number | null; questionCount: number };
 }
 
@@ -124,9 +125,17 @@ function StudentDashboard() {
                     {a.exam.durationMinutes ? ` · ${a.exam.durationMinutes} minutos` : ""} · Disponible del{" "}
                     {fmt(a.opensAt)} al {fmt(a.closesAt)}
                   </p>
-                  <span className={`inline-flex items-center mt-3 px-2.5 py-1 rounded-full text-xs font-medium ${badge.cls}`}>
-                    <Icon className="w-3.5 h-3.5 mr-1" /> {badge.label}
-                  </span>
+                  <div className="flex items-center gap-2 mt-3 flex-wrap">
+                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${badge.cls}`}>
+                      <Icon className="w-3.5 h-3.5 mr-1" /> {badge.label}
+                    </span>
+                    {a.isExtended && (
+                      <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-full text-xs font-extrabold shadow-2xs">
+                        <Zap className="w-3 h-3 text-amber-600 fill-current" />
+                        Plazo individual hasta el {fmt(a.closesAt)}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {(a.state === "AVAILABLE" || a.state === "IN_PROGRESS") && (

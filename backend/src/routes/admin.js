@@ -2646,6 +2646,195 @@ router.patch('/assignments/:id/cancel', checkAdmin, async (req, res, next) => {
   }
 });
 
+// Reactivar asignación para el curso completo o alumnos pendientes
+router.post('/assignments/:id/reactivate', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { closesAt, scope = 'PENDING_ONLY', resetMode = 'KEEP_ANSWERS' } = req.body;
+
+    if (!closesAt) {
+      return res.status(400).json({ error: 'Debes especificar la nueva fecha y hora de cierre' });
+    }
+
+    const newClosesAt = new Date(closesAt);
+    if (isNaN(newClosesAt.getTime())) {
+      return res.status(400).json({ error: 'Fecha y hora de cierre inválida' });
+    }
+
+    const now = new Date();
+    if (newClosesAt <= now) {
+      return res.status(400).json({ error: 'La nueva fecha de cierre debe ser en el futuro' });
+    }
+
+    const current = await prisma.examAssignment.findUnique({ where: { id } });
+    if (!current) return res.status(404).json({ error: 'Asignación no encontrada' });
+
+    const updateData = {
+      closesAt: newClosesAt,
+      status: 'ONGOING',
+    };
+    if (new Date(current.opensAt) > now) {
+      updateData.opensAt = now;
+    }
+
+    const updated = await prisma.examAssignment.update({
+      where: { id },
+      data: updateData,
+      include: {
+        exam: true,
+        course: true,
+        assignedTeacher: { select: { name: true, rut: true } }
+      }
+    });
+
+    let affectedSubmissions = 0;
+    if (scope === 'ALL_STUDENTS') {
+      const submitted = await prisma.submission.findMany({
+        where: { assignmentId: id, status: 'SUBMITTED' }
+      });
+
+      for (const sub of submitted) {
+        if (resetMode === 'CLEAR_ANSWERS') {
+          await prisma.submissionAnswer.deleteMany({
+            where: { submissionId: sub.id }
+          });
+        } else {
+          await prisma.submissionAnswer.updateMany({
+            where: { submissionId: sub.id },
+            data: { isCorrect: null }
+          });
+        }
+
+        await prisma.submission.update({
+          where: { id: sub.id },
+          data: {
+            status: 'IN_PROGRESS',
+            submittedAt: null,
+            autoSubmitted: false,
+            reactivatedAt: now,
+            startedAt: new Date(0),
+            extendedDeadline: null,
+            grade: null,
+            percent: null,
+            correctCount: null,
+            simceScore: null,
+            achievementLevel: null,
+            theta: null,
+            seTheta: null
+          }
+        });
+        affectedSubmissions++;
+      }
+    }
+
+    await prisma.submission.updateMany({
+      where: { assignmentId: id, status: 'IN_PROGRESS' },
+      data: {
+        reactivatedAt: now,
+        startedAt: new Date(0),
+        extendedDeadline: null
+      }
+    });
+
+    res.json({
+      message: 'Evaluación reactivada con éxito',
+      assignment: updated,
+      affectedSubmissions
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Reactivar evaluación para un estudiante específico (con plazo individual)
+router.post('/assignments/:id/students/:rut/reactivate', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const rut = req.params.rut;
+    const { deadline, resetMode = 'KEEP_ANSWERS' } = req.body;
+
+    if (!deadline) {
+      return res.status(400).json({ error: 'Debes especificar el plazo para el estudiante' });
+    }
+
+    const newDeadline = new Date(deadline);
+    if (isNaN(newDeadline.getTime())) {
+      return res.status(400).json({ error: 'Fecha límite individual inválida' });
+    }
+
+    const now = new Date();
+    if (newDeadline <= now) {
+      return res.status(400).json({ error: 'El plazo debe ser posterior a la hora actual' });
+    }
+
+    const assignment = await prisma.examAssignment.findUnique({ where: { id } });
+    if (!assignment) return res.status(404).json({ error: 'Asignación no encontrada' });
+
+    const student = await prisma.user.findFirst({
+      where: { rut, courseId: assignment.courseId, role: 'STUDENT' }
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'Estudiante no encontrado en el curso de esta evaluación' });
+    }
+
+    let submission = await prisma.submission.findUnique({
+      where: { studentRut_assignmentId: { studentRut: rut, assignmentId: id } }
+    });
+
+    if (!submission) {
+      submission = await prisma.submission.create({
+        data: {
+          studentRut: rut,
+          assignmentId: id,
+          status: 'IN_PROGRESS',
+          startedAt: new Date(0),
+          reactivatedAt: now,
+          extendedDeadline: newDeadline,
+          autoSubmitted: false
+        }
+      });
+    } else {
+      if (resetMode === 'CLEAR_ANSWERS') {
+        await prisma.submissionAnswer.deleteMany({
+          where: { submissionId: submission.id }
+        });
+      } else {
+        await prisma.submissionAnswer.updateMany({
+          where: { submissionId: submission.id },
+          data: { isCorrect: null }
+        });
+      }
+
+      submission = await prisma.submission.update({
+        where: { id: submission.id },
+        data: {
+          status: 'IN_PROGRESS',
+          submittedAt: null,
+          autoSubmitted: false,
+          reactivatedAt: now,
+          startedAt: new Date(0),
+          extendedDeadline: newDeadline,
+          grade: null,
+          percent: null,
+          correctCount: null,
+          simceScore: null,
+          achievementLevel: null,
+          theta: null,
+          seTheta: null
+        }
+      });
+    }
+
+    res.json({
+      message: `Evaluación reactivada exitosamente para ${student.name}`,
+      student: { rut: student.rut, name: student.name },
+      extendedDeadline: newDeadline
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // =======================
 // HITOS OFICIALES SIMCE
 // =======================
