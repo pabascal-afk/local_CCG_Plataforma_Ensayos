@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/session";
 import Link from "next/link";
-import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check, PenTool, Zap } from "lucide-react";
+import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check, PenTool, Zap, CheckSquare, Square } from "lucide-react";
 import OmrScannerModal from "@/components/OmrScannerModal";
 import FastDigitizerModal from "@/components/FastDigitizerModal";
 import OpenQuestionsGradingModal from "@/components/OpenQuestionsGradingModal";
 import ReactivateCourseModal from "@/components/ReactivateCourseModal";
 import ReactivateStudentModal from "@/components/ReactivateStudentModal";
+import ReactivateBulkStudentsModal from "@/components/ReactivateBulkStudentsModal";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function StudentsTab({ id }: { id: number }) {
@@ -24,6 +25,8 @@ export default function StudentsTab({ id }: { id: number }) {
   const [isUpdatingMode, setIsUpdatingMode] = useState(false);
   const [showReactivateCourseModal, setShowReactivateCourseModal] = useState(false);
   const [selectedReactivateStudent, setSelectedReactivateStudent] = useState<any>(null);
+  const [selectedRuts, setSelectedRuts] = useState<string[]>([]);
+  const [showBulkReactivateModal, setShowBulkReactivateModal] = useState(false);
 
   const handleDownloadTemplate = async () => {
     try {
@@ -115,6 +118,17 @@ export default function StudentsTab({ id }: { id: number }) {
   const pending = data.students.filter((s: any) => s.state !== "SUBMITTED");
   const openQuestions = data.openQuestions || [];
   const hasOpenQuestions = openQuestions.length > 0;
+
+  const selectedStudentObjects = useMemo(() => {
+    if (!data?.students) return [];
+    return data.students
+      .filter((s: any) => selectedRuts.includes(s.rut))
+      .map((s: any) => ({ rut: s.rut, name: s.name }));
+  }, [data?.students, selectedRuts]);
+
+  const toggleSelectRut = (rut: string) => {
+    setSelectedRuts(prev => prev.includes(rut) ? prev.filter(r => r !== rut) : [...prev, rut]);
+  };
 
   return (
     <div>
@@ -341,11 +355,73 @@ export default function StudentsTab({ id }: { id: number }) {
         </div>
       </div>
 
+      {/* Barra de Selección Rápida Masiva */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 p-3 bg-gray-50 border border-gray-200 rounded-xl">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Selección Masiva:</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedRuts.length === data.students.length) {
+                setSelectedRuts([]);
+              } else {
+                setSelectedRuts(data.students.map((s: any) => s.rut));
+              }
+            }}
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-gray-200 bg-white hover:bg-gray-100 text-gray-700 transition"
+          >
+            {selectedRuts.length === data.students.length ? "Deseleccionar Todos" : `Seleccionar Todos (${data.students.length})`}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedRuts(pending.map((s: any) => s.rut))}
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-900 transition"
+          >
+            Solo Pendientes / Ausentes ({pending.length})
+          </button>
+          {selectedRuts.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedRuts([])}
+              className="text-xs text-gray-500 hover:text-gray-800 underline px-1"
+            >
+              Limpiar ({selectedRuts.length})
+            </button>
+          )}
+        </div>
+
+        {selectedRuts.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowBulkReactivateModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition"
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-300" /> Reactivar Seleccionados ({selectedRuts.length})
+          </button>
+        )}
+      </div>
+
       <h3 className="text-lg font-bold text-gray-800 mb-4">Estudiantes que Entregaron ({students.length})</h3>
       <div className="overflow-x-auto border rounded-lg mb-8">
         <table className="w-full text-sm text-left">
           <thead className="bg-gray-50 text-gray-600 font-semibold border-b">
             <tr>
+              <th className="p-4 w-10 text-center">
+                <input
+                  type="checkbox"
+                  checked={students.length > 0 && students.every((s: any) => selectedRuts.includes(s.rut))}
+                  onChange={() => {
+                    const allSubmittedRuts: string[] = students.map((s: any) => String(s.rut));
+                    const allSelected = allSubmittedRuts.every((r: string) => selectedRuts.includes(r));
+                    if (allSelected) {
+                      setSelectedRuts(prev => prev.filter((r: string) => !allSubmittedRuts.includes(r)));
+                    } else {
+                      setSelectedRuts(prev => Array.from(new Set([...prev, ...allSubmittedRuts])));
+                    }
+                  }}
+                  className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                />
+              </th>
               <th className="p-4">RUT</th>
               <th className="p-4">Nombre</th>
               <th className="p-4 text-center">Nota</th>
@@ -359,7 +435,7 @@ export default function StudentsTab({ id }: { id: number }) {
           <tbody className="divide-y">
             {students.length === 0 && (
               <tr>
-                <td colSpan={hasOpenQuestions ? 8 : 7} className="p-4 text-center text-gray-500">
+                <td colSpan={hasOpenQuestions ? 9 : 8} className="p-4 text-center text-gray-500">
                   Nadie ha entregado aún.
                 </td>
               </tr>
@@ -369,9 +445,18 @@ export default function StudentsTab({ id }: { id: number }) {
               const level = st.achievementLevel || (g >= 6.0 ? "ADECUADO" : g >= 4.0 ? "ELEMENTAL" : "INSUFICIENTE");
               const openGraded = st.openGradedCount || 0;
               const openTotal = openQuestions.length;
+              const isSelected = selectedRuts.includes(st.rut);
 
               return (
-                <tr key={st.rut} className="hover:bg-gray-50">
+                <tr key={st.rut} className={`hover:bg-gray-50 ${isSelected ? "bg-blue-50/40" : ""}`}>
+                  <td className="p-4 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelectRut(st.rut)}
+                      className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                    />
+                  </td>
                   <td className="p-4 font-mono text-gray-600">{st.rut}</td>
                   <td className="p-4 font-bold text-gray-900">{st.name}</td>
                   <td className="p-4 text-center font-bold text-blue-600">{g.toFixed(1)}</td>
@@ -432,6 +517,22 @@ export default function StudentsTab({ id }: { id: number }) {
         <table className="w-full text-sm text-left">
           <thead className="bg-gray-50 text-gray-600 font-semibold border-b">
             <tr>
+              <th className="p-4 w-10 text-center">
+                <input
+                  type="checkbox"
+                  checked={pending.length > 0 && pending.every((s: any) => selectedRuts.includes(s.rut))}
+                  onChange={() => {
+                    const allPendingRuts: string[] = pending.map((s: any) => String(s.rut));
+                    const allSelected = allPendingRuts.every((r: string) => selectedRuts.includes(r));
+                    if (allSelected) {
+                      setSelectedRuts(prev => prev.filter((r: string) => !allPendingRuts.includes(r)));
+                    } else {
+                      setSelectedRuts(prev => Array.from(new Set([...prev, ...allPendingRuts])));
+                    }
+                  }}
+                  className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                />
+              </th>
               <th className="p-4">RUT</th>
               <th className="p-4">Nombre</th>
               <th className="p-4">Estado</th>
@@ -441,57 +542,93 @@ export default function StudentsTab({ id }: { id: number }) {
           <tbody className="divide-y">
             {pending.length === 0 && (
               <tr>
-                <td colSpan={4} className="p-4 text-center text-gray-500">
+                <td colSpan={5} className="p-4 text-center text-gray-500">
                   Todos han entregado.
                 </td>
               </tr>
             )}
-            {pending.map((st: any) => (
-              <tr key={st.rut} className="hover:bg-gray-50 text-gray-500">
-                <td className="p-4 font-mono">{st.rut}</td>
-                <td className="p-4">
-                  <span className="font-bold text-gray-800 block">{st.name}</span>
-                  {st.isExtended && (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md mt-0.5">
-                      <Zap className="w-3 h-3 text-indigo-600 fill-current" />
-                      Plazo individual: {new Date(st.extendedDeadline).toLocaleDateString([], { day: "2-digit", month: "short" })} {new Date(st.extendedDeadline).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                  )}
-                </td>
-                <td className="p-4">
-                  {st.state === "NOT_STARTED" ? (
-                    <span className="text-gray-500">Sin comenzar</span>
-                  ) : (
-                    <span className="text-amber-700 font-semibold">En curso ({st.answersCount} resp.)</span>
-                  )}
-                </td>
-                <td className="p-4 text-right whitespace-nowrap space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedReactivateStudent(st)}
-                    className="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs"
-                    title="Otorgar plazo individual a este alumno"
-                  >
-                    <Zap className="w-3.5 h-3.5 text-blue-600 fill-current" /> Habilitar Plazo
-                  </button>
-                  {hasOpenQuestions && (
+            {pending.map((st: any) => {
+              const isSelected = selectedRuts.includes(st.rut);
+              return (
+                <tr key={st.rut} className={`hover:bg-gray-50 text-gray-500 ${isSelected ? "bg-blue-50/40" : ""}`}>
+                  <td className="p-4 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelectRut(st.rut)}
+                      className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                    />
+                  </td>
+                  <td className="p-4 font-mono">{st.rut}</td>
+                  <td className="p-4">
+                    <span className="font-bold text-gray-800 block">{st.name}</span>
+                    {st.isExtended && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md mt-0.5">
+                        <Zap className="w-3 h-3 text-indigo-600 fill-current" />
+                        Plazo individual: {new Date(st.extendedDeadline).toLocaleDateString([], { day: "2-digit", month: "short" })} {new Date(st.extendedDeadline).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-4">
+                    {st.state === "NOT_STARTED" ? (
+                      <span className="text-gray-500">Sin comenzar</span>
+                    ) : (
+                      <span className="text-amber-700 font-semibold">En curso ({st.answersCount} resp.)</span>
+                    )}
+                  </td>
+                  <td className="p-4 text-right whitespace-nowrap space-x-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setSelectedGradingRut(st.rut);
-                        setShowOpenGradingModal(true);
-                      }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition"
+                      onClick={() => setSelectedReactivateStudent(st)}
+                      className="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs"
+                      title="Otorgar plazo individual a este alumno"
                     >
-                      <PenTool className="w-3 h-3" /> Puntaje Desarrollo
+                      <Zap className="w-3.5 h-3.5 text-blue-600 fill-current" /> Habilitar Plazo
                     </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+                    {hasOpenQuestions && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedGradingRut(st.rut);
+                          setShowOpenGradingModal(true);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition"
+                      >
+                        <PenTool className="w-3 h-3" /> Puntaje Desarrollo
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+
+      {/* Floating Selection Action Bar */}
+      {selectedRuts.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-gray-900/95 text-white backdrop-blur-md px-5 py-3 rounded-2xl shadow-2xl border border-gray-700 flex items-center gap-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="text-sm">
+            <span className="font-extrabold text-blue-400">{selectedRuts.length}</span> estudiante{selectedRuts.length > 1 ? "s" : ""} seleccionado{selectedRuts.length > 1 ? "s" : ""}
+          </div>
+          <div className="h-4 w-px bg-gray-700" />
+          <button
+            type="button"
+            onClick={() => setShowBulkReactivateModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+          >
+            <Zap className="w-4 h-4 text-amber-300 fill-current" />
+            Reactivar / Habilitar Plazo Masivo
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedRuts([])}
+            className="text-xs text-gray-400 hover:text-white transition px-2 py-1"
+          >
+            Limpiar
+          </button>
+        </div>
+      )}
 
       {/* Modal Reactivar Curso */}
       <ReactivateCourseModal
@@ -512,6 +649,18 @@ export default function StudentsTab({ id }: { id: number }) {
         student={selectedReactivateStudent}
         examDurationMinutes={data?.assignment?.durationMinutes}
         onSuccess={refreshData}
+      />
+
+      {/* Modal Reactivar Masivo */}
+      <ReactivateBulkStudentsModal
+        isOpen={showBulkReactivateModal}
+        onClose={() => setShowBulkReactivateModal(false)}
+        assignmentId={id}
+        selectedStudents={selectedStudentObjects}
+        onSuccess={() => {
+          setSelectedRuts([]);
+          refreshData();
+        }}
       />
     </div>
   );

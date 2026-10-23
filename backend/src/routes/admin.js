@@ -8,6 +8,7 @@ const bcrypt = require('bcryptjs');
 const exceljs = require('exceljs');
 const { normalizeRut } = require('../utils/rut');
 const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet');
+const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
 
 const router = express.Router();
 const uploadMemory = multer({ storage: multer.memoryStorage() });
@@ -2327,6 +2328,74 @@ router.post('/exams/:id/import-questions', checkAdmin, uploadMemory.single('file
 });
 
 // =======================
+// BLOQUES PEDAGÓGICOS DE CAMPANA ESCOLAR
+// =======================
+router.get('/bell-blocks', async (req, res, next) => {
+  try {
+    const blocks = await getSchoolBellBlocks();
+    res.json(blocks);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/bell-blocks', checkAdmin, async (req, res, next) => {
+  try {
+    const { name, startTime, endTime, orderIndex } = req.body;
+    if (!name || !startTime || !endTime) {
+      return res.status(400).json({ error: 'Nombre, hora de inicio y término son requeridos' });
+    }
+    const highest = await prisma.schoolBellBlock.findFirst({
+      orderBy: { orderIndex: 'desc' }
+    });
+    const nextOrder = orderIndex !== undefined ? parseInt(orderIndex, 10) : (highest ? highest.orderIndex + 1 : 1);
+
+    const block = await prisma.schoolBellBlock.create({
+      data: {
+        name: String(name).trim(),
+        startTime: String(startTime).trim(),
+        endTime: String(endTime).trim(),
+        orderIndex: nextOrder,
+        isActive: true
+      }
+    });
+    res.json(block);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/bell-blocks/:id', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { name, startTime, endTime, orderIndex, isActive } = req.body;
+    const block = await prisma.schoolBellBlock.update({
+      where: { id },
+      data: {
+        name: name !== undefined ? String(name).trim() : undefined,
+        startTime: startTime !== undefined ? String(startTime).trim() : undefined,
+        endTime: endTime !== undefined ? String(endTime).trim() : undefined,
+        orderIndex: orderIndex !== undefined ? parseInt(orderIndex, 10) : undefined,
+        isActive: isActive !== undefined ? Boolean(isActive) : undefined,
+      }
+    });
+    res.json(block);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/bell-blocks/:id', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    await prisma.schoolBellBlock.delete({ where: { id } });
+    res.json({ message: 'Bloque horario eliminado' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// =======================
 // ASIGNACIONES
 // =======================
 router.get('/assignments', async (req, res, next) => {
@@ -2376,6 +2445,17 @@ router.patch('/assignments/:id/dynamic-password', checkAdmin, async (req, res, n
         dynamicPasswordActive: Boolean(dynamicPasswordActive)
       }
     });
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'DYNAMIC_PASSWORD_CHANGED',
+      actor: req.user,
+      details: {
+        dynamicPasswordActive: assignment.dynamicPasswordActive,
+        hasPassword: Boolean(assignment.dynamicPassword)
+      }
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -2513,6 +2593,23 @@ router.post('/assignments', checkAdmin, async (req, res, next) => {
         assignedTeacher: { select: { name: true, rut: true } }
       }
     });
+
+    await logAssignmentAction({
+      assignmentId: assignment.id,
+      action: 'ASSIGNMENT_CREATED',
+      actor: req.user,
+      details: {
+        examTitle: assignment.exam?.title,
+        courseName: assignment.course ? `${assignment.course.level} ${assignment.course.letter}` : null,
+        opensAt: opensDate,
+        closesAt: closesDate,
+        durationMinutes: durationMinutes || assignment.exam?.durationMinutes || null,
+        applicationMode: assignment.applicationMode,
+        dynamicPasswordActive: assignment.dynamicPasswordActive
+      },
+      note: req.body.note || null
+    });
+
     res.json(assignment);
   } catch (error) {
     if (error.code === 'P2002') {
@@ -2544,6 +2641,14 @@ router.patch('/assignments/:id/mode', checkAdmin, async (req, res, next) => {
         assignedTeacher: { select: { name: true, rut: true } }
       }
     });
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'MODE_CHANGED',
+      actor: req.user,
+      details: { newMode: mode }
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -2560,6 +2665,17 @@ router.patch('/assignments/:id/teacher', checkAdmin, async (req, res, next) => {
       data: { assignedTeacherRut: assignedTeacherRut || null },
       include: { assignedTeacher: true }
     });
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'TEACHER_REASSIGNED',
+      actor: req.user,
+      details: {
+        assignedTeacherRut: assignedTeacherRut || null,
+        assignedTeacherName: assignment.assignedTeacher?.name || null
+      }
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -2580,6 +2696,14 @@ router.put('/assignments/:id', checkAdmin, async (req, res, next) => {
         course: true, assignedTeacher: { select: { name: true, rut: true } }
       }
     });
+
+    await logAssignmentAction({
+      assignmentId: assignment.id,
+      action: 'RESCHEDULED',
+      actor: req.user,
+      details: { opensAt, closesAt }
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -2618,6 +2742,21 @@ router.patch('/assignments/:id/reschedule', checkAdmin, async (req, res, next) =
         assignedTeacher: { select: { name: true, rut: true } }
       }
     });
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'RESCHEDULED',
+      actor: req.user,
+      details: {
+        previousOpensAt: current.opensAt,
+        previousClosesAt: current.closesAt,
+        opensAt,
+        closesAt,
+        reason: reason || null
+      },
+      note: reason || null
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -2640,6 +2779,18 @@ router.patch('/assignments/:id/cancel', checkAdmin, async (req, res, next) => {
         assignedTeacher: { select: { name: true, rut: true } }
       }
     });
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'STATUS_CHANGED',
+      actor: req.user,
+      details: {
+        status: 'CANCELLED',
+        reason: reason || 'Cancelado por administración'
+      },
+      note: reason || 'Cancelado por administración'
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -2736,6 +2887,20 @@ router.post('/assignments/:id/reactivate', checkAdmin, async (req, res, next) =>
       }
     });
 
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'COURSE_REACTIVATED',
+      actor: req.user,
+      details: {
+        previousClosesAt: current.closesAt,
+        newClosesAt,
+        scope,
+        resetMode,
+        affectedSubmissions
+      },
+      note: req.body.note || null
+    });
+
     res.json({
       message: 'Evaluación reactivada con éxito',
       assignment: updated,
@@ -2751,7 +2916,7 @@ router.post('/assignments/:id/students/:rut/reactivate', checkAdmin, async (req,
   try {
     const id = parseInt(req.params.id, 10);
     const rut = req.params.rut;
-    const { deadline, resetMode = 'KEEP_ANSWERS' } = req.body;
+    const { deadline, resetMode = 'KEEP_ANSWERS', note } = req.body;
 
     if (!deadline) {
       return res.status(400).json({ error: 'Debes especificar el plazo para el estudiante' });
@@ -2825,11 +2990,213 @@ router.post('/assignments/:id/students/:rut/reactivate', checkAdmin, async (req,
       });
     }
 
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'STUDENT_REACTIVATED',
+      actor: req.user,
+      targetStudent: { rut: student.rut, name: student.name },
+      details: {
+        deadline: newDeadline,
+        resetMode
+      },
+      note: note || null
+    });
+
     res.json({
       message: `Evaluación reactivada exitosamente para ${student.name}`,
       student: { rut: student.rut, name: student.name },
       extendedDeadline: newDeadline
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Prórroga rápida en caliente (+15m, +30m, etc.)
+ * PATCH /api/admin/assignments/:id/quick-extend
+ */
+router.patch('/assignments/:id/quick-extend', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const assignment = await prisma.examAssignment.findUnique({ where: { id } });
+    if (!assignment) return res.status(404).json({ error: 'Asignación no encontrada' });
+
+    const { minutes = 15, note } = req.body;
+    const mins = parseInt(minutes, 10);
+    if (isNaN(mins) || mins <= 0) {
+      return res.status(400).json({ error: 'Minutos inválidos para prórroga' });
+    }
+
+    const currentCloses = new Date(assignment.closesAt).getTime();
+    const baseTime = Math.max(currentCloses, Date.now());
+    const newClosesAt = new Date(baseTime + mins * 60000);
+
+    const updated = await prisma.examAssignment.update({
+      where: { id },
+      data: {
+        closesAt: newClosesAt,
+        status: 'ACTIVE'
+      },
+      include: { exam: true, course: true }
+    });
+
+    const now = new Date();
+    const activeExtendedSubs = await prisma.submission.findMany({
+      where: {
+        assignmentId: id,
+        extendedDeadline: { gt: now }
+      }
+    });
+
+    for (const sub of activeExtendedSubs) {
+      const extTime = new Date(sub.extendedDeadline).getTime();
+      await prisma.submission.update({
+        where: { id: sub.id },
+        data: {
+          extendedDeadline: new Date(extTime + mins * 60000)
+        }
+      });
+    }
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'TIME_EXTENDED',
+      actor: req.user,
+      details: {
+        minutesAdded: mins,
+        previousClosesAt: assignment.closesAt,
+        newClosesAt,
+        extendedStudentsCount: activeExtendedSubs.length
+      },
+      note: note || `Prórroga rápida de +${mins} minutos`
+    });
+
+    res.json({
+      message: `Plazo extendido en +${mins} minutos exitosamente`,
+      assignment: updated,
+      minutesAdded: mins,
+      newClosesAt
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Reactivación masiva de estudiantes
+ * POST /api/admin/assignments/:id/students/bulk-reactivate
+ */
+router.post('/assignments/:id/students/bulk-reactivate', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const assignment = await prisma.examAssignment.findUnique({ where: { id } });
+    if (!assignment) return res.status(404).json({ error: 'Asignación no encontrada' });
+
+    const { ruts, deadline, resetMode = 'KEEP_ANSWERS', note } = req.body;
+
+    if (!Array.isArray(ruts) || ruts.length === 0) {
+      return res.status(400).json({ error: 'Debes seleccionar al menos un estudiante.' });
+    }
+
+    if (!deadline) {
+      return res.status(400).json({ error: 'Debes especificar el plazo para los estudiantes.' });
+    }
+
+    const newDeadline = new Date(deadline);
+    if (isNaN(newDeadline.getTime())) {
+      return res.status(400).json({ error: 'Fecha límite individual inválida.' });
+    }
+
+    const now = new Date();
+    const affectedStudents = [];
+
+    for (const rawRut of ruts) {
+      const rut = normalizeRut(rawRut);
+      const student = await prisma.user.findFirst({
+        where: { rut, courseId: assignment.courseId, role: 'STUDENT' }
+      });
+
+      if (!student) continue;
+
+      const submission = await prisma.submission.findUnique({
+        where: { studentRut_assignmentId: { studentRut: rut, assignmentId: id } }
+      });
+
+      if (!submission) {
+        await prisma.submission.create({
+          data: {
+            studentRut: rut,
+            assignmentId: id,
+            status: 'IN_PROGRESS',
+            startedAt: new Date(0),
+            extendedDeadline: newDeadline,
+            reactivatedAt: now,
+            autoSubmitted: false
+          }
+        });
+      } else {
+        if (resetMode === 'CLEAR_ANSWERS') {
+          await prisma.submissionAnswer.deleteMany({
+            where: { submissionId: submission.id }
+          });
+        }
+
+        await prisma.submission.update({
+          where: { id: submission.id },
+          data: {
+            status: 'IN_PROGRESS',
+            submittedAt: null,
+            autoSubmitted: false,
+            reactivatedAt: now,
+            startedAt: new Date(0),
+            extendedDeadline: newDeadline,
+            grade: resetMode === 'CLEAR_ANSWERS' ? null : submission.grade,
+            percent: resetMode === 'CLEAR_ANSWERS' ? null : submission.percent,
+            correctCount: resetMode === 'CLEAR_ANSWERS' ? null : submission.correctCount,
+            simceScore: resetMode === 'CLEAR_ANSWERS' ? null : submission.simceScore,
+            achievementLevel: resetMode === 'CLEAR_ANSWERS' ? null : submission.achievementLevel,
+            theta: resetMode === 'CLEAR_ANSWERS' ? null : submission.theta,
+            seTheta: resetMode === 'CLEAR_ANSWERS' ? null : submission.seTheta
+          }
+        });
+      }
+
+      affectedStudents.push({ rut: student.rut, name: student.name });
+    }
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'STUDENT_BULK_REACTIVATED',
+      actor: req.user,
+      details: {
+        affectedCount: affectedStudents.length,
+        students: affectedStudents,
+        deadline: newDeadline,
+        resetMode
+      },
+      note: note || `Reactivación masiva para ${affectedStudents.length} estudiantes`
+    });
+
+    res.json({
+      message: `Se reactivó el plazo exitosamente para ${affectedStudents.length} estudiantes`,
+      affectedCount: affectedStudents.length,
+      affectedStudents
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Consulta de Logs de Auditoría
+ * GET /api/admin/assignments/:id/logs
+ */
+router.get('/assignments/:id/logs', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const logs = await getAssignmentLogs(id);
+    res.json(logs);
   } catch (error) {
     next(error);
   }
