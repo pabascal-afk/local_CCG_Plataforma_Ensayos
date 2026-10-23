@@ -20,7 +20,8 @@ import {
   Tv,
   Headphones,
   Scissors,
-  Zap
+  Zap,
+  History
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -40,6 +41,7 @@ import ItemsTab from "./tabs/ItemsTab";
 import StudentsTab from "./tabs/StudentsTab";
 import RemedialTab from "./tabs/RemedialTab";
 import EvolutionTab from "./tabs/EvolutionTab";
+import LogsTab from "./tabs/LogsTab";
 
 export default function TeacherAssignmentPage() {
   const { id } = useParams();
@@ -57,6 +59,22 @@ export default function TeacherAssignmentPage() {
   const [showAiModal, setShowAiModal] = useState(false);
   const [showAudioModal, setShowAudioModal] = useState(false);
   const [showReactivateModal, setShowReactivateModal] = useState(false);
+  const [extendingMinutes, setExtendingMinutes] = useState<number | null>(null);
+
+  const handleQuickExtend = async (minutes: number) => {
+    try {
+      setExtendingMinutes(minutes);
+      await apiFetch(`/teacher/assignments/${id}/quick-extend`, {
+        method: "PATCH",
+        body: { minutes, extendStudents: true }
+      });
+      loadBase();
+    } catch (e: any) {
+      alert(e.message || "Error al extender tiempo");
+    } finally {
+      setExtendingMinutes(null);
+    }
+  };
 
   const loadBase = () => {
     apiFetch(`/teacher/assignments`).then(data => {
@@ -73,6 +91,13 @@ export default function TeacherAssignmentPage() {
 
   useEffect(() => {
     loadBase();
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam) {
+        setActiveTab(tabParam);
+      }
+    }
   }, [id]);
 
   const handleRelease = async () => {
@@ -138,6 +163,7 @@ export default function TeacherAssignmentPage() {
     { id: "students", label: "Estudiantes", icon: Users },
     { id: "remedial", label: "Acción Remedial", icon: AlertTriangle },
     { id: "evolution", label: "Evolución", icon: TrendingUp },
+    { id: "logs", label: "Historial y Logs", icon: History },
   ];
 
   const handleExport = () => {
@@ -185,6 +211,26 @@ export default function TeacherAssignmentPage() {
                 >
                   <Headphones className="w-4 h-4 text-purple-600" />
                   <span>Audios</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => handleQuickExtend(15)}
+                  disabled={extendingMinutes !== null}
+                  className="px-2.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-lg shadow-xs transition-all flex items-center gap-1 text-xs cursor-pointer disabled:opacity-50"
+                  title="Añadir +15 minutos al plazo del curso y alumnos en curso"
+                >
+                  <Zap className="w-3.5 h-3.5 text-emerald-600 fill-current" />
+                  <span>+15 min</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => handleQuickExtend(30)}
+                  disabled={extendingMinutes !== null}
+                  className="px-2.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-lg shadow-xs transition-all flex items-center gap-1 text-xs cursor-pointer disabled:opacity-50"
+                  title="Añadir +30 minutos al plazo del curso y alumnos en curso"
+                >
+                  <Zap className="w-3.5 h-3.5 text-emerald-600 fill-current" />
+                  <span>+30 min</span>
                 </button>
                 <button 
                   type="button"
@@ -352,6 +398,7 @@ export default function TeacherAssignmentPage() {
               {activeTab === "students" && <StudentsTab id={Number(id)} />}
               {activeTab === "remedial" && <RemedialTab assignmentId={id as string} />}
               {activeTab === "evolution" && <EvolutionTab assignmentId={Number(id)} />}
+              {activeTab === "logs" && <LogsTab id={Number(id)} />}
             </div>
           </div>
 

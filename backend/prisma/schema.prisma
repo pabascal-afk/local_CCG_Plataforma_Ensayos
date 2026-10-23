@@ -111,6 +111,7 @@ model ExamAssignment {
   course             Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
   submissions        Submission[]
   remedialProposals  RemedialProposal[] @relation("OriginRemedials")
+  actionLogs         AssignmentActionLog[]
 
   @@unique([examId, courseId])
 }
@@ -203,4 +204,34 @@ model ExamAudioClip {
   createdAt       DateTime @default(now())
   exam            Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
 }
+
+model AssignmentActionLog {
+  id           Int            @id @default(autoincrement())
+  assignmentId Int
+  action       String         // ASSIGNMENT_CREATED | COURSE_REACTIVATED | STUDENT_REACTIVATED | STUDENT_BULK_REACTIVATED | TIME_EXTENDED | MODE_CHANGED | DYNAMIC_PASSWORD_CHANGED | RESULTS_RELEASED | ANSWERS_RESET | OPEN_QUESTIONS_GRADED | OMR_BULK_SUBMITTED | ANSWERS_IMPORTED | RESCHEDULED
+  actorRut     String         // RUT del usuario que realizó la acción
+  actorName    String         // Nombre legible del autor
+  actorRole    String         // ADMIN | DIRECTOR | TEACHER
+  targetRut    String?        // RUT del estudiante (si es acción individual)
+  targetName   String?        // Nombre del estudiante
+  details      String?        // JSON estructurado con diffs, horas, minutos, modos, afectados
+  note         String?        // Motivo o justificación opcional
+  createdAt    DateTime       @default(now())
+
+  assignment   ExamAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId, createdAt])
+  @@index([action])
+}
+
+model SchoolBellBlock {
+  id         Int      @id @default(autoincrement())
+  name       String   // "Bloque 1", "Bloque 2", etc.
+  startTime  String   // "08:15"
+  endTime    String   // "09:45"
+  orderIndex Int      @default(1)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
 

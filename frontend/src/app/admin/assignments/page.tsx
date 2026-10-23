@@ -8,7 +8,7 @@ import {
   Timer, KeyRound, RotateCcw, Sparkles, CheckCircle2, ChevronRight,
   ShieldCheck, AlertTriangle, Layers, Copy, Inbox, CheckSquare,
   XCircle, MessageSquare, AlertCircle, Bot, ChevronDown, ChevronUp,
-  Printer, ScanLine, FileText, Monitor, Laptop, Zap
+  Printer, ScanLine, FileText, Monitor, Laptop, Zap, History
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -2125,6 +2125,14 @@ export default function AssignmentsDashboard() {
                                 )}
                               </div>
                               <div className="flex items-center gap-1">
+                                <Link
+                                  href={`/teacher/assignments/${a.id}?tab=logs`}
+                                  target="_blank"
+                                  className="text-gray-400 hover:text-indigo-600 p-0.5 rounded transition cursor-pointer"
+                                  title="Ver historial de auditoría y logs"
+                                >
+                                  <History className="w-3.5 h-3.5" />
+                                </Link>
                                 <button 
                                   type="button"
                                   onClick={() => setSelectedReactivateAssignment(a)} 
@@ -2572,6 +2580,15 @@ export default function AssignmentsDashboard() {
                                     <Zap className="w-3.5 h-3.5 text-amber-600 fill-current" />
                                     Reactivar
                                   </button>
+                                  <Link
+                                    href={`/teacher/assignments/${a.id}?tab=logs`}
+                                    target="_blank"
+                                    className="text-[11px] font-bold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-xs transition"
+                                    title="Ver historial de auditoría y acciones"
+                                  >
+                                    <History className="w-3.5 h-3.5 text-gray-600" />
+                                    Logs
+                                  </Link>
                                   <button
                                     type="button"
                                     onClick={() => setOmrScanAssignmentId(a.id)}

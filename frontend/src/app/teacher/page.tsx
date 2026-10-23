@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Users, Clock, CheckCircle2, ChevronRight, BarChart2, Download, Headphones, Zap } from "lucide-react";
+import { BookOpen, Users, Clock, CheckCircle2, ChevronRight, BarChart2, Download, Headphones, Zap, Plus } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -10,6 +10,7 @@ import { useSchoolYear } from "@/context/SchoolYearContext";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 import AudioCutterModal from "@/components/AudioCutterModal";
 import ReactivateCourseModal from "@/components/ReactivateCourseModal";
+import AssignExamModal from "@/components/AssignExamModal";
 
 type Assignment = {
   id: number;
@@ -32,6 +33,7 @@ function TeacherDashboard() {
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [selectedAudioAssignment, setSelectedAudioAssignment] = useState<Assignment | null>(null);
   const [selectedReactivateAssignment, setSelectedReactivateAssignment] = useState<Assignment | null>(null);
+  const [showAssignModal, setShowAssignModal] = useState(false);
   const [error, setError] = useState("");
 
   const loadAssignments = () => {
@@ -55,17 +57,26 @@ function TeacherDashboard() {
               : "Monitoreo y resultados de los ensayos asignados a tus cursos."}
           </p>
         </div>
-        {assignments && assignments.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
           <button
-            onClick={() => {
-              const token = typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : "";
-              window.location.href = `/api/teacher/assignments-export.xlsx?token=${token}`;
-            }}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors"
+            onClick={() => setShowAssignModal(true)}
+            className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition cursor-pointer"
           >
-            <Download className="w-4 h-4" /> Exportar Resumen a Excel
+            <Plus className="w-4 h-4" />
+            <span>{isPruebas ? "Asignar Prueba" : "Asignar Ensayo"}</span>
           </button>
-        )}
+          {assignments && assignments.length > 0 && (
+            <button
+              onClick={() => {
+                const token = typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : "";
+                window.location.href = `/api/teacher/assignments-export.xlsx?token=${token}`;
+              }}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-xs transition-colors"
+            >
+              <Download className="w-4 h-4" /> Exportar Resumen a Excel
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -187,6 +198,13 @@ function TeacherDashboard() {
           onSuccess={loadAssignments}
         />
       )}
+
+      {/* Modal Asignar Evaluación Dinámica */}
+      <AssignExamModal
+        isOpen={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        onSuccess={loadAssignments}
+      />
     </div>
   );
 }

@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const { normalizeRut } = require('../utils/rut');
 const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet');
 const { computeResults, isOpenQuestion, getQuestionMaxPoints } = require('../services/grading');
+const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
 
 const router = express.Router();
 const uploadMemory = multer({ storage: multer.memoryStorage() });
@@ -124,6 +125,203 @@ router.get('/assignments', async (req, res, next) => {
 });
 
 // ==========================================
+// Bloques Pedagógicos y Catálogo para Asignación
+// ==========================================
+
+router.get('/bell-blocks', async (req, res, next) => {
+  try {
+    const blocks = await getSchoolBellBlocks();
+    res.json(blocks);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/available-exams', async (req, res, next) => {
+  try {
+    const allowedCourses = await getAllowedCourseIds(req.user);
+    let levels = undefined;
+    if (allowedCourses) {
+      const courses = await prisma.course.findMany({
+        where: { id: { in: allowedCourses } },
+        select: { level: true }
+      });
+      levels = [...new Set(courses.map(c => c.level))];
+    }
+    const where = {};
+    if (levels && levels.length > 0 && req.query.filterByMyLevels === 'true') {
+      where.level = { in: levels };
+    }
+    const exams = await prisma.exam.findMany({
+      where,
+      include: {
+        _count: { select: { questions: true } }
+      },
+      orderBy: [{ level: 'asc' }, { subject: 'asc' }, { orderNumber: 'asc' }]
+    });
+    res.json(exams.map(e => ({
+      id: e.id,
+      title: e.title,
+      subject: e.subject,
+      level: e.level,
+      examType: e.examType,
+      orderNumber: e.orderNumber,
+      durationMinutes: e.durationMinutes,
+      questionCount: e._count.questions
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/my-courses', async (req, res, next) => {
+  try {
+    const allowedCourses = await getAllowedCourseIds(req.user);
+    const yearFilter = req.query.year ? parseInt(req.query.year, 10) : undefined;
+    const where = {};
+    if (allowedCourses) {
+      where.id = { in: allowedCourses };
+    }
+    if (yearFilter) {
+      where.year = yearFilter;
+    }
+    const courses = await prisma.course.findMany({
+      where,
+      include: {
+        _count: { select: { students: true } }
+      },
+      orderBy: [{ level: 'asc' }, { letter: 'asc' }]
+    });
+    res.json(courses.map(c => ({
+      id: c.id,
+      level: c.level,
+      letter: c.letter,
+      year: c.year,
+      name: `${c.level.replace('B', '° Básico').replace('M', '° Medio')} ${c.letter}`,
+      studentCount: c._count.students
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/assignments', async (req, res, next) => {
+  try {
+    const {
+      examId,
+      courseId,
+      opensAt,
+      closesAt,
+      durationMinutes,
+      dynamicPassword,
+      dynamicPasswordActive,
+      applicationMode = 'DIGITAL',
+      presetType,
+      note
+    } = req.body;
+
+    const parsedExamId = parseInt(examId, 10);
+    const parsedCourseId = parseInt(courseId, 10);
+
+    if (isNaN(parsedExamId) || isNaN(parsedCourseId)) {
+      return res.status(400).json({ error: 'Debes especificar una prueba y un curso válidos.' });
+    }
+
+    const allowedCourses = await getAllowedCourseIds(req.user);
+    if (allowedCourses && !allowedCourses.includes(parsedCourseId)) {
+      return res.status(403).json({ error: 'No tienes permisos para asignar evaluaciones a este curso.' });
+    }
+
+    if (!opensAt || !closesAt) {
+      return res.status(400).json({ error: 'Debes especificar fecha y hora de inicio y término.' });
+    }
+
+    const opensDate = new Date(opensAt);
+    const closesDate = new Date(closesAt);
+
+    if (isNaN(opensDate.getTime()) || isNaN(closesDate.getTime())) {
+      return res.status(400).json({ error: 'Fechas u horas no válidas.' });
+    }
+
+    // Verificar si ya existe asignación
+    const existing = await prisma.examAssignment.findUnique({
+      where: {
+        examId_courseId: {
+          examId: parsedExamId,
+          courseId: parsedCourseId
+        }
+      }
+    });
+
+    if (existing) {
+      return res.status(400).json({
+        error: 'Esta evaluación ya está asignada a este curso. Puedes reactivarla o editar sus parámetros.'
+      });
+    }
+
+    const exam = await prisma.exam.findUnique({ where: { id: parsedExamId } });
+    if (!exam) return res.status(404).json({ error: 'La prueba seleccionada no existe.' });
+
+    const course = await prisma.course.findUnique({ where: { id: parsedCourseId } });
+    if (!course) return res.status(404).json({ error: 'El curso seleccionado no existe.' });
+
+    if (durationMinutes !== undefined && durationMinutes !== null) {
+      const dur = parseInt(durationMinutes, 10);
+      if (!isNaN(dur) && dur > 0) {
+        await prisma.exam.update({
+          where: { id: parsedExamId },
+          data: { durationMinutes: dur }
+        }).catch(() => null);
+      }
+    }
+
+    const assignment = await prisma.examAssignment.create({
+      data: {
+        examId: parsedExamId,
+        courseId: parsedCourseId,
+        opensAt: opensDate,
+        closesAt: closesDate,
+        assignedTeacherRut: req.user.rut,
+        dynamicPassword: dynamicPassword ? String(dynamicPassword).trim().toUpperCase() : null,
+        dynamicPasswordActive: Boolean(dynamicPasswordActive),
+        applicationMode: applicationMode === 'PRINTED' ? 'PRINTED' : 'DIGITAL',
+      },
+      include: {
+        exam: true,
+        course: true,
+        assignedTeacher: { select: { name: true, rut: true } }
+      }
+    });
+
+    // Registrar en auditoría
+    await logAssignmentAction({
+      assignmentId: assignment.id,
+      action: 'ASSIGNMENT_CREATED',
+      actor: req.user,
+      details: {
+        examTitle: exam.title,
+        courseName: `${course.level} ${course.letter}`,
+        opensAt: opensDate,
+        closesAt: closesDate,
+        durationMinutes: durationMinutes || exam.durationMinutes || null,
+        applicationMode: assignment.applicationMode,
+        dynamicPasswordActive: assignment.dynamicPasswordActive,
+        presetType: presetType || 'CUSTOM'
+      },
+      note: note || (presetType === 'QUICK_LAUNCH' ? 'Lanzamiento rápido en clase' : null)
+    });
+
+    res.json(assignment);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(400).json({ error: 'Esta evaluación ya está asignada a este curso.' });
+    }
+    console.error('[teacher/assignments error]:', error);
+    next(error);
+  }
+});
+
+// ==========================================
 // Contraseña Dinámica de Ensayo (PIN Temporal de Clase)
 // ==========================================
 
@@ -167,6 +365,17 @@ router.post('/assignments/:id/dynamic-password', async (req, res, next) => {
         dynamicPasswordActive: Boolean(dynamicPasswordActive)
       }
     });
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'DYNAMIC_PASSWORD_CHANGED',
+      actor: req.user,
+      details: {
+        dynamicPasswordActive: updated.dynamicPasswordActive,
+        hasPassword: Boolean(updated.dynamicPassword)
+      }
+    });
+
     res.json({
       dynamicPassword: updated.dynamicPassword,
       dynamicPasswordActive: updated.dynamicPasswordActive
@@ -199,6 +408,16 @@ router.post('/assignments/:id/release', async (req, res, next) => {
         releasedBy: req.user.name
       }
     });
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'RESULTS_RELEASED',
+      actor: req.user,
+      details: {
+        releasedAt: updated.releasedAt
+      }
+    });
+
     res.json({ message: 'Resultados liberados', assignment: updated });
   } catch (error) {
     next(error);
@@ -2077,6 +2296,17 @@ router.patch('/assignments/:id/mode', async (req, res, next) => {
         assignedTeacher: { select: { name: true, rut: true } }
       }
     });
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'MODE_CHANGED',
+      actor: req.user,
+      details: {
+        previousMode: assignment.applicationMode,
+        newMode: mode
+      }
+    });
+
     res.json(updated);
   } catch (error) {
     next(error);
@@ -2178,6 +2408,20 @@ router.post('/assignments/:id/reactivate', async (req, res, next) => {
       }
     });
 
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'COURSE_REACTIVATED',
+      actor: req.user,
+      details: {
+        previousClosesAt: assignment.closesAt,
+        newClosesAt,
+        scope,
+        resetMode,
+        affectedSubmissions
+      },
+      note: req.body.note || null
+    });
+
     res.json({
       message: 'Evaluación reactivada con éxito para el curso',
       assignment: updatedAssignment,
@@ -2197,7 +2441,7 @@ router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) 
     const id = parseInt(req.params.id, 10);
     const rut = req.params.rut;
     const assignment = await getAssignmentIfAllowed(id, req.user);
-    const { deadline, resetMode = 'KEEP_ANSWERS' } = req.body;
+    const { deadline, resetMode = 'KEEP_ANSWERS', note } = req.body;
 
     if (!deadline) {
       return res.status(400).json({ error: 'Debes especificar el plazo para el estudiante' });
@@ -2270,6 +2514,18 @@ router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) 
       });
     }
 
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'STUDENT_REACTIVATED',
+      actor: req.user,
+      targetStudent: { rut: student.rut, name: student.name },
+      details: {
+        deadline: newDeadline,
+        resetMode
+      },
+      note: note || null
+    });
+
     res.json({
       message: `Evaluación reactivada exitosamente para ${student.name}`,
       student: { rut: student.rut, name: student.name },
@@ -2277,6 +2533,194 @@ router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) 
     });
   } catch (error) {
     next(error);
+  }
+});
+
+/**
+ * Prórroga rápida en caliente (+15m, +30m, etc.)
+ * PATCH /api/teacher/assignments/:id/quick-extend
+ */
+router.patch('/assignments/:id/quick-extend', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+    const { minutes = 15, note } = req.body;
+    const mins = parseInt(minutes, 10);
+    if (isNaN(mins) || mins <= 0) {
+      return res.status(400).json({ error: 'Minutos inválidos para prórroga' });
+    }
+
+    const currentCloses = new Date(assignment.closesAt).getTime();
+    const baseTime = Math.max(currentCloses, Date.now());
+    const newClosesAt = new Date(baseTime + mins * 60000);
+
+    const updated = await prisma.examAssignment.update({
+      where: { id },
+      data: {
+        closesAt: newClosesAt,
+        status: 'ACTIVE'
+      },
+      include: { exam: true, course: true }
+    });
+
+    // Si algún estudiante tiene una prórroga individual vigente, también se le agregan los minutos
+    const now = new Date();
+    const activeExtendedSubs = await prisma.submission.findMany({
+      where: {
+        assignmentId: id,
+        extendedDeadline: { gt: now }
+      }
+    });
+
+    for (const sub of activeExtendedSubs) {
+      const extTime = new Date(sub.extendedDeadline).getTime();
+      await prisma.submission.update({
+        where: { id: sub.id },
+        data: {
+          extendedDeadline: new Date(extTime + mins * 60000)
+        }
+      });
+    }
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'TIME_EXTENDED',
+      actor: req.user,
+      details: {
+        minutesAdded: mins,
+        previousClosesAt: assignment.closesAt,
+        newClosesAt,
+        extendedStudentsCount: activeExtendedSubs.length
+      },
+      note: note || `Prórroga rápida en vivo de +${mins} minutos`
+    });
+
+    res.json({
+      message: `Plazo extendido en +${mins} minutos exitosamente`,
+      assignment: updated,
+      minutesAdded: mins,
+      newClosesAt
+    });
+  } catch (error) {
+    handleAssignmentError(error, res, next);
+  }
+});
+
+/**
+ * Reactivación masiva de estudiantes seleccionados
+ * POST /api/teacher/assignments/:id/students/bulk-reactivate
+ */
+router.post('/assignments/:id/students/bulk-reactivate', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+    const { ruts, deadline, resetMode = 'KEEP_ANSWERS', note } = req.body;
+
+    if (!Array.isArray(ruts) || ruts.length === 0) {
+      return res.status(400).json({ error: 'Debes seleccionar al menos un estudiante.' });
+    }
+
+    if (!deadline) {
+      return res.status(400).json({ error: 'Debes especificar el plazo para los estudiantes.' });
+    }
+
+    const newDeadline = new Date(deadline);
+    if (isNaN(newDeadline.getTime())) {
+      return res.status(400).json({ error: 'Fecha límite individual inválida.' });
+    }
+
+    const now = new Date();
+    const affectedStudents = [];
+
+    for (const rawRut of ruts) {
+      const rut = normalizeRut(rawRut);
+      const student = await prisma.user.findFirst({
+        where: { rut, courseId: assignment.courseId, role: 'STUDENT' }
+      });
+
+      if (!student) continue;
+
+      const submission = await prisma.submission.findUnique({
+        where: { studentRut_assignmentId: { studentRut: rut, assignmentId: id } }
+      });
+
+      if (!submission) {
+        await prisma.submission.create({
+          data: {
+            studentRut: rut,
+            assignmentId: id,
+            status: 'IN_PROGRESS',
+            startedAt: new Date(0),
+            extendedDeadline: newDeadline,
+            reactivatedAt: now,
+            autoSubmitted: false
+          }
+        });
+      } else {
+        if (resetMode === 'CLEAR_ANSWERS') {
+          await prisma.submissionAnswer.deleteMany({
+            where: { submissionId: submission.id }
+          });
+        }
+
+        await prisma.submission.update({
+          where: { id: submission.id },
+          data: {
+            status: 'IN_PROGRESS',
+            submittedAt: null,
+            autoSubmitted: false,
+            reactivatedAt: now,
+            startedAt: new Date(0),
+            extendedDeadline: newDeadline,
+            grade: resetMode === 'CLEAR_ANSWERS' ? null : submission.grade,
+            percent: resetMode === 'CLEAR_ANSWERS' ? null : submission.percent,
+            correctCount: resetMode === 'CLEAR_ANSWERS' ? null : submission.correctCount,
+            simceScore: resetMode === 'CLEAR_ANSWERS' ? null : submission.simceScore,
+            achievementLevel: resetMode === 'CLEAR_ANSWERS' ? null : submission.achievementLevel,
+            theta: resetMode === 'CLEAR_ANSWERS' ? null : submission.theta,
+            seTheta: resetMode === 'CLEAR_ANSWERS' ? null : submission.seTheta
+          }
+        });
+      }
+
+      affectedStudents.push({ rut: student.rut, name: student.name });
+    }
+
+    await logAssignmentAction({
+      assignmentId: id,
+      action: 'STUDENT_BULK_REACTIVATED',
+      actor: req.user,
+      details: {
+        affectedCount: affectedStudents.length,
+        students: affectedStudents,
+        deadline: newDeadline,
+        resetMode
+      },
+      note: note || `Reactivación masiva para ${affectedStudents.length} estudiantes`
+    });
+
+    res.json({
+      message: `Se reactivó el plazo exitosamente para ${affectedStudents.length} estudiantes`,
+      affectedCount: affectedStudents.length,
+      affectedStudents
+    });
+  } catch (error) {
+    handleAssignmentError(error, res, next);
+  }
+});
+
+/**
+ * Consulta de Logs de Auditoría
+ * GET /api/teacher/assignments/:id/logs
+ */
+router.get('/assignments/:id/logs', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    await getAssignmentIfAllowed(id, req.user);
+    const logs = await getAssignmentLogs(id);
+    res.json(logs);
+  } catch (error) {
+    handleAssignmentError(error, res, next);
   }
 });
 
