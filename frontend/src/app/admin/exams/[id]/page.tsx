@@ -5,13 +5,18 @@ import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
 import Link from "next/link";
-import { ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, Sparkles, Headphones, Scissors } from "lucide-react";
+import { 
+  ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, 
+  Sparkles, Headphones, Scissors, Plus, Trash2, ListPlus 
+} from "lucide-react";
 import { getToken } from "@/lib/session";
 import AiPromptModal from "@/components/AiPromptModal";
 import AudioCutterModal from "@/components/AudioCutterModal";
+import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const { id } = params;
+  const isPruebas = useIsPruebas();
   const [exam, setExam] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -25,6 +30,9 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const [axesKeys, setAxesKeys] = useState<Record<string, string>>({});
   const [learningObjectivesKeys, setLearningObjectivesKeys] = useState<Record<string, string>>({});
   const [difficultiesKeys, setDifficultiesKeys] = useState<Record<string, string>>({});
+
+  const [customQuestionCount, setCustomQuestionCount] = useState<number | null>(null);
+  const [customAddAmount, setCustomAddAmount] = useState<number>(2);
 
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
@@ -68,6 +76,9 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     setAxesKeys(e.axesKeys || {});
     setLearningObjectivesKeys(e.learningObjectivesKeys || {});
     setDifficultiesKeys(dk);
+
+    const initialCount = e.questions?.length || e.questionCount || Object.keys(e.answerKey || {}).length || 45;
+    setCustomQuestionCount(initialCount);
   };
 
   const handleDownloadTemplate = async () => {
@@ -107,12 +118,101 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     loadExam();
   }, [id]);
 
+  const maxQ = Math.max(
+    customQuestionCount ?? (exam?.questionCount || 45),
+    ...Object.keys(answerKey).map(Number).filter(n => !isNaN(n))
+  );
+  const questions = Array.from({ length: maxQ }, (_, i) => String(i + 1));
+
+  const handleAddQuestions = (count: number = 1) => {
+    const safeCount = Math.max(1, count);
+    const currentTotal = maxQ;
+    const newTotal = currentTotal + safeCount;
+    setCustomQuestionCount(newTotal);
+
+    setAnswerKey(prev => {
+      const next = { ...prev };
+      for (let i = currentTotal + 1; i <= newTotal; i++) {
+        if (!next[String(i)]) next[String(i)] = "A";
+      }
+      return next;
+    });
+
+    setQuestionTypesKeys(prev => {
+      const next = { ...prev };
+      for (let i = currentTotal + 1; i <= newTotal; i++) {
+        if (!next[String(i)]) next[String(i)] = "MULTIPLE_CHOICE";
+      }
+      return next;
+    });
+
+    setMaxPointsKeys(prev => {
+      const next = { ...prev };
+      for (let i = currentTotal + 1; i <= newTotal; i++) {
+        if (next[String(i)] === undefined) next[String(i)] = 1;
+      }
+      return next;
+    });
+
+    setDifficultiesKeys(prev => {
+      const next = { ...prev };
+      for (let i = currentTotal + 1; i <= newTotal; i++) {
+        if (next[String(i)] === undefined) next[String(i)] = "0.0";
+      }
+      return next;
+    });
+  };
+
+  const handleRemoveLastQuestion = () => {
+    if (maxQ <= 1) return;
+    const qToRemove = String(maxQ);
+    const newTotal = maxQ - 1;
+    setCustomQuestionCount(newTotal);
+
+    setAnswerKey(prev => {
+      const next = { ...prev };
+      delete next[qToRemove];
+      return next;
+    });
+    setQuestionTypesKeys(prev => {
+      const next = { ...prev };
+      delete next[qToRemove];
+      return next;
+    });
+    setMaxPointsKeys(prev => {
+      const next = { ...prev };
+      delete next[qToRemove];
+      return next;
+    });
+    setDifficultiesKeys(prev => {
+      const next = { ...prev };
+      delete next[qToRemove];
+      return next;
+    });
+    setSkillsKeys(prev => {
+      const next = { ...prev };
+      delete next[qToRemove];
+      return next;
+    });
+    setAxesKeys(prev => {
+      const next = { ...prev };
+      delete next[qToRemove];
+      return next;
+    });
+    setLearningObjectivesKeys(prev => {
+      const next = { ...prev };
+      delete next[qToRemove];
+      return next;
+    });
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
       await apiFetch(`/admin/exams/${id}/answer-key`, {
         method: "PUT",
         body: {
+          totalQuestions: maxQ,
           answerKey,
           questionTypesKeys,
           maxPointsKeys,
@@ -122,6 +222,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
           difficultiesKeys
         }
       });
+      setExam((prev: any) => ({ ...prev, questionCount: maxQ }));
       alert("Pauta guardada correctamente");
     } catch (err: any) {
       alert(err.message);
@@ -169,7 +270,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     for (let i = 0; i < letters.length; i++) {
       const qNum = String(i + 1);
       if (newTypes[qNum] === "WRITTEN" || newTypes[qNum] === "ORAL") continue;
-      if (i < 100) {
+      if (i < 150) {
         newKey[qNum] = letters[i];
         newTypes[qNum] = "MULTIPLE_CHOICE";
       }
@@ -212,9 +313,6 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   if (loading) return <div className="p-8">Cargando...</div>;
   if (!exam) return <div className="p-8">Error al cargar el ensayo.</div>;
 
-  const maxQ = Math.max(exam.questionCount || 45, ...Object.keys(answerKey).map(Number).filter(n => !isNaN(n)));
-  const questions = Array.from({ length: maxQ }, (_, i) => String(i + 1));
-
   const audioQuestionsSet = new Set<number>();
   if (exam?.audioQuestionNumbers && Array.isArray(exam.audioQuestionNumbers)) {
     exam.audioQuestionNumbers.forEach((n: number) => audioQuestionsSet.add(n));
@@ -239,17 +337,24 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
           <div className="p-8 max-w-7xl mx-auto">
             <div className="mb-6 flex justify-between items-end">
               <div>
-                <Link href="/admin/exams" className="text-blue-600 hover:underline flex items-center gap-1 inline-flex mb-2">
-                  <ArrowLeft className="w-4 h-4" /> Volver a Ensayos
+                <Link href="/admin/exams" className="text-blue-600 hover:underline flex items-center gap-1 inline-flex mb-2 text-xs font-semibold">
+                  <ArrowLeft className="w-3.5 h-3.5" /> Volver a {isPruebas ? "Pruebas" : "Ensayos"}
                 </Link>
-                <h1 className="text-2xl font-bold">Pauta: {exam.title}</h1>
-                <p className="text-gray-500">Completa las respuestas correctas o marca preguntas de Desarrollo Escrito / Respuesta Oral con su puntaje máximo.</p>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-black text-gray-900 tracking-tight">Pauta: {exam.title}</h1>
+                  <span className="bg-blue-100 text-blue-800 font-extrabold text-xs px-2.5 py-1 rounded-full">
+                    {maxQ} preguntas
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Completa las respuestas correctas o marca preguntas de Desarrollo Escrito / Respuesta Oral con su puntaje máximo.
+                </p>
               </div>
               
               <button 
                 onClick={handleSave}
                 disabled={saving}
-                className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2 shadow-sm disabled:opacity-50"
+                className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
               >
                 {saving ? "Guardando..." : <><Save className="w-5 h-5" /> Guardar Pauta</>}
               </button>
@@ -259,6 +364,74 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
               
               {/* Sidebar herramientas */}
               <div className="md:col-span-1 space-y-4">
+
+                {/* Card Cantidad de Preguntas */}
+                <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-sm text-gray-800 flex items-center gap-1.5">
+                      <ListPlus className="w-4 h-4 text-blue-600" /> Cantidad de Preguntas
+                    </h3>
+                    <span className="bg-blue-50 text-blue-700 font-black text-xs px-2.5 py-0.5 rounded-full border border-blue-200">
+                      {maxQ}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 leading-snug">
+                    ¿Necesitas más preguntas en este {isPruebas ? "instrumento" : "ensayo"}? Agrega preguntas adicionales o remueve la última.
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleAddQuestions(1)}
+                      className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition cursor-pointer"
+                      title="Agregar 1 pregunta más"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> +1 Pregunta
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAddQuestions(5)}
+                      className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition cursor-pointer"
+                      title="Agregar 5 preguntas más"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> +5 Preguntas
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+                    <div className="flex items-center gap-1 text-xs text-gray-500 font-medium">
+                      <span>Sumar</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={customAddAmount}
+                        onChange={(e) => setCustomAddAmount(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-12 border rounded px-1.5 py-1 text-center font-bold text-gray-800"
+                      />
+                      <span>más:</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAddQuestions(customAddAmount)}
+                      className="flex-1 py-1 px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-lg text-xs transition cursor-pointer"
+                    >
+                      + Agregar
+                    </button>
+                  </div>
+
+                  {maxQ > 1 && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLastQuestion}
+                      className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition cursor-pointer border border-transparent hover:border-red-200"
+                      title={`Eliminar la última pregunta (Nº ${maxQ})`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Quitar última pregunta (#{maxQ})
+                    </button>
+                  )}
+                </div>
+
                 <div className="bg-white p-4 rounded-xl border shadow-sm">
                   <h3 className="font-semibold mb-2">Pegar Pauta Rápida</h3>
                   <p className="text-sm text-gray-500 mb-3">Pega una cadena de letras (ej: ABDCA...) para llenar las claves al instante.</p>
@@ -516,6 +689,42 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                       })}
                     </tbody>
                   </table>
+
+                  {/* Pie de tabla con acciones de agregación rápida */}
+                  <div className="p-3.5 bg-gray-50 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs text-gray-600 font-medium flex items-center gap-2">
+                      <span className="font-bold text-gray-900">Total: {maxQ} preguntas</span>
+                      <span className="text-gray-400">•</span>
+                      <span>Al guardar la pauta se actualizará el instrumento con este total de preguntas.</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {maxQ > 1 && (
+                        <button
+                          type="button"
+                          onClick={handleRemoveLastQuestion}
+                          className="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                          title={`Eliminar pregunta Nº ${maxQ}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Quitar última (#{maxQ})
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleAddQuestions(1)}
+                        className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Agregar Pregunta (#{maxQ + 1})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddQuestions(5)}
+                        className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> +5 Preguntas
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
               

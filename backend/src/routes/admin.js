@@ -1888,16 +1888,47 @@ router.post('/exams', checkAdmin, (req, res, next) => {
 
 router.put('/exams/:id', checkAdmin, async (req, res, next) => {
   try {
-    const { title, subject, level, optionsCount } = req.body;
+    const examId = parseInt(req.params.id, 10);
+    const { title, subject, level, optionsCount, questionCount } = req.body;
+    const updateData = {};
+    if (title !== undefined) updateData.title = String(title).trim();
+    if (subject !== undefined) updateData.subject = String(subject).trim();
+    if (level !== undefined) updateData.level = level;
+    if (optionsCount !== undefined && !isNaN(parseInt(optionsCount, 10))) {
+      updateData.optionsCount = parseInt(optionsCount, 10);
+    }
+
     const exam = await prisma.exam.update({
-      where: { id: parseInt(req.params.id, 10) },
-      data: { 
-        title, 
-        subject,
-        level,
-        optionsCount: parseInt(optionsCount, 10) 
-      }
+      where: { id: examId },
+      data: updateData
     });
+
+    const qCount = parseInt(questionCount, 10);
+    if (!isNaN(qCount) && qCount > 0) {
+      const existingCount = await prisma.question.count({ where: { examId } });
+      if (qCount > existingCount) {
+        const toAdd = [];
+        for (let i = existingCount + 1; i <= qCount; i++) {
+          toAdd.push({
+            examId,
+            questionNumber: i,
+            correctAnswer: 'A',
+            questionType: 'MULTIPLE_CHOICE',
+            maxPoints: 1.0,
+            guessing: 0.25
+          });
+        }
+        await prisma.question.createMany({ data: toAdd });
+      } else if (qCount < existingCount) {
+        await prisma.question.deleteMany({
+          where: {
+            examId,
+            questionNumber: { gt: qCount }
+          }
+        });
+      }
+    }
+
     res.json(exam);
   } catch (error) {
     next(error);
@@ -2161,7 +2192,8 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       skillsKeys,
       axesKeys,
       learningObjectivesKeys,
-      difficultiesKeys
+      difficultiesKeys,
+      totalQuestions
     } = req.body;
     
     const allQNums = new Set([
@@ -2169,9 +2201,24 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       ...Object.keys(questionTypesKeys || {})
     ]);
 
+    const totalQ = parseInt(totalQuestions, 10);
+    if (!isNaN(totalQ) && totalQ > 0) {
+      for (let i = 1; i <= totalQ; i++) {
+        allQNums.add(String(i));
+      }
+      // Si se redujo la cantidad total de preguntas, eliminar las sobrantes
+      await prisma.question.deleteMany({
+        where: {
+          examId,
+          questionNumber: { gt: totalQ }
+        }
+      });
+    }
+
     for (const qNumStr of allQNums) {
       const qNum = parseInt(qNumStr, 10);
       if (isNaN(qNum)) continue;
+      if (!isNaN(totalQ) && totalQ > 0 && qNum > totalQ) continue;
 
       const rawAns = answerKey ? answerKey[qNumStr] : '';
       const explicitType = questionTypesKeys ? questionTypesKeys[qNumStr] : undefined;
@@ -2190,9 +2237,12 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
         questionType = 'ORAL';
         correctAnswer = 'ORAL';
         const mp = parseFloat(rawMaxPts);
-        maxPoints = !isNaN(mp) && mp > 0 ? mp : 5.0;
+        maxPoints = !isNaN(mp) && mp > 0 ? mp : 4.0;
       } else {
         questionType = 'MULTIPLE_CHOICE';
+        if (!correctAnswer) {
+          correctAnswer = 'A';
+        }
         const mp = parseFloat(rawMaxPts);
         maxPoints = !isNaN(mp) && mp > 0 ? mp : 1.0;
       }
@@ -2212,7 +2262,7 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       });
     }
 
-    res.json({ message: 'Pauta actualizada' });
+    res.json({ message: 'Pauta actualizada', totalQuestions: !isNaN(totalQ) && totalQ > 0 ? totalQ : allQNums.size });
   } catch (error) {
     next(error);
   }
