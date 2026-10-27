@@ -61,6 +61,7 @@ namespace CCGServerManager
         public int MainPort;
         public int BackendPort;
         public string RepoUrl;
+        public string GitBranch;
         public bool IsNextJs;
         public string EntryScript;
         public string FolderPath;
@@ -162,6 +163,7 @@ namespace CCGServerManager
                 MainPort = 3300,
                 BackendPort = 3001,
                 RepoUrl = "https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git",
+                GitBranch = "main",
                 IsNextJs = true,
                 EntryScript = "server.js",
                 FolderPath = defaultSimce,
@@ -178,6 +180,7 @@ namespace CCGServerManager
                 MainPort = 3600,
                 BackendPort = 3601,
                 RepoUrl = "https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git",
+                GitBranch = "pruebas-ccg",
                 IsNextJs = true,
                 EntryScript = "server.js",
                 FolderPath = defaultPruebas,
@@ -194,6 +197,7 @@ namespace CCGServerManager
                 MainPort = 9000,
                 BackendPort = 0,
                 RepoUrl = "https://github.com/pabascal-afk/local_CCG_Portal_Unificado_Plataformas.git",
+                GitBranch = "main",
                 IsNextJs = false,
                 EntryScript = "server\\index.js",
                 FolderPath = defaultUnified,
@@ -1237,15 +1241,16 @@ namespace CCGServerManager
                     }
                     else
                     {
-                        AppendLog(generalLogBox, "[2/4] Descargando últimos cambios desde GitHub (origin/main)...");
+                        string targetBranch = !string.IsNullOrEmpty(srv.GitBranch) ? srv.GitBranch : (srv.Id == "PRUEBAS" ? "pruebas-ccg" : "main");
+                        AppendLog(generalLogBox, string.Format("[2/4] Descargando últimos cambios desde GitHub (origin/{0})...", targetBranch));
                         UnlockManagerExeBeforeGit(srv.FolderPath);
                         RunCommandWithLogs("git", "config http.sslVerify false", srv.FolderPath, generalLogBox);
-                        RunCommandWithLogs("git", "fetch origin main", srv.FolderPath, generalLogBox);
-                        int resetCode = RunCommandWithLogs("git", "reset --hard origin/main", srv.FolderPath, generalLogBox);
+                        RunCommandWithLogs("git", "fetch origin " + targetBranch, srv.FolderPath, generalLogBox);
+                        int resetCode = RunCommandWithLogs("git", "reset --hard origin/" + targetBranch, srv.FolderPath, generalLogBox);
                         if (resetCode != 0)
                         {
                             UnlockManagerExeBeforeGit(srv.FolderPath);
-                            RunCommandWithLogs("git", "checkout -f origin/main", srv.FolderPath, generalLogBox);
+                            RunCommandWithLogs("git", "checkout -f origin/" + targetBranch, srv.FolderPath, generalLogBox);
                         }
                     }
 

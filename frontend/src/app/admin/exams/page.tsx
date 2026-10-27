@@ -688,7 +688,16 @@ export default function ExamsPage() {
                           {/* Resumen en 3 métricas limpias */}
                           <div className="grid grid-cols-3 gap-2 text-xs bg-white p-3 rounded-xl border border-gray-200 shadow-2xs">
                             <div>
-                              <span className="text-[10px] text-gray-400 font-bold uppercase block">Preguntas</span>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-gray-400 font-bold uppercase block">Preguntas</span>
+                                <Link 
+                                  href={`/admin/exams/${e.id}`} 
+                                  className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-0.5"
+                                  title="Agregar o quitar preguntas"
+                                >
+                                  <Plus className="w-2.5 h-2.5" /> + Agregar
+                                </Link>
+                              </div>
                               <span className="font-black text-gray-800 text-sm">{e.questionCount}</span>
                               <span className="text-[10px] text-gray-500 block truncate">
                                 {e.multipleChoiceCount ?? e.questionCount} selec.
@@ -787,7 +796,7 @@ export default function ExamsPage() {
                                 className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"
                               >
                                 <FileSpreadsheet className="w-3.5 h-3.5" />
-                                <span>Editar Pauta</span>
+                                <span>Editar Pauta y Preguntas</span>
                                 <ChevronRight className="w-3.5 h-3.5" />
                               </Link>
                             </div>

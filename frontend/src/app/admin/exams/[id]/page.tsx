@@ -223,7 +223,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
         }
       });
       setExam((prev: any) => ({ ...prev, questionCount: maxQ }));
-      alert("Pauta guardada correctamente");
+      alert("Pauta guardada correctamente (" + maxQ + " preguntas registradas)");
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -335,29 +335,65 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
       {(user) => (
         <AppShell user={user}>
           <div className="p-8 max-w-7xl mx-auto">
-            <div className="mb-6 flex justify-between items-end">
+            {/* Cabecera Principal con Botones de Acción Directos */}
+            <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
               <div>
-                <Link href="/admin/exams" className="text-blue-600 hover:underline flex items-center gap-1 inline-flex mb-2 text-xs font-semibold">
-                  <ArrowLeft className="w-3.5 h-3.5" /> Volver a {isPruebas ? "Pruebas" : "Ensayos"}
+                <Link href="/admin/exams" className="text-blue-600 hover:underline flex items-center gap-1 inline-flex mb-1.5 text-xs font-semibold">
+                  <ArrowLeft className="w-3.5 h-3.5" /> Volver al catálogo de {isPruebas ? "Pruebas" : "Ensayos"}
                 </Link>
-                <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-black text-gray-900 tracking-tight">Pauta: {exam.title}</h1>
-                  <span className="bg-blue-100 text-blue-800 font-extrabold text-xs px-2.5 py-1 rounded-full">
+                <div className="flex items-center gap-2.5">
+                  <h1 className="text-xl md:text-2xl font-black text-gray-900 tracking-tight">
+                    {isPruebas ? "Prueba" : "Pauta"}: {exam.title}
+                  </h1>
+                  <span className="bg-blue-100 text-blue-800 font-black text-xs px-2.5 py-0.5 rounded-full border border-blue-200">
                     {maxQ} preguntas
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Completa las respuestas correctas o marca preguntas de Desarrollo Escrito / Respuesta Oral con su puntaje máximo.
+                  Agrega preguntas, edita las respuestas correctas o configura preguntas abiertas y audios.
                 </p>
               </div>
               
-              <button 
-                onClick={handleSave}
-                disabled={saving}
-                className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
-              >
-                {saving ? "Guardando..." : <><Save className="w-5 h-5" /> Guardar Pauta</>}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Controles de adición directa de preguntas en la cabecera */}
+                <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg p-1 gap-1">
+                  <span className="text-xs font-bold text-gray-600 px-1.5 hidden sm:inline">Preguntas:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleAddQuestions(1)}
+                    className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded border border-blue-200 shadow-2xs transition flex items-center gap-1 cursor-pointer"
+                    title="Sumar 1 pregunta más a esta evaluación"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> +1 Pregunta
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAddQuestions(5)}
+                    className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded border border-blue-200 shadow-2xs transition flex items-center gap-1 cursor-pointer"
+                    title="Sumar 5 preguntas más a esta evaluación"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> +5
+                  </button>
+                  {maxQ > 1 && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLastQuestion}
+                      className="px-2 py-1.5 text-red-600 hover:bg-red-50 font-bold text-xs rounded border border-transparent hover:border-red-200 transition flex items-center gap-1 cursor-pointer"
+                      title={`Quitar última pregunta (#${maxQ})`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> -1
+                    </button>
+                  )}
+                </div>
+
+                <button 
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-xs md:text-sm hover:bg-blue-700 flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {saving ? "Guardando..." : <><Save className="w-4 h-4" /> Guardar Pauta ({maxQ} preg)</>}
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
