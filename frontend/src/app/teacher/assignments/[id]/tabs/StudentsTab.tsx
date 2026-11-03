@@ -111,14 +111,6 @@ export default function StudentsTab({ id }: { id: number }) {
     }
   };
 
-  if (error) return <div className="text-red-500">{error}</div>;
-  if (!data) return <div className="animate-pulse">Cargando estudiantes...</div>;
-
-  const students = data.students.filter((s: any) => s.state === "SUBMITTED").sort((a: any, b: any) => (b.grade || 0) - (a.grade || 0));
-  const pending = data.students.filter((s: any) => s.state !== "SUBMITTED");
-  const openQuestions = data.openQuestions || [];
-  const hasOpenQuestions = openQuestions.length > 0;
-
   const selectedStudentObjects = useMemo(() => {
     if (!data?.students) return [];
     return data.students
@@ -129,6 +121,14 @@ export default function StudentsTab({ id }: { id: number }) {
   const toggleSelectRut = (rut: string) => {
     setSelectedRuts(prev => prev.includes(rut) ? prev.filter(r => r !== rut) : [...prev, rut]);
   };
+
+  if (error) return <div className="text-red-500">{error}</div>;
+  if (!data) return <div className="animate-pulse">Cargando estudiantes...</div>;
+
+  const students = data.students.filter((s: any) => s.state === "SUBMITTED").sort((a: any, b: any) => (b.grade || 0) - (a.grade || 0));
+  const pending = data.students.filter((s: any) => s.state !== "SUBMITTED");
+  const openQuestions = data.openQuestions || [];
+  const hasOpenQuestions = openQuestions.length > 0;
 
   return (
     <div>
