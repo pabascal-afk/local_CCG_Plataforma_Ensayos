@@ -223,7 +223,7 @@ router.get('/assignments/:id/audios/:clipId', async (req, res) => {
 const answersSchema = z.object({
   answers: z.array(z.object({
     questionId: z.number().int(),
-    selectedAnswer: z.string().max(4000).nullable(),
+    selectedAnswer: z.string().max(25000).nullable(),
   })).min(1).max(200),
 });
 
