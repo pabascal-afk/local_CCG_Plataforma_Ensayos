@@ -229,11 +229,12 @@ namespace CCGServerManager
                 }
             }
 
-            // 3. Check Desktop and Documents\antigravity
+            // 3. Check Desktop, Documents\antigravity, and Documents\GitHub
             string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
             string docs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "antigravity");
+            string docsGithub = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "GitHub");
 
-            foreach (string root in new string[] { desktop, docs })
+            foreach (string root in new string[] { desktop, docs, docsGithub })
             {
                 if (!Directory.Exists(root)) continue;
                 foreach (string name in folderNames)
@@ -1245,7 +1246,12 @@ namespace CCGServerManager
                         AppendLog(generalLogBox, string.Format("[2/4] Descargando últimos cambios desde GitHub (origin/{0})...", targetBranch));
                         UnlockManagerExeBeforeGit(srv.FolderPath);
                         RunCommandWithLogs("git", "config http.sslVerify false", srv.FolderPath, generalLogBox);
+                        if (!string.IsNullOrEmpty(srv.RepoUrl))
+                        {
+                            RunCommandWithLogs("git", "remote set-url origin " + srv.RepoUrl, srv.FolderPath, generalLogBox);
+                        }
                         RunCommandWithLogs("git", "fetch origin " + targetBranch, srv.FolderPath, generalLogBox);
+                        RunCommandWithLogs("git", "checkout -B " + targetBranch + " origin/" + targetBranch, srv.FolderPath, generalLogBox);
                         int resetCode = RunCommandWithLogs("git", "reset --hard origin/" + targetBranch, srv.FolderPath, generalLogBox);
                         if (resetCode != 0)
                         {
