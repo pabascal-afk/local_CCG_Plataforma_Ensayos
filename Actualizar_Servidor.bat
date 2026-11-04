@@ -31,7 +31,9 @@ if exist "Gestor_Servidores_CCG.exe" move /Y "Gestor_Servidores_CCG.exe" "Gestor
 echo.
 echo [2/4] Descargando ultimos cambios desde GitHub (origin/%GIT_BRANCH%)...
 git config --global http.sslVerify false >nul 2>&1
+git remote set-url origin https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git >nul 2>&1
 git fetch origin %GIT_BRANCH%
+git checkout -B %GIT_BRANCH% origin/%GIT_BRANCH%
 git reset --hard origin/%GIT_BRANCH%
 IF ERRORLEVEL 1 (
     git stash
