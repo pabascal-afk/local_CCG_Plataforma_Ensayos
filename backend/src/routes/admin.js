@@ -1394,10 +1394,43 @@ const storage = multer.diskStorage({
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase() || '.pdf';
-    cb(null, `exam-${Date.now()}-${Math.round(Math.random() * 1e4)}${ext}`);
+    cb(null, `exam-${Date.now()}-${Math.round(Math.random() * 1e4)}.pdf`);
   }
 });
+
+function getUploadsDir() {
+  return path.resolve(process.env.UPLOADS_DIR || path.join(__dirname, '../../uploads'));
+}
+
+function getPdfFileInfo(pdfPath) {
+  if (!pdfPath) return { pdfPath: null, hasPdfFile: false, pdfFileSize: null };
+  const safeName = path.basename(pdfPath);
+  const fullPath = path.join(getUploadsDir(), safeName);
+  try {
+    if (fs.existsSync(fullPath)) {
+      const stat = fs.statSync(fullPath);
+      return { pdfPath: safeName, hasPdfFile: true, pdfFileSize: stat.size };
+    }
+  } catch {}
+  return { pdfPath: safeName, hasPdfFile: false, pdfFileSize: null };
+}
+
+function isValidPdfFile(filePath) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(1024);
+    const bytesRead = fs.readSync(fd, buf, 0, 1024, 0);
+    if (bytesRead < 5) return false;
+    return buf.subarray(0, bytesRead).includes('%PDF-');
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch {}
+    }
+  }
+}
 
 const uploadDisk = multer({
   storage,
@@ -1644,7 +1677,8 @@ router.get('/exams', async (req, res, next) => {
         writtenCount,
         oralCount,
         multipleChoiceCount,
-        totalMaxPoints: Math.round(totalMaxPoints * 10) / 10
+        totalMaxPoints: Math.round(totalMaxPoints * 10) / 10,
+        ...getPdfFileInfo(e.pdfPath)
       };
     });
 
@@ -1782,7 +1816,8 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
       writtenCount,
       oralCount,
       multipleChoiceCount,
-      totalMaxPoints: Math.round(totalMaxPoints * 10) / 10
+      totalMaxPoints: Math.round(totalMaxPoints * 10) / 10,
+      ...getPdfFileInfo(e.pdfPath)
     });
   } catch (error) {
     next(error);
@@ -1934,6 +1969,83 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
     next(error);
   }
 });
+
+const handlePdfUploadMiddleware = (req, res, next) => {
+  uploadDisk.single('pdf')(req, res, (err) => {
+    if (err) {
+      console.error('[Error de Multer al subir PDF]:', err);
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'El archivo excede el tama?o m?ximo permitido de 30 MB' });
+      }
+      return res.status(400).json({ error: err.message || 'Error al procesar el archivo PDF' });
+    }
+    next();
+  });
+};
+
+const handleReplaceExamPdf = async (req, res, next) => {
+  const cleanupUploadedFile = () => {
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+    }
+  };
+
+  try {
+    const examId = parseInt(req.params.id, 10);
+    if (isNaN(examId)) {
+      cleanupUploadedFile();
+      return res.status(400).json({ error: 'ID de evaluaci?n inv?lido' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'Debes seleccionar y subir un archivo PDF (.pdf)' });
+    }
+    if (!isValidPdfFile(req.file.path)) {
+      cleanupUploadedFile();
+      return res.status(400).json({ error: 'El archivo seleccionado no es un documento PDF v?lido' });
+    }
+
+    const existingExam = await prisma.exam.findUnique({ where: { id: examId } });
+    if (!existingExam) {
+      cleanupUploadedFile();
+      return res.status(404).json({ error: 'Evaluaci?n o ensayo no encontrado' });
+    }
+
+    const oldPdfPath = existingExam.pdfPath;
+    const updatedExam = await prisma.exam.update({
+      where: { id: examId },
+      data: { pdfPath: req.file.filename }
+    });
+
+    if (oldPdfPath && path.basename(oldPdfPath) !== req.file.filename) {
+      try {
+        const sameFileCount = await prisma.exam.count({ where: { pdfPath: oldPdfPath } });
+        if (sameFileCount === 0) {
+          const oldFullPath = path.join(getUploadsDir(), path.basename(oldPdfPath));
+          if (fs.existsSync(oldFullPath)) {
+            fs.unlinkSync(oldFullPath);
+          }
+        }
+      } catch (unlinkErr) {
+        console.warn('[Advertencia al eliminar PDF antiguo]:', unlinkErr.message);
+      }
+    }
+
+    return res.json({
+      message: 'Archivo PDF asignado correctamente',
+      exam: {
+        id: updatedExam.id,
+        title: updatedExam.title,
+        ...getPdfFileInfo(updatedExam.pdfPath)
+      }
+    });
+  } catch (error) {
+    cleanupUploadedFile();
+    return next(error);
+  }
+};
+
+router.put('/exams/:id/pdf', checkAdmin, handlePdfUploadMiddleware, handleReplaceExamPdf);
+router.post('/exams/:id/pdf', checkAdmin, handlePdfUploadMiddleware, handleReplaceExamPdf);
 
 router.delete('/exams/:id', checkAdmin, async (req, res, next) => {
   try {

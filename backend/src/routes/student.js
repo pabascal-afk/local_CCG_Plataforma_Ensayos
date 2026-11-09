@@ -164,6 +164,7 @@ router.post('/assignments/:id/start', async (req, res) => {
       title: assignment.exam.title,
       subject: assignment.exam.subject,
       optionsCount: assignment.exam.optionsCount,
+      pdfVersion: assignment.exam.pdfPath ? path.basename(assignment.exam.pdfPath) : '',
     },
     questions,
     audioClips,
@@ -185,12 +186,16 @@ router.get('/assignments/:id/pdf', async (req, res) => {
     return res.status(403).json({ error: 'El ensayo no está en curso' });
   }
 
-  const uploadsDir = path.resolve(process.env.UPLOADS_DIR || './uploads');
+  if (!assignment.exam?.pdfPath) {
+    return res.status(404).json({ error: 'Archivo PDF no encontrado' });
+  }
+
+  const uploadsDir = path.resolve(process.env.UPLOADS_DIR || path.join(__dirname, '../../uploads'));
   const filePath = path.join(uploadsDir, path.basename(assignment.exam.pdfPath));
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Archivo PDF no encontrado' });
 
   // sendFile soporta peticiones por rangos (Range), así pdf.js descarga por partes.
-  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
   res.sendFile(filePath);
 });
 

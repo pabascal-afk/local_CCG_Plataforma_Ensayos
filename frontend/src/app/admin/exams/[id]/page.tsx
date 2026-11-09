@@ -7,11 +7,13 @@ import { apiFetch } from "@/lib/api";
 import Link from "next/link";
 import { 
   ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, 
-  Sparkles, Headphones, Scissors, Plus, Trash2, ListPlus 
+  Sparkles, Headphones, Scissors, Plus, Trash2, ListPlus,
+  FileText, Eye, RefreshCw
 } from "lucide-react";
 import { getToken } from "@/lib/session";
 import AiPromptModal from "@/components/AiPromptModal";
 import AudioCutterModal from "@/components/AudioCutterModal";
+import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdfModal";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function AnswerKeyPage({ params }: { params: { id: string } }) {
@@ -22,6 +24,8 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const [saving, setSaving] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [showAudioModal, setShowAudioModal] = useState(false);
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [pdfModalPreview, setPdfModalPreview] = useState(false);
   
   const [answerKey, setAnswerKey] = useState<Record<string, string>>({});
   const [questionTypesKeys, setQuestionTypesKeys] = useState<Record<string, string>>({});
@@ -386,6 +390,25 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                   )}
                 </div>
 
+                {user.role === "ADMIN" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPdfModalPreview(false);
+                      setShowPdfModal(true);
+                    }}
+                    className={`px-3 py-2 rounded-lg font-bold text-xs md:text-sm flex items-center gap-1.5 border shadow-2xs transition cursor-pointer ${
+                      exam?.hasPdfFile === false
+                        ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300"
+                        : "bg-white hover:bg-slate-50 text-slate-700 border-slate-300"
+                    }`}
+                    title="Ver o asignar un nuevo archivo PDF"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
+                    <span>{exam?.hasPdfFile === false ? "Asignar PDF" : "Cambiar PDF"}</span>
+                  </button>
+                )}
+
                 <button 
                   onClick={handleSave}
                   disabled={saving}
@@ -400,6 +423,62 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
               
               {/* Sidebar herramientas */}
               <div className="md:col-span-1 space-y-4">
+
+                {/* Card Cuadernillo PDF */}
+                <div className={`p-4 rounded-xl border shadow-sm space-y-2.5 ${
+                  exam?.hasPdfFile === false
+                    ? "bg-amber-50/80 border-amber-200"
+                    : "bg-white border-gray-200"
+                }`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-bold text-sm text-gray-800 flex items-center gap-1.5">
+                      <FileText className={`w-4 h-4 ${exam?.hasPdfFile === false ? "text-amber-600" : "text-blue-600"}`} />
+                      <span>Archivo PDF</span>
+                    </h3>
+                    {exam?.hasPdfFile === false ? (
+                      <span className="bg-amber-100 text-amber-800 font-extrabold text-[10px] px-2 py-0.5 rounded-full border border-amber-200">
+                        Sin archivo
+                      </span>
+                    ) : (
+                      <span className="bg-emerald-50 text-emerald-700 font-extrabold text-[10px] px-2 py-0.5 rounded-full border border-emerald-200">
+                        {exam?.pdfFileSize ? formatFileSize(exam.pdfFileSize) : "Cargado"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 leading-snug">
+                    {exam?.hasPdfFile === false
+                      ? `Este ${isPruebas ? "instrumento" : "ensayo"} no tiene PDF disponible en el servidor. Sube uno nuevo aquí.`
+                      : `Puedes previsualizar el PDF actual o asignar uno nuevo sin perder la pauta ni los audios.`}
+                  </p>
+                  <div className="flex flex-col gap-1.5 pt-0.5">
+                    {exam?.hasPdfFile !== false && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPdfModalPreview(true);
+                          setShowPdfModal(true);
+                        }}
+                        className="w-full px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-slate-600" />
+                        <span>Ver PDF actual</span>
+                      </button>
+                    )}
+                    {user.role === "ADMIN" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPdfModalPreview(false);
+                          setShowPdfModal(true);
+                        }}
+                        className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs transition cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>{exam?.hasPdfFile === false ? "Asignar PDF" : "Asignar Nuevo PDF"}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
 
                 {/* Card Cantidad de Preguntas */}
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
@@ -789,6 +868,35 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
             questionCount={maxQ}
             initialQuestionNumber={selectedAudioQuestion}
             onClipsUpdated={loadExam}
+          />
+
+          {/* Modal Reemplazar / Asignar Nuevo PDF */}
+          <ReplaceExamPdfModal
+            isOpen={showPdfModal}
+            onClose={() => setShowPdfModal(false)}
+            exam={exam ? {
+              id: exam.id,
+              title: exam.title,
+              subject: exam.subject,
+              level: exam.level,
+              pdfPath: exam.pdfPath,
+              hasPdfFile: exam.hasPdfFile,
+              pdfFileSize: exam.pdfFileSize,
+            } : null}
+            canReplace={user.role === "ADMIN"}
+            initialPreview={pdfModalPreview}
+            onPdfUpdated={(updated) => {
+              setExam((prev: any) =>
+                prev
+                  ? {
+                      ...prev,
+                      pdfPath: updated.pdfPath,
+                      hasPdfFile: updated.hasPdfFile ?? true,
+                      pdfFileSize: updated.pdfFileSize,
+                    }
+                  : prev
+              );
+            }}
           />
         </AppShell>
       )}
