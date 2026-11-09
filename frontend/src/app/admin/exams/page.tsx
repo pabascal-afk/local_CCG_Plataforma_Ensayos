@@ -8,11 +8,12 @@ import Link from "next/link";
 import { 
   ArrowLeft, Trash2, FileText, Plus, Download, Search, 
   Filter, BookOpen, Layers, Clock, X, ChevronRight, Check, Sparkles,
-  ChevronDown, ChevronUp, Headphones, FileSpreadsheet
+  ChevronDown, ChevronUp, Headphones, FileSpreadsheet, Eye, RefreshCw
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal from "@/components/AiPromptModal";
 import AudioCutterModal from "@/components/AudioCutterModal";
+import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdfModal";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type CourseItem = {
@@ -34,6 +35,9 @@ type Exam = {
   questionCount: number;
   optionsCount?: number;
   createdAt?: string;
+  pdfPath?: string | null;
+  hasPdfFile?: boolean;
+  pdfFileSize?: number | null;
   assignedCourses?: CourseItem[];
   audioClipsCount?: number;
   hasAudios?: boolean;
@@ -105,6 +109,8 @@ export default function ExamsPage() {
   const [onlyAudioFilter, setOnlyAudioFilter] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [selectedAudioExam, setSelectedAudioExam] = useState<Exam | null>(null);
+  const [selectedPdfExam, setSelectedPdfExam] = useState<Exam | null>(null);
+  const [pdfModalInitialPreview, setPdfModalInitialPreview] = useState(false);
   const isPruebas = useIsPruebas();
 
   // Tarjetas compactas por defecto (disclosure progresivo)
@@ -652,33 +658,59 @@ export default function ExamsPage() {
                           </h2>
                         </div>
 
-                        {/* Fila 3: Metadatos simples y limpios (1 sola línea, sin colisiones) */}
-                        <div className="flex items-center gap-2 text-xs text-gray-500 pt-2 border-t border-gray-100 font-medium">
-                          <span className="text-gray-800 font-semibold">{e.questionCount} preg</span>
-                          <span>•</span>
-                          <span>{e.durationMinutes ? `${e.durationMinutes} min` : "Libre"}</span>
-                          <span>•</span>
-                          <span>{e.optionsCount ? `${e.optionsCount} alt.` : "4 alt."}</span>
-                          {Boolean(e.writtenCount && e.writtenCount > 0) && (
-                            <>
-                              <span>•</span>
-                              <span className="text-amber-700 font-semibold">{e.writtenCount} esc.</span>
-                            </>
-                          )}
-                          {Boolean(e.oralCount && e.oralCount > 0) && (
-                            <>
-                              <span>•</span>
-                              <span className="text-purple-700 font-semibold">{e.oralCount} oral</span>
-                            </>
-                          )}
-                          {hasAudio && (
-                            <>
-                              <span>•</span>
-                              <span className="text-purple-700 font-bold inline-flex items-center gap-0.5">
-                                <Headphones className="w-3 h-3" /> Audio
-                              </span>
-                            </>
-                          )}
+                        {/* Fila 3: Metadatos simples y limpios */}
+                        <div className="flex items-center justify-between gap-2 text-xs text-gray-500 pt-2 border-t border-gray-100 font-medium">
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <span className="text-gray-800 font-semibold">{e.questionCount} preg</span>
+                            <span>•</span>
+                            <span>{e.durationMinutes ? `${e.durationMinutes} min` : "Libre"}</span>
+                            <span>•</span>
+                            <span>{e.optionsCount ? `${e.optionsCount} alt.` : "4 alt."}</span>
+                            {Boolean(e.writtenCount && e.writtenCount > 0) && (
+                              <>
+                                <span>•</span>
+                                <span className="text-amber-700 font-semibold">{e.writtenCount} esc.</span>
+                              </>
+                            )}
+                            {Boolean(e.oralCount && e.oralCount > 0) && (
+                              <>
+                                <span>•</span>
+                                <span className="text-purple-700 font-semibold">{e.oralCount} oral</span>
+                              </>
+                            )}
+                            {hasAudio && (
+                              <>
+                                <span>•</span>
+                                <span className="text-purple-700 font-bold inline-flex items-center gap-0.5">
+                                  <Headphones className="w-3 h-3" /> Audio
+                                </span>
+                              </>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setPdfModalInitialPreview(user.role !== "ADMIN");
+                              setSelectedPdfExam(e);
+                            }}
+                            className={`shrink-0 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md border transition cursor-pointer ${
+                              e.hasPdfFile === false
+                                ? "text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-300"
+                                : "text-blue-700 bg-blue-50 hover:bg-blue-100 border-blue-200"
+                            }`}
+                            title={
+                              e.hasPdfFile === false
+                                ? "Archivo PDF faltante. Clic para asignar un nuevo PDF."
+                                : user.role === "ADMIN"
+                                ? "Ver o asignar un nuevo PDF"
+                                : "Ver PDF"
+                            }
+                          >
+                            <FileText className="w-3 h-3 shrink-0" />
+                            <span>{e.hasPdfFile === false ? "Sin PDF" : "PDF"}</span>
+                          </button>
                         </div>
                       </div>
 
@@ -720,6 +752,57 @@ export default function ExamsPage() {
                                 {e.durationMinutes ? `${e.durationMinutes} min` : "Libre"}
                               </span>
                               <span className="text-[10px] text-gray-500 block">Duración</span>
+                            </div>
+                          </div>
+
+                          {/* Documento PDF del Instrumento */}
+                          <div
+                            className={`p-2.5 rounded-lg border flex flex-wrap items-center justify-between gap-2 text-xs ${
+                              e.hasPdfFile === false
+                                ? "bg-amber-50/90 border-amber-200 text-amber-900"
+                                : "bg-white border-gray-200 text-gray-800"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FileText className={`w-4 h-4 shrink-0 ${e.hasPdfFile === false ? "text-amber-600" : "text-blue-600"}`} />
+                              <span className="truncate">
+                                {e.hasPdfFile === false ? (
+                                  <strong>Archivo PDF no encontrado</strong>
+                                ) : (
+                                  <>
+                                    <strong>Documento PDF</strong>
+                                    {e.pdfFileSize ? <span className="text-gray-500 ml-1">({formatFileSize(e.pdfFileSize)})</span> : null}
+                                  </>
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {e.hasPdfFile !== false && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPdfModalInitialPreview(true);
+                                    setSelectedPdfExam(e);
+                                  }}
+                                  className="inline-flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] px-2.5 py-1 rounded-md transition cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>Ver PDF</span>
+                                </button>
+                              )}
+                              {user.role === "ADMIN" && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPdfModalInitialPreview(false);
+                                    setSelectedPdfExam(e);
+                                  }}
+                                  className="inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] px-2.5 py-1 rounded-md transition cursor-pointer"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  <span>{e.hasPdfFile === false ? "Asignar PDF" : "Cambiar PDF"}</span>
+                                </button>
+                              )}
                             </div>
                           </div>
 
@@ -829,6 +912,39 @@ export default function ExamsPage() {
               onClipsUpdated={loadData}
             />
           )}
+
+          {/* Modal Ver / Asignar Nuevo PDF */}
+          <ReplaceExamPdfModal
+            isOpen={Boolean(selectedPdfExam)}
+            onClose={() => setSelectedPdfExam(null)}
+            exam={selectedPdfExam}
+            canReplace={user.role === "ADMIN"}
+            initialPreview={pdfModalInitialPreview}
+            onPdfUpdated={(updated) => {
+              setExams((prev) =>
+                prev.map((item) =>
+                  item.id === updated.id
+                    ? {
+                        ...item,
+                        pdfPath: updated.pdfPath,
+                        hasPdfFile: updated.hasPdfFile ?? true,
+                        pdfFileSize: updated.pdfFileSize,
+                      }
+                    : item
+                )
+              );
+              setSelectedPdfExam((prev) =>
+                prev && prev.id === updated.id
+                  ? {
+                      ...prev,
+                      pdfPath: updated.pdfPath,
+                      hasPdfFile: updated.hasPdfFile ?? true,
+                      pdfFileSize: updated.pdfFileSize,
+                    }
+                  : prev
+              );
+            }}
+          />
         </AppShell>
       )}
     </RequireRole>

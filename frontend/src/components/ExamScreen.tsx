@@ -32,7 +32,7 @@ const ALL_OPTIONS = ["A", "B", "C", "D", "E"];
 interface StartData {
   submissionId: number;
   assignmentId: number;
-  exam: { id: number; title: string; subject: string; optionsCount: number };
+  exam: { id: number; title: string; subject: string; optionsCount: number; pdfVersion?: string };
   questions: { id: number; questionNumber: number; questionType?: string; maxPoints?: number }[];
   audioClips?: StudentAudioClip[];
   answers: Record<string, string>;
@@ -268,10 +268,17 @@ export default function ExamScreen({ assignmentId }: { assignmentId: number }) {
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
+  const pdfVersion = data?.exam?.pdfVersion || "";
+
   // El objeto file debe ser estable para que react-pdf no recargue el PDF en cada render
   const pdfFile = useMemo(
-    () => ({ url: `/api/student/assignments/${assignmentId}/pdf`, httpHeaders: authHeaders() }),
-    [assignmentId]
+    () => ({
+      url: pdfVersion
+        ? `/api/student/assignments/${assignmentId}/pdf?v=${encodeURIComponent(pdfVersion)}`
+        : `/api/student/assignments/${assignmentId}/pdf`,
+      httpHeaders: authHeaders(),
+    }),
+    [assignmentId, pdfVersion]
   );
 
   if (fatal) {
