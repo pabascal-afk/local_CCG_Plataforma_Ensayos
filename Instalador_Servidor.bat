@@ -8,11 +8,13 @@ if %errorlevel% equ 0 (
     set APP_NAME=PRUEBAS CCG
     set APP_PORT=3600
     set APP_BACKEND_PORT=3601
+    set GIT_BRANCH=pruebas-ccg
 ) else (
     set IS_PRUEBAS=0
     set APP_NAME=Plataforma Ensayos SIMCE
     set APP_PORT=3300
     set APP_BACKEND_PORT=3001
+    set GIT_BRANCH=main
 )
 
 title Instalador / Actualizador - %APP_NAME% (Puerto %APP_PORT%)
@@ -59,19 +61,30 @@ IF EXIST ".git" (
     echo [INFO] Repositorio detectado.
     echo [INFO] Deteniendo servidores y liberando puertos %APP_PORT% y %APP_BACKEND_PORT%...
     powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort %APP_PORT%,%APP_BACKEND_PORT% -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
-    echo [INFO] Obteniendo actualizaciones desde GitHub...
-    git fetch origin main
-    git pull origin main
+    del /F /Q "Gestor_Servidores_CCG.exe.old*" >nul 2>&1
+    del /F /Q "ccg.exe.old*" >nul 2>&1
+    del /F /Q "Lanzador_Plataforma.exe.old*" >nul 2>&1
+    if exist "Gestor_Servidores_CCG.exe" move /Y "Gestor_Servidores_CCG.exe" "Gestor_Servidores_CCG.exe.old" >nul 2>&1
+    if exist "ccg.exe" move /Y "ccg.exe" "ccg.exe.old" >nul 2>&1
+    if exist "Lanzador_Plataforma.exe" move /Y "Lanzador_Plataforma.exe" "Lanzador_Plataforma.exe.old" >nul 2>&1
+    echo [INFO] Obteniendo actualizaciones desde GitHub (origin/%GIT_BRANCH%)...
+    git remote set-url origin https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git >nul 2>&1
+    git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" >nul 2>&1
+    git fetch origin +refs/heads/%GIT_BRANCH%:refs/remotes/origin/%GIT_BRANCH%
+    git checkout -B %GIT_BRANCH% origin/%GIT_BRANCH%
+    git reset --hard origin/%GIT_BRANCH%
     IF ERRORLEVEL 1 (
-        echo [AVISO] git pull tuvo dificultades por archivos locales modificados.
-        echo [INFO] Guardando cambios locales y sincronizando con origin/main...
+        echo [AVISO] git reset tuvo dificultades por archivos locales bloqueados.
+        echo [INFO] Guardando cambios locales y sincronizando con origin/%GIT_BRANCH%...
         git stash
-        git pull origin main
+        git fetch origin +refs/heads/%GIT_BRANCH%:refs/remotes/origin/%GIT_BRANCH%
+        git checkout -B %GIT_BRANCH% origin/%GIT_BRANCH%
+        git reset --hard origin/%GIT_BRANCH%
     )
 ) ELSE (
-    echo [INFO] Iniciando instalacion por primera vez...
+    echo [INFO] Iniciando instalacion por primera vez (rama %GIT_BRANCH%)...
     echo [INFO] Clonando repositorio desde GitHub...
-    git clone https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git .
+    git clone -b %GIT_BRANCH% https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git .
     IF ERRORLEVEL 1 (
         color 0C
         echo [ERROR] Hubo un problema al clonar el repositorio.
@@ -114,6 +127,10 @@ echo.
 echo ==========================================================
 echo   [2/3] Instalando y compilando Frontend (Next.js)...
 echo ==========================================================
+set PORT=%APP_PORT%
+set BACKEND_PORT=%APP_BACKEND_PORT%
+set API_INTERNAL_URL=http://127.0.0.1:%APP_BACKEND_PORT%
+if "%IS_PRUEBAS%"=="1" set APP_MODE=PRUEBAS
 cd frontend
 IF NOT EXIST "node_modules\qrcode" (
     echo [INFO] Instalando dependencias de frontend: qrcode, jsqr...
