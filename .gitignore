@@ -38,7 +38,7 @@ npm-debug.log*
 scratch/
 .system_generated/
 *.tmp
-*.exe.old
+*.exe.old*
 
 # OS files
 Thumbs.db

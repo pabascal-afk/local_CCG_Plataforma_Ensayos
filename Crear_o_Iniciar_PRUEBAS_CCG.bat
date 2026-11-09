@@ -14,19 +14,16 @@ set "DEST_DIR=%~dp0..\PRUEBAS CCG"
 IF EXIST "%DEST_DIR%\server.js" GOTO :EXISTING_INSTALL
 
 :NEW_INSTALL
-echo [1/5] Creando carpeta independiente para pruebas en:
+echo [1/5] Creando carpeta independiente para pruebas (rama pruebas-ccg) en:
 echo       "%DEST_DIR%"
 echo.
-git clone . "%DEST_DIR%"
+git config --global http.sslVerify false >nul 2>&1
+git clone -b pruebas-ccg https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git "%DEST_DIR%"
 IF ERRORLEVEL 1 (
-    echo [INFO] Clonando desde GitHub remoto...
-    git clone https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git "%DEST_DIR%"
-    IF ERRORLEVEL 1 (
-        color 0C
-        echo [ERROR] No se pudo clonar el repositorio en "%DEST_DIR%".
-        pause
-        exit /b 1
-    )
+    color 0C
+    echo [ERROR] No se pudo clonar el repositorio en "%DEST_DIR%".
+    pause
+    exit /b 1
 )
 
 echo.
@@ -73,11 +70,14 @@ GOTO :LAUNCH_SERVER
 
 :EXISTING_INSTALL
 echo [INFO] La instancia "%DEST_DIR%" ya existe.
-echo [INFO] Sincronizando con los ultimos cambios de GitHub (origin/main)...
+echo [INFO] Sincronizando con los ultimos cambios de GitHub (origin/pruebas-ccg)...
 cd /d "%DEST_DIR%"
 git config --global http.sslVerify false >nul 2>&1
-git fetch origin main >nul 2>&1
-git pull origin main >nul 2>&1
+git remote set-url origin https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git >nul 2>&1
+git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" >nul 2>&1
+git fetch origin +refs/heads/pruebas-ccg:refs/remotes/origin/pruebas-ccg
+git checkout -B pruebas-ccg origin/pruebas-ccg
+git reset --hard origin/pruebas-ccg
 cd /d "%~dp0"
 
 :LAUNCH_SERVER

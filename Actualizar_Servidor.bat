@@ -25,14 +25,22 @@ echo.
 
 echo [1/4] Deteniendo instancias previas en los puertos %APP_PORT% y %APP_BACKEND_PORT%...
 powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort %APP_PORT%,%APP_BACKEND_PORT% -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1
-if exist "Gestor_Servidores_CCG.exe.old" del /F /Q "Gestor_Servidores_CCG.exe.old" >nul 2>&1
-if exist "Gestor_Servidores_CCG.exe" move /Y "Gestor_Servidores_CCG.exe" "Gestor_Servidores_CCG.exe.old" >nul 2>&1
+del /F /Q "Gestor_Servidores_CCG.exe.old*" >nul 2>&1
+del /F /Q "ccg.exe.old*" >nul 2>&1
+del /F /Q "Lanzador_Plataforma.exe.old*" >nul 2>&1
+if exist "Gestor_Servidores_CCG.exe" (
+    move /Y "Gestor_Servidores_CCG.exe" "Gestor_Servidores_CCG.exe.old" >nul 2>&1
+    if exist "Gestor_Servidores_CCG.exe" move /Y "Gestor_Servidores_CCG.exe" "Gestor_Servidores_CCG.exe.old.%RANDOM%" >nul 2>&1
+)
+if exist "ccg.exe" move /Y "ccg.exe" "ccg.exe.old" >nul 2>&1
+if exist "Lanzador_Plataforma.exe" move /Y "Lanzador_Plataforma.exe" "Lanzador_Plataforma.exe.old" >nul 2>&1
 
 echo.
 echo [2/4] Descargando ultimos cambios desde GitHub (origin/%GIT_BRANCH%)...
 git config --global http.sslVerify false >nul 2>&1
 git remote set-url origin https://github.com/pabascal-afk/local_CCG_Plataforma_Ensayos.git >nul 2>&1
-git fetch origin %GIT_BRANCH%
+git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" >nul 2>&1
+git fetch origin +refs/heads/%GIT_BRANCH%:refs/remotes/origin/%GIT_BRANCH%
 git checkout -B %GIT_BRANCH% origin/%GIT_BRANCH%
 git reset --hard origin/%GIT_BRANCH%
 IF ERRORLEVEL 1 (
@@ -49,6 +57,10 @@ cd ..
 
 echo.
 echo [4/4] Verificando dependencias y compilando Frontend Next.js para produccion en puerto %APP_PORT%...
+set PORT=%APP_PORT%
+set BACKEND_PORT=%APP_BACKEND_PORT%
+set API_INTERNAL_URL=http://127.0.0.1:%APP_BACKEND_PORT%
+if /I "%GIT_BRANCH%"=="pruebas-ccg" set APP_MODE=PRUEBAS
 cd frontend
 IF NOT EXIST "node_modules\qrcode" (
     echo [INFO] Instalando dependencias faltantes en frontend: qrcode, jsqr...
