@@ -16,6 +16,8 @@ interface StudentQuestionAudioPlayerProps {
   assignmentId: number;
   clip: StudentAudioClip;
   token?: string;
+  mockExamId?: number;
+  mockResetKey?: number;
 }
 
 function fmtSec(sec: number): string {
@@ -29,6 +31,8 @@ export default function StudentQuestionAudioPlayer({
   assignmentId,
   clip,
   token,
+  mockExamId,
+  mockResetKey = 0,
 }: StudentQuestionAudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [clipCurrentTime, setClipCurrentTime] = useState(0);
@@ -42,23 +46,34 @@ export default function StudentQuestionAudioPlayer({
   const rawEnd = clip.endSec;
   const clipDuration = rawEnd !== null && rawEnd !== undefined && rawEnd > startSec ? rawEnd - startSec : 0;
 
-  // Clave en localStorage para recordar escuchas del alumno en esta estación
-  const storageKey = `ccg_audio_plays_${assignmentId}_${clip.id}`;
+  const isMock = Boolean(mockExamId);
+  // En modo Mocktest se usa sessionStorage para no afectar ni persistir escuchas reales
+  const storageKey = isMock
+    ? `ccg_mock_audio_plays_${mockExamId}_${clip.id}`
+    : `ccg_audio_plays_${assignmentId}_${clip.id}`;
+
+  const savePlayCount = (nextCount: number) => {
+    try {
+      const store = isMock ? sessionStorage : localStorage;
+      store.setItem(storageKey, String(nextCount));
+    } catch {}
+  };
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(storageKey);
-      if (stored) {
-        setPlayCount(parseInt(stored, 10) || 0);
-      }
+      const store = isMock ? sessionStorage : localStorage;
+      const stored = store.getItem(storageKey);
+      setPlayCount(stored ? parseInt(stored, 10) || 0 : 0);
     } catch {}
-  }, [storageKey]);
+  }, [storageKey, isMock, mockResetKey]);
 
   const maxPlays = clip.maxPlays;
   const isLimitReached = maxPlays !== null && maxPlays !== undefined && playCount >= maxPlays;
   const remainingPlays = maxPlays !== null && maxPlays !== undefined ? Math.max(0, maxPlays - playCount) : null;
 
-  const audioSrc = `/api/student/assignments/${assignmentId}/audios/${clip.id}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  const audioSrc = isMock
+    ? `/api/admin/exams/${mockExamId}/audios/${clip.id}/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`
+    : `/api/student/assignments/${assignmentId}/audios/${clip.id}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 
   const handleTimeUpdate = () => {
     const audio = audioRef.current;
@@ -83,9 +98,7 @@ export default function StudentQuestionAudioPlayer({
       if (hasStartedThisPlayRef.current) {
         const nextCount = playCount + 1;
         setPlayCount(nextCount);
-        try {
-          localStorage.setItem(storageKey, String(nextCount));
-        } catch {}
+        savePlayCount(nextCount);
         hasStartedThisPlayRef.current = false;
       }
       return;
@@ -159,9 +172,7 @@ export default function StudentQuestionAudioPlayer({
           if (hasStartedThisPlayRef.current) {
             const nextCount = playCount + 1;
             setPlayCount(nextCount);
-            try {
-              localStorage.setItem(storageKey, String(nextCount));
-            } catch {}
+            savePlayCount(nextCount);
             hasStartedThisPlayRef.current = false;
           }
         }}

@@ -9,6 +9,7 @@ const exceljs = require('exceljs');
 const { normalizeRut } = require('../utils/rut');
 const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet');
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
+const { computeResults } = require('../services/grading');
 
 const router = express.Router();
 const uploadMemory = multer({ storage: multer.memoryStorage() });
@@ -1975,7 +1976,7 @@ const handlePdfUploadMiddleware = (req, res, next) => {
     if (err) {
       console.error('[Error de Multer al subir PDF]:', err);
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ error: 'El archivo excede el tama?o m?ximo permitido de 30 MB' });
+        return res.status(400).json({ error: 'El archivo excede el tamaño máximo permitido de 30 MB' });
       }
       return res.status(400).json({ error: err.message || 'Error al procesar el archivo PDF' });
     }
@@ -1994,20 +1995,20 @@ const handleReplaceExamPdf = async (req, res, next) => {
     const examId = parseInt(req.params.id, 10);
     if (isNaN(examId)) {
       cleanupUploadedFile();
-      return res.status(400).json({ error: 'ID de evaluaci?n inv?lido' });
+      return res.status(400).json({ error: 'ID de evaluación inválido' });
     }
     if (!req.file) {
       return res.status(400).json({ error: 'Debes seleccionar y subir un archivo PDF (.pdf)' });
     }
     if (!isValidPdfFile(req.file.path)) {
       cleanupUploadedFile();
-      return res.status(400).json({ error: 'El archivo seleccionado no es un documento PDF v?lido' });
+      return res.status(400).json({ error: 'El archivo seleccionado no es un documento PDF válido' });
     }
 
     const existingExam = await prisma.exam.findUnique({ where: { id: examId } });
     if (!existingExam) {
       cleanupUploadedFile();
-      return res.status(404).json({ error: 'Evaluaci?n o ensayo no encontrado' });
+      return res.status(404).json({ error: 'Evaluación o ensayo no encontrado' });
     }
 
     const oldPdfPath = existingExam.pdfPath;
@@ -2046,6 +2047,189 @@ const handleReplaceExamPdf = async (req, res, next) => {
 
 router.put('/exams/:id/pdf', checkAdmin, handlePdfUploadMiddleware, handleReplaceExamPdf);
 router.post('/exams/:id/pdf', checkAdmin, handlePdfUploadMiddleware, handleReplaceExamPdf);
+
+// ==========================================
+// MOCKTEST EN VIVO (ESTUDIANTE FALSO / AISLADO DE BD)
+// ==========================================
+const handleStartMockSession = async (req, res, next) => {
+  try {
+    const examId = parseInt(req.params.id, 10);
+    if (isNaN(examId)) {
+      return res.status(400).json({ error: 'ID de evaluación inválido' });
+    }
+
+    const exam = await prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        questions: { orderBy: { questionNumber: 'asc' } },
+        audioClips: { orderBy: [{ orderIndex: 'asc' }, { id: 'asc' }] }
+      }
+    });
+    if (!exam) {
+      return res.status(404).json({ error: 'Evaluación o ensayo no encontrado' });
+    }
+
+    const levelLabel = (exam.level || '4B').replace('B', '° Básico').replace('M', '° Medio');
+    const now = new Date();
+    const durationMinutes = exam.durationMinutes && exam.durationMinutes > 0 ? exam.durationMinutes : 90;
+    const deadline = new Date(now.getTime() + durationMinutes * 60 * 1000);
+
+    const audioClips = (exam.audioClips || []).map((c) => {
+      let qNums = [];
+      try {
+        qNums = JSON.parse(c.questionNumbers || '[]');
+      } catch {
+        qNums = [];
+      }
+      return {
+        id: c.id,
+        title: c.title,
+        startSec: c.startSec,
+        endSec: c.endSec,
+        questionNumbers: qNums,
+        maxPlays: c.maxPlays
+      };
+    });
+
+    const pdfInfo = getPdfFileInfo(exam.pdfPath);
+
+    return res.json({
+      submissionId: 0,
+      assignmentId: 0,
+      isMock: true,
+      mockStudent: {
+        name: 'Sofía Mocktest (Estudiante Simulado)',
+        rut: '99.999.999-K',
+        courseName: `${levelLabel} · Simulación`
+      },
+      exam: {
+        id: exam.id,
+        title: exam.title,
+        subject: exam.subject,
+        level: exam.level,
+        examType: exam.examType,
+        optionsCount: exam.optionsCount || 4,
+        durationMinutes,
+        pdfVersion: pdfInfo.pdfPath || '',
+        hasPdfFile: pdfInfo.hasPdfFile
+      },
+      questions: (exam.questions || []).map((q) => ({
+        id: q.id,
+        questionNumber: q.questionNumber,
+        questionType: q.questionType || 'MULTIPLE_CHOICE',
+        maxPoints: q.maxPoints ?? 1
+      })),
+      audioClips,
+      answers: {},
+      serverNow: now.toISOString(),
+      deadline: deadline.toISOString()
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+router.post('/exams/:id/mock-session', handleStartMockSession);
+router.get('/exams/:id/mock-session', handleStartMockSession);
+
+router.post('/exams/:id/mock-grade', async (req, res, next) => {
+  try {
+    const examId = parseInt(req.params.id, 10);
+    if (isNaN(examId)) {
+      return res.status(400).json({ error: 'ID de evaluación inválido' });
+    }
+
+    const exam = await prisma.exam.findUnique({
+      where: { id: examId },
+      include: {
+        questions: { orderBy: { questionNumber: 'asc' } }
+      }
+    });
+    if (!exam) {
+      return res.status(404).json({ error: 'Evaluación o ensayo no encontrado' });
+    }
+
+    const rawAnswers = req.body?.answers && typeof req.body.answers === 'object' ? req.body.answers : {};
+    const rawAwarded = req.body?.awardedPoints && typeof req.body.awardedPoints === 'object' ? req.body.awardedPoints : {};
+
+    const allowedMc = ['A', 'B', 'C', 'D', 'E'].slice(0, exam.optionsCount || 4);
+    const answersMap = {};
+    const awardedPointsMap = {};
+    const questionById = Object.fromEntries((exam.questions || []).map((q) => [q.id, q]));
+
+    for (const q of exam.questions || []) {
+      const val = rawAnswers[q.id] ?? rawAnswers[String(q.id)];
+      const qType = q.questionType || 'MULTIPLE_CHOICE';
+      if (val !== undefined && val !== null && String(val).trim() !== '') {
+        if (qType === 'MULTIPLE_CHOICE') {
+          const upper = String(val).trim().toUpperCase();
+          if (allowedMc.includes(upper)) {
+            answersMap[q.id] = upper;
+          }
+        } else if (qType === 'WRITTEN') {
+          answersMap[q.id] = String(val).slice(0, 25000);
+        }
+      }
+
+      if (qType === 'WRITTEN' || qType === 'ORAL') {
+        const ptsRaw = rawAwarded[q.id] ?? rawAwarded[String(q.id)];
+        if (ptsRaw !== undefined && ptsRaw !== null && String(ptsRaw).trim() !== '') {
+          const ptsNum = Number(ptsRaw);
+          const maxPts = Number(q.maxPoints) > 0 ? Number(q.maxPoints) : 1;
+          if (Number.isFinite(ptsNum)) {
+            awardedPointsMap[q.id] = Math.max(0, Math.min(maxPts, ptsNum));
+          }
+        }
+      }
+    }
+
+    const results = computeResults(exam.questions || [], answersMap, exam, awardedPointsMap);
+    const perQuestion = results.perQuestion.map((pq) => {
+      const q = questionById[pq.questionId];
+      return {
+        questionId: pq.questionId,
+        questionNumber: q?.questionNumber,
+        questionType: q?.questionType || 'MULTIPLE_CHOICE',
+        selected: pq.selected,
+        correctAnswer: q?.correctAnswer || '',
+        isCorrect: pq.isCorrect,
+        awardedPoints: pq.awardedPoints,
+        maxPoints: pq.maxPoints,
+        skill: q?.skill || null,
+        axis: q?.axis || null,
+        learningObjective: q?.learningObjective || null
+      };
+    });
+
+    return res.json({
+      isMock: true,
+      exam: {
+        id: exam.id,
+        title: exam.title,
+        subject: exam.subject,
+        level: exam.level,
+        examType: exam.examType,
+        optionsCount: exam.optionsCount || 4
+      },
+      submittedAt: new Date().toISOString(),
+      correctCount: results.correctCount,
+      total: results.total,
+      maxPoints: results.maxPoints,
+      earnedPoints: results.earnedPoints,
+      percent: results.percent,
+      grade: results.grade,
+      achievementLevel: results.achievementLevel,
+      simceScore: results.simceScore,
+      theta: results.theta,
+      seTheta: results.seTheta,
+      bySkill: results.bySkill,
+      byAxis: results.byAxis,
+      perQuestion
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
 
 router.delete('/exams/:id', checkAdmin, async (req, res, next) => {
   try {

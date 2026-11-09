@@ -8,7 +8,7 @@ import Link from "next/link";
 import { 
   ArrowLeft, Trash2, FileText, Plus, Download, Search, 
   Filter, BookOpen, Layers, Clock, X, ChevronRight, Check, Sparkles,
-  ChevronDown, ChevronUp, Headphones, FileSpreadsheet, Eye, RefreshCw
+  ChevronDown, ChevronUp, Headphones, FileSpreadsheet, Eye, RefreshCw, Play
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal from "@/components/AiPromptModal";
@@ -688,29 +688,43 @@ export default function ExamsPage() {
                             )}
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              setPdfModalInitialPreview(user.role !== "ADMIN");
-                              setSelectedPdfExam(e);
-                            }}
-                            className={`shrink-0 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md border transition cursor-pointer ${
-                              e.hasPdfFile === false
-                                ? "text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-300"
-                                : "text-blue-700 bg-blue-50 hover:bg-blue-100 border-blue-200"
-                            }`}
-                            title={
-                              e.hasPdfFile === false
-                                ? "Archivo PDF faltante. Clic para asignar un nuevo PDF."
-                                : user.role === "ADMIN"
-                                ? "Ver o asignar un nuevo PDF"
-                                : "Ver PDF"
-                            }
-                          >
-                            <FileText className="w-3 h-3 shrink-0" />
-                            <span>{e.hasPdfFile === false ? "Sin PDF" : "PDF"}</span>
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <a
+                              href={`/admin/exams/${e.id}/mock`}
+                              target="_blank"
+                              rel="opener"
+                              onClick={(ev) => ev.stopPropagation()}
+                              className="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md border text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200 transition cursor-pointer"
+                              title="Tomar Mocktest en otra pestaña con un estudiante falso"
+                            >
+                              <Play className="w-3 h-3 fill-current shrink-0" />
+                              <span>Mocktest</span>
+                            </a>
+
+                            <button
+                              type="button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                setPdfModalInitialPreview(user.role !== "ADMIN");
+                                setSelectedPdfExam(e);
+                              }}
+                              className={`shrink-0 inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md border transition cursor-pointer ${
+                                e.hasPdfFile === false
+                                  ? "text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-300"
+                                  : "text-blue-700 bg-blue-50 hover:bg-blue-100 border-blue-200"
+                              }`}
+                              title={
+                                e.hasPdfFile === false
+                                  ? "Archivo PDF faltante. Clic para asignar un nuevo PDF."
+                                  : user.role === "ADMIN"
+                                  ? "Ver o asignar un nuevo PDF"
+                                  : "Ver PDF"
+                              }
+                            >
+                              <FileText className="w-3 h-3 shrink-0" />
+                              <span>{e.hasPdfFile === false ? "Sin PDF" : "PDF"}</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -863,7 +877,7 @@ export default function ExamsPage() {
                               <span>Eliminar</span>
                             </button>
 
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               {hasAudio && (
                                 <button 
                                   type="button"
@@ -874,6 +888,16 @@ export default function ExamsPage() {
                                   <span>Audios</span>
                                 </button>
                               )}
+                              <a
+                                href={`/admin/exams/${e.id}/mock`}
+                                target="_blank"
+                                rel="opener"
+                                className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-2.5 py-1.5 rounded-lg shadow-xs transition"
+                                title="Abrir Mocktest en otra pestaña con un estudiante falso"
+                              >
+                                <Play className="w-3.5 h-3.5 fill-current" />
+                                <span>Tomar Mocktest</span>
+                              </a>
                               <Link 
                                 href={`/admin/exams/${e.id}`} 
                                 className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"

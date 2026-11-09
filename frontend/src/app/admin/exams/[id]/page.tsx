@@ -8,7 +8,7 @@ import Link from "next/link";
 import { 
   ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, 
   Sparkles, Headphones, Scissors, Plus, Trash2, ListPlus,
-  FileText, Eye, RefreshCw
+  FileText, Eye, RefreshCw, Play
 } from "lucide-react";
 import { getToken } from "@/lib/session";
 import AiPromptModal from "@/components/AiPromptModal";
@@ -389,6 +389,17 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                     </button>
                   )}
                 </div>
+
+                <a
+                  href={`/admin/exams/${exam.id}/mock`}
+                  target="_blank"
+                  rel="opener"
+                  className="px-3 py-2 rounded-lg font-bold text-xs md:text-sm flex items-center gap-1.5 border bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 shadow-2xs transition cursor-pointer"
+                  title="Rendir Mocktest en otra pestaña con un estudiante falso"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Mocktest</span>
+                </a>
 
                 {user.role === "ADMIN" && (
                   <button
