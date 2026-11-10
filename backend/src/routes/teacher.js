@@ -8,7 +8,13 @@ const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const { normalizeRut } = require('../utils/rut');
 const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet');
-const { computeResults, isOpenQuestion, getQuestionMaxPoints } = require('../services/grading');
+const {
+  computeResults,
+  isOpenQuestion,
+  getQuestionMaxPoints,
+  normalizeGradingMode,
+  normalizePassThreshold
+} = require('../services/grading');
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
 
 const router = express.Router();
@@ -101,22 +107,29 @@ router.get('/assignments', async (req, res, next) => {
     });
     const courseTotals = Object.fromEntries(courses.map(c => [c.id, c._count.students]));
 
-    const result = assignments.map(a => ({
-      id: a.id,
-      examId: a.examId,
-      courseId: a.courseId,
-      courseName: `${a.course.level.replace('B', '° Básico').replace('M', '° Medio')} ${a.course.letter}`,
-      title: a.exam.title,
-      subject: a.exam.subject,
-      opensAt: a.opensAt,
-      closesAt: a.closesAt,
-      released: a.released,
-      releasedAt: a.releasedAt,
-      dynamicPassword: a.dynamicPassword,
-      dynamicPasswordActive: a.dynamicPasswordActive,
-      submissionsCount: a._count.submissions,
-      totalStudents: courseTotals[a.courseId] || 0
-    }));
+    const result = assignments.map(a => {
+      const gMode = normalizeGradingMode(a.exam?.gradingMode);
+      const pThresh = normalizePassThreshold(a.exam?.passThreshold, 0.6);
+      return {
+        id: a.id,
+        examId: a.examId,
+        courseId: a.courseId,
+        courseName: `${a.course.level.replace('B', '° Básico').replace('M', '° Medio')} ${a.course.letter}`,
+        title: a.exam.title,
+        subject: a.exam.subject,
+        gradingMode: gMode,
+        passThreshold: pThresh,
+        passThresholdPercent: Math.round(pThresh * 1000) / 10,
+        opensAt: a.opensAt,
+        closesAt: a.closesAt,
+        released: a.released,
+        releasedAt: a.releasedAt,
+        dynamicPassword: a.dynamicPassword,
+        dynamicPasswordActive: a.dynamicPasswordActive,
+        submissionsCount: a._count.submissions,
+        totalStudents: courseTotals[a.courseId] || 0
+      };
+    });
 
     res.json(result);
   } catch (error) {
@@ -159,16 +172,22 @@ router.get('/available-exams', async (req, res, next) => {
       },
       orderBy: [{ level: 'asc' }, { subject: 'asc' }, { orderNumber: 'asc' }]
     });
-    res.json(exams.map(e => ({
-      id: e.id,
-      title: e.title,
-      subject: e.subject,
-      level: e.level,
-      examType: e.examType,
-      orderNumber: e.orderNumber,
-      durationMinutes: e.durationMinutes,
-      questionCount: e._count.questions
-    })));
+    res.json(exams.map(e => {
+      const pThresh = normalizePassThreshold(e.passThreshold, 0.6);
+      return {
+        id: e.id,
+        title: e.title,
+        subject: e.subject,
+        level: e.level,
+        examType: e.examType,
+        orderNumber: e.orderNumber,
+        gradingMode: normalizeGradingMode(e.gradingMode),
+        passThreshold: pThresh,
+        passThresholdPercent: Math.round(pThresh * 1000) / 10,
+        durationMinutes: e.durationMinutes,
+        questionCount: e._count.questions
+      };
+    }));
   } catch (error) {
     next(error);
   }
@@ -471,6 +490,9 @@ router.get('/assignments/:id/live', async (req, res, next) => {
     const openQuestions = questions.filter(q => isOpenQuestion(q));
     const maxTotalPoints = questions.reduce((sum, q) => sum + getQuestionMaxPoints(q), 0);
 
+    const liveGradingMode = normalizeGradingMode(assignment.exam?.gradingMode);
+    const livePassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
+
     const submissions = await prisma.submission.findMany({
       where: { assignmentId: assignment.id },
       include: { answers: true, _count: { select: { answers: true } } }
@@ -536,7 +558,7 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         percent: sub?.percent ?? null,
         correctCount: sub?.correctCount ?? null,
         maxTotalPoints,
-        simceScore: sub?.simceScore || null,
+        simceScore: liveGradingMode === 'NORMAL' ? null : (sub?.simceScore ?? null),
         achievementLevel: sub?.achievementLevel || null,
         openGradedCount,
         openTotalCount: openQuestions.length,
@@ -551,8 +573,14 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         closesAt: assignment.closesAt,
         status: assignment.status,
         durationMinutes: assignment.exam?.durationMinutes || null,
-        applicationMode: assignment.applicationMode || 'DIGITAL'
+        applicationMode: assignment.applicationMode || 'DIGITAL',
+        gradingMode: liveGradingMode,
+        passThreshold: livePassThreshold,
+        passThresholdPercent: Math.round(livePassThreshold * 1000) / 10
       },
+      gradingMode: liveGradingMode,
+      passThreshold: livePassThreshold,
+      passThresholdPercent: Math.round(livePassThreshold * 1000) / 10,
       applicationMode: assignment.applicationMode || 'DIGITAL',
       questionCount: questions.length,
       maxTotalPoints,
@@ -590,12 +618,17 @@ router.get('/assignments/:id/summary', async (req, res, next) => {
     const levelCounts = { INSUFICIENTE: 0, ELEMENTAL: 0, ADECUADO: 0 };
     const gradeRanges = { '1.0-3.9': 0, '4.0-4.9': 0, '5.0-5.9': 0, '6.0-7.0': 0 };
 
+    const summaryGradingMode = normalizeGradingMode(assignment.exam?.gradingMode);
+    const summaryPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
+
     if (submissions.length > 0) {
       averageGrade = submissions.reduce((sum, s) => sum + (s.grade || 1.0), 0) / submissions.length;
       averagePercent = submissions.reduce((sum, s) => sum + (s.percent || 0), 0) / submissions.length;
-      const simceSubmissions = submissions.filter(s => s.simceScore != null);
-      if (simceSubmissions.length > 0) {
-        averageSimceScore = Math.round(simceSubmissions.reduce((sum, s) => sum + s.simceScore, 0) / simceSubmissions.length);
+      if (summaryGradingMode !== 'NORMAL') {
+        const simceSubmissions = submissions.filter(s => s.simceScore != null);
+        if (simceSubmissions.length > 0) {
+          averageSimceScore = Math.round(simceSubmissions.reduce((sum, s) => sum + s.simceScore, 0) / simceSubmissions.length);
+        }
       }
 
       submissions.forEach(s => {
@@ -611,6 +644,9 @@ router.get('/assignments/:id/summary', async (req, res, next) => {
     }
 
     res.json({
+      gradingMode: summaryGradingMode,
+      passThreshold: summaryPassThreshold,
+      passThresholdPercent: Math.round(summaryPassThreshold * 1000) / 10,
       totalStudents,
       submittedCount: submissions.length,
       averageGrade,
@@ -947,6 +983,8 @@ router.get('/assignments/:id/items', async (req, res, next) => {
       include: { answers: true }
     });
 
+    const itemPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
+
     const analysis = questions.map(q => {
       const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL' || q.correctAnswer === 'DESARROLLO' || q.correctAnswer === 'ORAL';
       const maxPts = q.maxPoints != null && q.maxPoints > 0 ? Number(q.maxPoints) : 1;
@@ -977,7 +1015,7 @@ router.get('/assignments/:id/items', async (req, res, next) => {
             const pts = Math.max(0, Math.min(maxPts, Number(ans.awardedPoints)));
             stats.gradedCount++;
             sumPts += pts;
-            if (pts >= maxPts * 0.6) stats.correctCount++;
+            if (pts + 1e-9 >= maxPts * itemPassThreshold) stats.correctCount++;
           }
         });
         stats.avgPoints = stats.gradedCount > 0 ? Math.round((sumPts / stats.gradedCount) * 100) / 100 : null;
@@ -1026,6 +1064,11 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       orderBy: { questionNumber: 'asc' }
     });
 
+    const exportGradingMode = normalizeGradingMode(assignment.exam?.gradingMode);
+    const exportPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
+    const exportPassPercent = Math.round(exportPassThreshold * 1000) / 10;
+    const isNormalExport = exportGradingMode === 'NORMAL';
+
     const workbook = new exceljs.Workbook();
     workbook.creator = 'Colegio Concepción de Chillán';
 
@@ -1035,7 +1078,7 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       { header: 'RUT', key: 'rut', width: 14 },
       { header: 'Nombre Estudiante', key: 'name', width: 32 },
       { header: 'Nota', key: 'grade', width: 10 },
-      { header: 'Puntaje SIMCE', key: 'simceScore', width: 16 },
+      ...(isNormalExport ? [] : [{ header: 'Puntaje SIMCE', key: 'simceScore', width: 16 }]),
       { header: 'Nivel de Logro', key: 'level', width: 16 },
       { header: '% Logro', key: 'percent', width: 12 }
     ];
@@ -1057,7 +1100,7 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
         rut: st.rut,
         name: st.name,
         grade: sub?.grade != null ? sub.grade.toFixed(1) : '',
-        simceScore: sub?.simceScore != null ? sub.simceScore : '',
+        ...(isNormalExport ? {} : { simceScore: sub?.simceScore != null ? sub.simceScore : '' }),
         level: sub?.achievementLevel || '',
         percent: pVal
       };
@@ -1079,15 +1122,15 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
     // HOJA 2: Resumen Ejecutivo
     const sheet2 = workbook.addWorksheet('Resumen Ejecutivo');
     sheet2.columns = [
-      { header: 'Indicador / Métrica', key: 'metric', width: 35 },
-      { header: 'Valor', key: 'value', width: 25 }
+      { header: 'Indicador / Métrica', key: 'metric', width: 42 },
+      { header: 'Valor', key: 'value', width: 28 }
     ];
 
     const totalStudents = students.length;
     const submittedCount = submissions.length;
     const participationPct = totalStudents > 0 ? Math.round((submittedCount / totalStudents) * 100) : 0;
     const avgGrade = submittedCount > 0 ? (submissions.reduce((sum, s) => sum + (s.grade || 1.0), 0) / submittedCount).toFixed(1) : '0.0';
-    const simceSubs = submissions.filter(s => s.simceScore != null);
+    const simceSubs = isNormalExport ? [] : submissions.filter(s => s.simceScore != null);
     const avgSimce = simceSubs.length > 0 ? Math.round(simceSubs.reduce((sum, s) => sum + s.simceScore, 0) / simceSubs.length) : 'N/A';
     const avgPercent = submittedCount > 0 ? Math.round(submissions.reduce((sum, s) => sum + (s.percent || 0), 0) / submittedCount) : 0;
 
@@ -1096,19 +1139,20 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
     const countInsuficiente = submissions.filter(s => s.achievementLevel === 'INSUFICIENTE').length;
 
     sheet2.addRows([
-      { metric: 'Título del Ensayo', value: assignment.exam.title },
+      { metric: 'Título del Ensayo / Prueba', value: assignment.exam.title },
       { metric: 'Asignatura', value: assignment.exam.subject },
       { metric: 'Curso', value: `${assignment.course.level.replace('B', '° Básico').replace('M', '° Medio')} ${assignment.course.letter}` },
+      { metric: 'Modo de Calificación', value: isNormalExport ? `Prueba Normal (Exigencia ${exportPassPercent}%)` : `Escala SIMCE TRI (Exigencia ${exportPassPercent}%)` },
       { metric: 'Total Matrícula del Curso', value: totalStudents },
       { metric: 'Estudiantes Evaluados (Entregas)', value: submittedCount },
       { metric: 'Estudiantes Ausentes / Pendientes', value: totalStudents - submittedCount },
       { metric: 'Tasa de Participación', value: `${participationPct}%` },
       { metric: 'Nota Promedio (1.0 - 7.0)', value: avgGrade },
-      { metric: 'Puntaje SIMCE Promedio (200 - 350 pts)', value: avgSimce },
+      ...(isNormalExport ? [] : [{ metric: 'Puntaje SIMCE Promedio (200 - 350 pts)', value: avgSimce }]),
       { metric: '% Logro Promedio', value: `${avgPercent}%` },
-      { metric: 'Nivel Adecuado (≥ 284 pts)', value: `${countAdecuado} estudiantes (${submittedCount > 0 ? Math.round((countAdecuado / submittedCount) * 100) : 0}%)` },
-      { metric: 'Nivel Elemental (241 - 283 pts)', value: `${countElemental} estudiantes (${submittedCount > 0 ? Math.round((countElemental / submittedCount) * 100) : 0}%)` },
-      { metric: 'Nivel Insuficiente (< 241 pts)', value: `${countInsuficiente} estudiantes (${submittedCount > 0 ? Math.round((countInsuficiente / submittedCount) * 100) : 0}%)` }
+      { metric: isNormalExport ? 'Nivel Adecuado (Nota ≥ 6.0)' : 'Nivel Adecuado (≥ 284 pts)', value: `${countAdecuado} estudiantes (${submittedCount > 0 ? Math.round((countAdecuado / submittedCount) * 100) : 0}%)` },
+      { metric: isNormalExport ? 'Nivel Elemental (Nota 4.0 - 5.9)' : 'Nivel Elemental (241 - 283 pts)', value: `${countElemental} estudiantes (${submittedCount > 0 ? Math.round((countElemental / submittedCount) * 100) : 0}%)` },
+      { metric: isNormalExport ? `Nivel Insuficiente (Nota < 4.0 / < ${exportPassPercent}%)` : 'Nivel Insuficiente (< 241 pts)', value: `${countInsuficiente} estudiantes (${submittedCount > 0 ? Math.round((countInsuficiente / submittedCount) * 100) : 0}%)` }
     ]);
 
     // HOJA 3: Habilidades y Ejes
@@ -1194,7 +1238,7 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
           if (ans && ans.awardedPoints != null) {
             const pts = Math.max(0, Math.min(maxPts, Number(ans.awardedPoints)));
             sumPts += pts;
-            if (pts >= maxPts * 0.6) correctCount++;
+            if (pts + 1e-9 >= maxPts * exportPassThreshold) correctCount++;
           } else {
             omitted++;
           }
@@ -1271,6 +1315,7 @@ router.get('/assignments-export.xlsx', async (req, res, next) => {
       { header: 'Curso', key: 'course', width: 14 },
       { header: 'Asignatura', key: 'subject', width: 20 },
       { header: 'Título del Ensayo', key: 'title', width: 35 },
+      { header: 'Modo Calificación', key: 'grading', width: 22 },
       { header: 'Apertura', key: 'opensAt', width: 14 },
       { header: 'Cierre', key: 'closesAt', width: 14 },
       { header: 'Entregas', key: 'submitted', width: 12 },
@@ -1283,8 +1328,10 @@ router.get('/assignments-export.xlsx', async (req, res, next) => {
     assignments.forEach(a => {
       const subs = a.submissions;
       const total = a.course?.students?.length || 0;
+      const gMode = normalizeGradingMode(a.exam?.gradingMode);
+      const pPct = Math.round(normalizePassThreshold(a.exam?.passThreshold, 0.6) * 1000) / 10;
       const avgG = subs.length > 0 ? (subs.reduce((acc, s) => acc + (s.grade || 1.0), 0) / subs.length).toFixed(1) : 'N/A';
-      const simceSubs = subs.filter(s => s.simceScore != null);
+      const simceSubs = gMode === 'NORMAL' ? [] : subs.filter(s => s.simceScore != null);
       const avgS = simceSubs.length > 0 ? Math.round(simceSubs.reduce((acc, s) => acc + s.simceScore, 0) / simceSubs.length) : 'N/A';
       const part = total > 0 ? Math.round((subs.length / total) * 100) + '%' : '0%';
 
@@ -1293,6 +1340,7 @@ router.get('/assignments-export.xlsx', async (req, res, next) => {
         course: a.course ? `${a.course.level.replace('B', '° Básico').replace('M', '° Medio')} ${a.course.letter}` : 'Sin curso',
         subject: a.exam.subject,
         title: a.exam.title,
+        grading: gMode === 'NORMAL' ? `Normal (${pPct}%)` : `SIMCE TRI (${pPct}%)`,
         opensAt: new Date(a.opensAt).toLocaleDateString('es-CL'),
         closesAt: new Date(a.closesAt).toLocaleDateString('es-CL'),
         submitted: subs.length,
@@ -1342,18 +1390,25 @@ router.get('/students/:rut', async (req, res, next) => {
       rut: student.rut,
       name: student.name,
       courseName: student.course ? `${student.course.level.replace('B', '° Básico').replace('M', '° Medio')} ${student.course.letter}` : 'Sin curso',
-      history: submissions.map(s => ({
-        id: s.id,
-        assignmentId: s.assignmentId,
-        date: s.submittedAt,
-        title: s.assignment.exam.title,
-        subject: s.assignment.exam.subject,
-        grade: s.grade,
-        percent: s.percent,
-        simceScore: s.simceScore,
-        theta: s.theta,
-        level: s.achievementLevel
-      }))
+      history: submissions.map(s => {
+        const gMode = normalizeGradingMode(s.assignment.exam?.gradingMode);
+        const pThresh = normalizePassThreshold(s.assignment.exam?.passThreshold, 0.6);
+        return {
+          id: s.id,
+          assignmentId: s.assignmentId,
+          date: s.submittedAt,
+          title: s.assignment.exam.title,
+          subject: s.assignment.exam.subject,
+          gradingMode: gMode,
+          passThreshold: pThresh,
+          passThresholdPercent: Math.round(pThresh * 1000) / 10,
+          grade: s.grade,
+          percent: s.percent,
+          simceScore: gMode === 'NORMAL' ? null : s.simceScore,
+          theta: gMode === 'NORMAL' ? null : s.theta,
+          level: s.achievementLevel
+        };
+      })
     };
 
     res.json(result);
@@ -1393,6 +1448,7 @@ router.get('/students/:rut/export.xlsx', async (req, res, next) => {
       { header: 'Fecha', key: 'date', width: 14 },
       { header: 'Ensayo / Evaluación', key: 'title', width: 35 },
       { header: 'Asignatura', key: 'subject', width: 22 },
+      { header: 'Modo / Exigencia', key: 'grading', width: 20 },
       { header: 'Nota Escolar', key: 'grade', width: 14 },
       { header: 'Puntaje SIMCE', key: 'simceScore', width: 16 },
       { header: 'Nivel de Logro', key: 'level', width: 16 },
@@ -1402,15 +1458,18 @@ router.get('/students/:rut/export.xlsx', async (req, res, next) => {
 
     submissions.forEach(s => {
       const pVal = s.percent != null ? (s.percent > 1 ? Math.round(s.percent) : Math.round(s.percent * 100)) + '%' : '';
+      const gMode = normalizeGradingMode(s.assignment.exam?.gradingMode);
+      const pPct = Math.round(normalizePassThreshold(s.assignment.exam?.passThreshold, 0.6) * 1000) / 10;
       sheet.addRow({
         date: s.submittedAt ? new Date(s.submittedAt).toLocaleDateString('es-CL') : '',
         title: s.assignment.exam.title,
         subject: s.assignment.exam.subject,
+        grading: gMode === 'NORMAL' ? `Normal (${pPct}%)` : `SIMCE TRI (${pPct}%)`,
         grade: s.grade != null ? s.grade.toFixed(1) : '',
-        simceScore: s.simceScore != null ? s.simceScore : '',
+        simceScore: gMode === 'NORMAL' ? 'N/A' : (s.simceScore != null ? s.simceScore : ''),
         level: s.achievementLevel || '',
         percent: pVal,
-        theta: s.theta != null ? s.theta.toFixed(3) : ''
+        theta: gMode === 'NORMAL' ? 'N/A' : (s.theta != null ? s.theta.toFixed(3) : '')
       });
     });
 
@@ -1474,7 +1533,10 @@ router.get('/assignments/:id/evolution', async (req, res, next) => {
     const timeline = courseAssignments.map(a => {
       const subs = a.submissions;
       const count = subs.length;
+      const aGradingMode = normalizeGradingMode(a.exam?.gradingMode);
+      const aPassThreshold = normalizePassThreshold(a.exam?.passThreshold, 0.6);
       let sumSimce = 0;
+      let simceCount = 0;
       let sumGrade = 0;
       let sumPercent = 0;
       const levels = { INSUFICIENTE: 0, ELEMENTAL: 0, ADECUADO: 0 };
@@ -1484,9 +1546,12 @@ router.get('/assignments/:id/evolution', async (req, res, next) => {
       const oaTotals = {};
 
       subs.forEach(s => {
-        if (s.simceScore) sumSimce += s.simceScore;
-        if (s.grade) sumGrade += s.grade;
-        if (s.percent) sumPercent += s.percent;
+        if (aGradingMode !== 'NORMAL' && s.simceScore != null) {
+          sumSimce += s.simceScore;
+          simceCount++;
+        }
+        if (s.grade != null) sumGrade += s.grade;
+        if (s.percent != null) sumPercent += s.percent;
         if (s.achievementLevel && levels[s.achievementLevel] !== undefined) {
           levels[s.achievementLevel]++;
         }
@@ -1509,7 +1574,7 @@ router.get('/assignments/:id/evolution', async (req, res, next) => {
         });
       });
 
-      const avgSimce = count ? Math.round(sumSimce / count) : null;
+      const avgSimce = aGradingMode !== 'NORMAL' && simceCount ? Math.round(sumSimce / simceCount) : null;
       const avgGrade = count ? Math.round((sumGrade / count) * 10) / 10 : null;
       const avgPercent = count ? Math.round((sumPercent / count) * 10) / 10 : null;
 
@@ -1530,6 +1595,9 @@ router.get('/assignments/:id/evolution', async (req, res, next) => {
         orderNumber: a.exam.orderNumber,
         examType: a.exam.examType,
         subject: a.exam.subject,
+        gradingMode: aGradingMode,
+        passThreshold: aPassThreshold,
+        passThresholdPercent: Math.round(aPassThreshold * 1000) / 10,
         date: a.opensAt,
         submissionsCount: count,
         totalStudents: totalStudentsInCourse,
@@ -1754,6 +1822,7 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
     });
 
     const results = { imported: 0, updated: 0, errors: [] };
+    const bulkPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
 
     for (const subItem of submissions) {
       const rawRut = subItem.studentRut;
@@ -1845,7 +1914,7 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
             const finalPts = incomingPts !== undefined ? incomingPts : (existing?.awardedPoints ?? null);
             if (finalPts !== null) {
               finalAwardedMap[q.id] = finalPts;
-              const isCorrect = finalPts >= (q.maxPoints || 1);
+              const isCorrect = finalPts + 1e-9 >= (q.maxPoints || 1) * bulkPassThreshold;
               await prisma.submissionAnswer.upsert({
                 where: {
                   submissionId_questionId: {
@@ -1953,6 +2022,7 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
 
     const worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
     const results = { imported: 0, errors: [] };
+    const importPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
     const questions = assignment.exam.questions;
     const questionsByNum = {};
     questions.forEach(q => { questionsByNum[q.questionNumber] = q; });
@@ -2053,7 +2123,7 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
             const finalPts = incomingPts !== undefined ? incomingPts : (existing?.awardedPoints ?? null);
             if (finalPts !== null) {
               finalAwardedMap[q.id] = finalPts;
-              const isCorrect = finalPts >= (q.maxPoints || 1);
+              const isCorrect = finalPts + 1e-9 >= (q.maxPoints || 1) * importPassThreshold;
               await prisma.submissionAnswer.upsert({
                 where: {
                   submissionId_questionId: {
@@ -2205,7 +2275,8 @@ router.post('/assignments/:id/grade-open-questions', async (req, res, next) => {
       if (isNaN(num)) continue;
       const maxPts = q.maxPoints != null && q.maxPoints > 0 ? Number(q.maxPoints) : 1;
       const clampedPts = Math.round(Math.max(0, Math.min(maxPts, num)) * 100) / 100;
-      const isCorrect = clampedPts >= maxPts;
+      const openPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
+      const isCorrect = clampedPts + 1e-9 >= maxPts * openPassThreshold;
 
       await prisma.submissionAnswer.upsert({
         where: {

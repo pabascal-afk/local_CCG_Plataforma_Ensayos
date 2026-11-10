@@ -101,19 +101,24 @@ export default function StudentEvolutionPage() {
             ) : (
               <div className="space-y-8">
                 {Object.entries(bySubject).map(([subject, exams]) => {
-                  const chartData = exams.map((exam: any) => ({
-                    id: exam.id,
-                    title: exam.title,
-                    date: exam.date,
-                    simceScore: exam.simceScore || (exam.percent ? Math.round(250 + (exam.percent - 50) * 2) : 250),
-                    grade: exam.grade,
-                    percent: exam.percent,
-                    level: exam.level,
-                  }));
+                  const chartData = exams
+                    .filter((exam: any) => exam.gradingMode !== "NORMAL" && exam.simceScore != null)
+                    .map((exam: any) => ({
+                      id: exam.id,
+                      title: exam.title,
+                      date: exam.date,
+                      simceScore: exam.simceScore,
+                      grade: exam.grade,
+                      percent: exam.percent,
+                      level: exam.level,
+                    }));
 
                   return (
                     <div key={subject} className="space-y-6">
-                      <LongitudinalChart data={chartData} />
+                      <LongitudinalChart
+                        data={chartData}
+                        emptyMessage="Las evaluaciones de esta asignatura utilizan escala normal (sin puntaje SIMCE)."
+                      />
 
                       <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
                         <div className="bg-blue-600 px-6 py-4 flex items-center justify-between">
@@ -133,14 +138,25 @@ export default function StudentEvolutionPage() {
                                     <span className="text-xs text-gray-500">{new Date(exam.date).toLocaleDateString()}</span>
                                   </div>
                                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-                                    <div className="text-center bg-white border rounded px-3 py-2">
-                                      <span className="block text-[10px] text-gray-400 uppercase font-bold">
-                                        {isPruebas ? "Puntaje" : "Puntaje SIMCE"}
-                                      </span>
-                                      <span className="block text-xl font-extrabold text-blue-600">
-                                        {exam.simceScore || (exam.percent ? Math.round(250 + (exam.percent - 50) * 2) : 250)}
-                                      </span>
-                                    </div>
+                                    {exam.gradingMode === "NORMAL" || exam.simceScore == null ? (
+                                      <div className="text-center bg-indigo-50/70 border border-indigo-200 rounded px-3 py-2">
+                                        <span className="block text-[10px] text-indigo-600 uppercase font-bold">
+                                          Escala Normal
+                                        </span>
+                                        <span className="block text-sm font-extrabold text-indigo-800 mt-1">
+                                          Exig. {exam.passThresholdPercent ?? 60}%
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div className="text-center bg-white border rounded px-3 py-2">
+                                        <span className="block text-[10px] text-gray-400 uppercase font-bold">
+                                          {isPruebas ? "Puntaje" : "Puntaje SIMCE"}
+                                        </span>
+                                        <span className="block text-xl font-extrabold text-blue-600">
+                                          {exam.simceScore}
+                                        </span>
+                                      </div>
+                                    )}
                                     <div className="text-center bg-white border rounded px-3 py-2">
                                       <span className="block text-[10px] text-gray-400 uppercase font-bold">Nota Escolar</span>
                                       <span className="block text-xl font-bold text-gray-800">{exam.grade?.toFixed(1)}</span>

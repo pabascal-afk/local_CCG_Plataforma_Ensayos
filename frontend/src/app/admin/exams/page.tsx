@@ -9,12 +9,13 @@ import {
   ArrowLeft, Trash2, FileText, Plus, Download, Search, 
   Filter, BookOpen, Layers, Clock, X, ChevronRight, Check, Sparkles,
   ChevronDown, ChevronUp, Headphones, FileSpreadsheet, Eye, RefreshCw, Play,
-  Calculator, CheckCircle2
+  Calculator, CheckCircle2, SlidersHorizontal
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal from "@/components/AiPromptModal";
 import AudioCutterModal from "@/components/AudioCutterModal";
 import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdfModal";
+import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type CourseItem = {
@@ -48,6 +49,9 @@ type Exam = {
   multipleChoiceCount?: number;
   totalMaxPoints?: number;
   submittedCount?: number;
+  gradingMode?: GradingMode;
+  passThreshold?: number;
+  passThresholdPercent?: number;
 };
 
 function getSubjectTheme(subject: string) {
@@ -117,6 +121,12 @@ export default function ExamsPage() {
   const [recalculating, setRecalculating] = useState(false);
   const [recalcError, setRecalcError] = useState("");
   const [recalcFeedback, setRecalcFeedback] = useState<any>(null);
+  const [gradingExam, setGradingExam] = useState<Exam | null>(null);
+  const [editGradingMode, setEditGradingMode] = useState<GradingMode>("SIMCE");
+  const [editPassPercent, setEditPassPercent] = useState<number>(60);
+  const [recalcAfterGradingSave, setRecalcAfterGradingSave] = useState<boolean>(true);
+  const [savingGrading, setSavingGrading] = useState<boolean>(false);
+  const [gradingError, setGradingError] = useState<string>("");
   const isPruebas = useIsPruebas();
 
   // Tarjetas compactas por defecto (disclosure progresivo)
@@ -310,6 +320,53 @@ export default function ExamsPage() {
       setRecalcError(err.message || "Error al recalcular notas");
     } finally {
       setRecalculating(false);
+    }
+  };
+
+  const handleOpenGradingModal = (examItem: Exam) => {
+    setGradingExam(examItem);
+    setEditGradingMode(examItem.gradingMode === "NORMAL" ? "NORMAL" : "SIMCE");
+    const rawPct =
+      examItem.passThresholdPercent !== undefined && examItem.passThresholdPercent !== null
+        ? Number(examItem.passThresholdPercent)
+        : examItem.passThreshold !== undefined && examItem.passThreshold !== null
+        ? Math.round(Number(examItem.passThreshold) * 1000) / 10
+        : 60;
+    setEditPassPercent(Math.min(99, Math.max(1, Math.round(rawPct) || 60)));
+    setRecalcAfterGradingSave((examItem.submittedCount ?? 0) > 0);
+    setGradingError("");
+  };
+
+  const handleSaveGradingConfig = async () => {
+    if (!gradingExam) return;
+    setGradingError("");
+    setSavingGrading(true);
+    const safePct = Math.min(99, Math.max(1, Math.round(Number(editPassPercent) || 60)));
+    const normalizedPassThreshold = Number((safePct / 100).toFixed(4));
+    try {
+      await apiFetch(`/admin/exams/${gradingExam.id}`, {
+        method: "PUT",
+        body: {
+          gradingMode: editGradingMode,
+          passThresholdPercent: safePct,
+          passThreshold: normalizedPassThreshold,
+        },
+      });
+
+      if (recalcAfterGradingSave && (gradingExam.submittedCount ?? 0) > 0) {
+        const result = await apiFetch<any>(`/admin/exams/${gradingExam.id}/recalculate-grades`, {
+          method: "POST",
+          body: {},
+        });
+        setRecalcFeedback(result);
+      }
+
+      setGradingExam(null);
+      await loadData();
+    } catch (err: any) {
+      setGradingError(err.message || "Error al guardar la modalidad de calificación");
+    } finally {
+      setSavingGrading(false);
     }
   };
 
@@ -672,7 +729,7 @@ export default function ExamsPage() {
                       >
                         {/* Fila 1: Badges superiores (Orden, Nivel, Tipo a la izquierda; Botón Audio condicional y Chevron a la derecha) */}
                         <div className="flex items-center justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-1.5 shrink-0">
+                          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                             <span className="bg-slate-900 text-white font-black text-xs px-2 py-0.5 rounded-md">
                               #{e.orderNumber}
                             </span>
@@ -680,6 +737,18 @@ export default function ExamsPage() {
                               {formatLevelName(e.level)}
                             </span>
                             {getExamTypeBadge(e.examType)}
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-extrabold border ${
+                                e.gradingMode === "NORMAL"
+                                  ? "bg-indigo-100 text-indigo-800 border-indigo-200"
+                                  : "bg-slate-100 text-slate-700 border-slate-200"
+                              }`}
+                              title="Modalidad de calificación y exigencia para nota 4,0"
+                            >
+                              {e.gradingMode === "NORMAL"
+                                ? `Normal · ${e.passThresholdPercent ?? 60}%`
+                                : `SIMCE · ${e.passThresholdPercent ?? 60}%`}
+                            </span>
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
@@ -818,11 +887,13 @@ export default function ExamsPage() {
                             </div>
 
                             <div>
-                              <span className="text-[10px] text-gray-400 font-bold uppercase block">Tiempo</span>
-                              <span className="font-black text-gray-800 text-sm">
-                                {e.durationMinutes ? `${e.durationMinutes} min` : "Libre"}
+                              <span className="text-[10px] text-gray-400 font-bold uppercase block">Calificación</span>
+                              <span className={`font-black text-sm ${e.gradingMode === "NORMAL" ? "text-indigo-700" : "text-gray-800"}`}>
+                                {e.gradingMode === "NORMAL" ? "Normal" : "SIMCE TRI"}
                               </span>
-                              <span className="text-[10px] text-gray-500 block">Duración</span>
+                              <span className="text-[10px] text-gray-500 block">
+                                Exig. {e.passThresholdPercent ?? 60}%{e.durationMinutes ? ` · ${e.durationMinutes}m` : ""}
+                              </span>
                             </div>
                           </div>
 
@@ -953,6 +1024,17 @@ export default function ExamsPage() {
                               {user.role === "ADMIN" && (
                                 <button
                                   type="button"
+                                  onClick={() => handleOpenGradingModal(e)}
+                                  className="inline-flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold text-xs px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                                  title="Cambiar modalidad (SIMCE / Prueba normal) y porcentaje de exigencia"
+                                >
+                                  <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600" />
+                                  <span>Calificación</span>
+                                </button>
+                              )}
+                              {user.role === "ADMIN" && (
+                                <button
+                                  type="button"
                                   onClick={() => {
                                     setRecalcError("");
                                     setRecalcExam(e);
@@ -1075,7 +1157,12 @@ export default function ExamsPage() {
                     Se reevaluarán <strong>{recalcExam.submittedCount ?? 0} entrega(s) finalizada(s)</strong> (<code className="font-mono">SUBMITTED</code>) de esta evaluación usando la pauta actualmente guardada.
                   </p>
                   <ul className="space-y-1 text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <li>• Recalcula nota, porcentaje, nivel de logro, puntaje SIMCE/TRI y corrección por pregunta.</li>
+                    <li>
+                      •{" "}
+                      {recalcExam.gradingMode === "NORMAL"
+                        ? `Modo Prueba normal (${recalcExam.passThresholdPercent ?? 60}% exigencia): recalcula nota 1,0–7,0, porcentaje, nivel de logro y corrección por pregunta (sin puntaje SIMCE/TRI).`
+                        : `Modo SIMCE TRI (${recalcExam.passThresholdPercent ?? 60}% exigencia para nota 4,0): recalcula nota, porcentaje, nivel de logro, puntaje SIMCE/TRI y corrección por pregunta.`}
+                    </li>
                     <li>• No altera intentos en curso (<code className="font-mono">IN_PROGRESS</code>).</li>
                     <li>• Mantiene los puntajes ya otorgados manualmente en preguntas de desarrollo/oral.</li>
                   </ul>
@@ -1103,6 +1190,93 @@ export default function ExamsPage() {
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${recalculating ? "animate-spin" : ""}`} />
                     <span>{recalculating ? "Recalculando..." : "Confirmar recálculo"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Configurar Modalidad de Calificación y Exigencia */}
+          {gradingExam && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-blue-600 text-white">
+                      <SlidersHorizontal className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm">Configurar Calificación y Exigencia</h3>
+                      <p className="text-[11px] text-slate-500 line-clamp-1">{gradingExam.title}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !savingGrading && setGradingExam(null)}
+                    disabled={savingGrading}
+                    className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-4">
+                  <GradingModeSelector
+                    variant="full"
+                    gradingMode={editGradingMode}
+                    onGradingModeChange={setEditGradingMode}
+                    passThresholdPercent={editPassPercent}
+                    onPassThresholdPercentChange={setEditPassPercent}
+                    totalPoints={gradingExam.totalMaxPoints ?? gradingExam.questionCount}
+                    disabled={savingGrading}
+                  />
+
+                  {(gradingExam.submittedCount ?? 0) > 0 && (
+                    <label className="flex items-start gap-2.5 p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs text-indigo-950 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={recalcAfterGradingSave}
+                        onChange={(e) => setRecalcAfterGradingSave(e.target.checked)}
+                        disabled={savingGrading}
+                        className="mt-0.5 w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                      />
+                      <span>
+                        <strong>Recalcular notas automáticamente después de guardar</strong>{" "}
+                        ({gradingExam.submittedCount} entrega(s) <code className="font-mono">SUBMITTED</code> se reevaluarán inmediatamente con esta modalidad).
+                      </span>
+                    </label>
+                  )}
+
+                  {gradingError && (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+                      {gradingError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGradingExam(null)}
+                    disabled={savingGrading}
+                    className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveGradingConfig}
+                    disabled={savingGrading}
+                    className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>
+                      {savingGrading
+                        ? "Guardando..."
+                        : recalcAfterGradingSave && (gradingExam.submittedCount ?? 0) > 0
+                        ? "Guardar y recalcular notas"
+                        : "Guardar configuración"}
+                    </span>
                   </button>
                 </div>
               </div>

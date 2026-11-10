@@ -1,5 +1,5 @@
 const { prisma } = require('../lib/prisma');
-const { computeResults, isOpenQuestion } = require('./grading');
+const { computeResults, isOpenQuestion, normalizeGradingMode, normalizePassThreshold } = require('./grading');
 const { logAssignmentAction } = require('./assignmentLog');
 
 /**
@@ -309,6 +309,9 @@ async function recalculateExamSubmissions(examId, { assignmentId = null, actor =
 
   const effectiveActor = actor || { rut: 'SISTEMA', name: 'Administrador', role: 'ADMIN' };
   const cleanNote = note ? String(note).trim() : null;
+  const gradingMode = normalizeGradingMode(exam.gradingMode);
+  const passThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
+  const passThresholdPercent = Math.round(passThreshold * 100);
 
   for (const aStat of assignmentStatsMap.values()) {
     const previousAvgGrade = roundAvg(aStat.prevGradeSum, aStat.prevGradeCount);
@@ -321,6 +324,9 @@ async function recalculateExamSubmissions(examId, { assignmentId = null, actor =
       details: {
         examId: exam.id,
         examTitle: exam.title,
+        gradingMode,
+        passThreshold,
+        passThresholdPercent,
         courseName: aStat.courseName,
         submittedCount: aStat.submittedCount,
         updatedCount: aStat.updatedCount,
@@ -329,7 +335,11 @@ async function recalculateExamSubmissions(examId, { assignmentId = null, actor =
         previousAvgGrade,
         newAvgGrade,
       },
-      note: cleanNote || `Recálculo masivo con la pauta actual (${(exam.questions || []).length} preguntas).`,
+      note:
+        cleanNote ||
+        `Recálculo masivo con la pauta actual (${(exam.questions || []).length} preguntas · ${
+          gradingMode === 'NORMAL' ? `Modo Normal ${passThresholdPercent}% exigencia` : `Modo SIMCE ${passThresholdPercent}% exigencia`
+        }).`,
     });
   }
 
@@ -344,6 +354,9 @@ async function recalculateExamSubmissions(examId, { assignmentId = null, actor =
         : `Se recalcularon ${evaluatedCount} entrega(s) finalizada(s). ${updatedSubmissionsCount} entrega(s) actualizada(s).`,
     examId: exam.id,
     examTitle: exam.title,
+    gradingMode,
+    passThreshold,
+    passThresholdPercent,
     questionCount: (exam.questions || []).length,
     assignmentsTotal: allAssignmentsCount,
     assignmentsAffected: assignmentStatsMap.size,

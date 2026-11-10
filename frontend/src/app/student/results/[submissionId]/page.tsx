@@ -42,10 +42,18 @@ export default function ResultsPage() {
               <div className="space-y-6">
                 <div className="bg-white border rounded-xl p-8 shadow-sm text-center">
                   <h1 className="text-3xl font-bold text-gray-900 mb-2">{data.exam.title}</h1>
-                  <p className="text-gray-500 mb-8">{data.exam.subject} • Entregado el {new Date(data.submittedAt).toLocaleString()}</p>
-                  
+                  <p className="text-gray-500 mb-6">{data.exam.subject} • Entregado el {new Date(data.submittedAt).toLocaleString()}</p>
+
+                  {(data.gradingMode === "NORMAL" || data.exam?.gradingMode === "NORMAL") && (
+                    <div className="inline-flex items-center gap-2 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-xl px-4 py-2 text-xs font-bold mb-6">
+                      <span>
+                        Evaluación en escala normal (1,0 a 7,0) · Exigencia {data.passThresholdPercent ?? data.exam?.passThresholdPercent ?? 60}% para nota 4,0
+                      </span>
+                    </div>
+                  )}
+
                   {/* Hero Card Puntaje SIMCE */}
-                  {data.simceScore && (
+                  {data.simceScore != null && data.gradingMode !== "NORMAL" && data.exam?.gradingMode !== "NORMAL" && (
                     <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-2xl p-6 mb-6 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
                       <div className="text-left">
                         <span className="text-xs font-semibold uppercase tracking-wider text-blue-200">Resultado Oficial Estandarizado</span>
@@ -70,6 +78,9 @@ export default function ResultsPage() {
                     <div className="bg-blue-50 rounded-xl p-4">
                       <p className="text-sm text-blue-600 font-medium mb-1">Nota Escolar</p>
                       <p className="text-3xl font-bold text-blue-900">{data.grade?.toFixed(1)}</p>
+                      <p className="text-[11px] text-blue-600/80 font-medium mt-0.5">
+                        Exigencia {data.passThresholdPercent ?? data.exam?.passThresholdPercent ?? 60}%
+                      </p>
                     </div>
                     <div className="bg-purple-50 rounded-xl p-4">
                       <p className="text-sm text-purple-600 font-medium mb-1">Logro</p>

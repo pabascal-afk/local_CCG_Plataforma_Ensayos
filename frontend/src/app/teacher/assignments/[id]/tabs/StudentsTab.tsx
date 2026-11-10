@@ -425,7 +425,9 @@ export default function StudentsTab({ id }: { id: number }) {
               <th className="p-4">RUT</th>
               <th className="p-4">Nombre</th>
               <th className="p-4 text-center">Nota</th>
-              <th className="p-4 text-center">{isPruebas ? "Puntaje" : "Puntaje SIMCE"}</th>
+              <th className="p-4 text-center">
+                {data?.gradingMode === "NORMAL" ? "% Logro (Pts)" : isPruebas ? "Puntaje" : "Puntaje SIMCE"}
+              </th>
               {hasOpenQuestions && <th className="p-4 text-center">Desarrollo / Oral</th>}
               <th className="p-4">Nivel de Logro</th>
               <th className="p-4">Entrega</th>
@@ -461,7 +463,24 @@ export default function StudentsTab({ id }: { id: number }) {
                   <td className="p-4 font-bold text-gray-900">{st.name}</td>
                   <td className="p-4 text-center font-bold text-blue-600">{g.toFixed(1)}</td>
                   <td className="p-4 text-center font-bold text-emerald-700">
-                    {st.simceScore ? `${st.simceScore} pts` : "-"}
+                    {data?.gradingMode === "NORMAL" ? (
+                      st.percent != null ? (
+                        <div>
+                          <span>{Math.round(st.percent)}%</span>
+                          {st.correctCount != null && st.maxTotalPoints ? (
+                            <span className="block text-[10px] font-medium text-slate-500">
+                              {st.correctCount}/{st.maxTotalPoints} pts
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : (
+                        "-"
+                      )
+                    ) : st.simceScore != null ? (
+                      `${st.simceScore} pts`
+                    ) : (
+                      "-"
+                    )}
                   </td>
                   {hasOpenQuestions && (
                     <td className="p-4 text-center">

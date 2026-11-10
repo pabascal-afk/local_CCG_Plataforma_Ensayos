@@ -9,7 +9,7 @@ const exceljs = require('exceljs');
 const { normalizeRut } = require('../utils/rut');
 const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet');
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
-const { computeResults } = require('../services/grading');
+const { computeResults, normalizeGradingMode, normalizePassThreshold } = require('../services/grading');
 const { recalculateExamSubmissions } = require('../services/submissions');
 
 const router = express.Router();
@@ -33,6 +33,53 @@ function normalizeRole(val) {
   if (['DIRECTOR', 'DIRECTORA', 'DIRECTIVO', 'UTP', 'JEFE_UTP'].includes(v)) return 'DIRECTOR';
   if (['ADMIN', 'ADMINISTRADOR'].includes(v)) return 'ADMIN';
   return 'STUDENT';
+}
+
+function parseGradingConfigInput(body = {}, defaultMode = 'SIMCE', defaultThreshold = 0.6) {
+  let gradingMode = normalizeGradingMode(defaultMode);
+  if (body.gradingMode !== undefined && body.gradingMode !== null && String(body.gradingMode).trim() !== '') {
+    const rawMode = String(body.gradingMode).trim().toUpperCase();
+    if (!['SIMCE', 'IRT', 'TRI', 'NORMAL', 'STANDARD', 'TRADITIONAL'].includes(rawMode)) {
+      return { error: 'Modo de calificación inválido. Usa SIMCE o NORMAL.' };
+    }
+    gradingMode = normalizeGradingMode(rawMode);
+  }
+
+  let passThreshold = normalizePassThreshold(defaultThreshold, 0.6);
+  const hasRawPercent = body.passThresholdPercent !== undefined && body.passThresholdPercent !== null && String(body.passThresholdPercent).trim() !== '';
+  const hasRawExigencia = body.exigencia !== undefined && body.exigencia !== null && String(body.exigencia).trim() !== '';
+  const hasRawThreshold = body.passThreshold !== undefined && body.passThreshold !== null && String(body.passThreshold).trim() !== '';
+
+  if (hasRawPercent || hasRawExigencia) {
+    const rawVal = hasRawPercent ? body.passThresholdPercent : body.exigencia;
+    const cleaned = String(rawVal).trim().replace(/%/g, '').replace(',', '.');
+    const num = Number(cleaned);
+    if (!cleaned || !Number.isFinite(num) || num <= 0 || num >= 100) {
+      return { error: 'La exigencia debe ser un porcentaje entre 1% y 99% (ej. 60).' };
+    }
+    const ratio = num < 1 ? num : num / 100;
+    if (ratio <= 0 || ratio >= 1) {
+      return { error: 'La exigencia debe ser un porcentaje entre 1% y 99% (ej. 60).' };
+    }
+    passThreshold = Math.round(ratio * 10000) / 10000;
+  } else if (hasRawThreshold) {
+    const cleaned = String(body.passThreshold).trim().replace(/%/g, '').replace(',', '.');
+    const num = Number(cleaned);
+    if (!cleaned || !Number.isFinite(num) || num <= 0) {
+      return { error: 'La exigencia debe ser un valor positivo entre 1% y 99% (o 0.01 a 0.99).' };
+    }
+    const ratio = num > 1 ? num / 100 : num;
+    if (ratio <= 0 || ratio >= 1) {
+      return { error: 'La exigencia debe estar entre 1% y 99% (o 0.01 a 0.99).' };
+    }
+    passThreshold = Math.round(ratio * 10000) / 10000;
+  }
+
+  return {
+    gradingMode,
+    passThreshold,
+    passThresholdPercent: Math.round(passThreshold * 1000) / 10,
+  };
 }
 
 // ==========================================
@@ -221,9 +268,11 @@ router.get('/dashboard', async (req, res, next) => {
       const examTypeVal = sub.assignment.exam.examType;
       const orderNumberVal = sub.assignment.exam.orderNumber;
       const subjectVal = sub.assignment.exam.subject;
+      const examGradingMode = normalizeGradingMode(sub.assignment.exam?.gradingMode);
+      const examPassThreshold = normalizePassThreshold(sub.assignment.exam?.passThreshold, 0.6);
       const date = sub.assignment.opensAt;
-      const score = sub.simceScore || (sub.percent ? Math.round(250 + (sub.percent - 50) * 2) : 250);
-      const grade = sub.grade || 1.0;
+      const score = examGradingMode === 'NORMAL' ? null : (sub.simceScore != null ? sub.simceScore : null);
+      const grade = sub.grade != null ? sub.grade : 1.0;
       const percent = sub.percent != null ? sub.percent : 0;
       const achLevel = sub.achievementLevel || 'ELEMENTAL';
 
@@ -235,8 +284,11 @@ router.get('/dashboard', async (req, res, next) => {
           orderNumber: orderNumberVal,
           examType: examTypeVal,
           subject: subjectVal,
+          gradingMode: examGradingMode,
+          passThreshold: examPassThreshold,
           date,
           totalSimce: 0,
+          simceCount: 0,
           totalGrade: 0,
           totalPercent: 0,
           count: 0,
@@ -245,14 +297,20 @@ router.get('/dashboard', async (req, res, next) => {
         };
       }
       const entry = evolution[lvl][examId];
-      entry.totalSimce += score;
+      if (score != null) {
+        entry.totalSimce += score;
+        entry.simceCount++;
+      }
       entry.totalGrade += grade;
       entry.totalPercent += percent;
       entry.count++;
       if (entry.levels[achLevel] !== undefined) entry.levels[achLevel]++;
 
-      if (!entry.courses[courseName]) entry.courses[courseName] = { totalSimce: 0, totalGrade: 0, count: 0 };
-      entry.courses[courseName].totalSimce += score;
+      if (!entry.courses[courseName]) entry.courses[courseName] = { totalSimce: 0, simceCount: 0, totalGrade: 0, count: 0 };
+      if (score != null) {
+        entry.courses[courseName].totalSimce += score;
+        entry.courses[courseName].simceCount++;
+      }
       entry.courses[courseName].totalGrade += grade;
       entry.courses[courseName].count++;
     });
@@ -265,7 +323,7 @@ router.get('/dashboard', async (req, res, next) => {
           const courseScores = {};
           for (const [cName, cStats] of Object.entries(e.courses)) {
             courseScores[cName] = {
-              avgSimce: Math.round(cStats.totalSimce / cStats.count),
+              avgSimce: cStats.simceCount > 0 ? Math.round(cStats.totalSimce / cStats.simceCount) : null,
               avgGrade: Number((cStats.totalGrade / cStats.count).toFixed(1)),
               count: cStats.count
             };
@@ -276,8 +334,10 @@ router.get('/dashboard', async (req, res, next) => {
             orderNumber: e.orderNumber,
             examType: e.examType,
             subject: e.subject,
+            gradingMode: e.gradingMode,
+            passThreshold: e.passThreshold,
             date: e.date,
-            avgSimce: Math.round(e.totalSimce / e.count),
+            avgSimce: e.simceCount > 0 ? Math.round(e.totalSimce / e.simceCount) : null,
             avgGrade: Number((e.totalGrade / e.count).toFixed(1)),
             avgPercent: Math.round(e.totalPercent / e.count),
             count: e.count,
@@ -375,8 +435,9 @@ router.get('/dashboard/multiannual', async (req, res, next) => {
       const cKey = `${cLevel.replace('B', '° Básico').replace('M', '° Medio')} ${cLetter}`;
       const examTitle = sub.assignment.exam.title;
       const examOrder = sub.assignment.exam.orderNumber;
-      const score = sub.simceScore || (sub.percent ? Math.round(250 + (sub.percent - 50) * 2) : 250);
-      const grade = sub.grade || 1.0;
+      const isNormalMode = normalizeGradingMode(sub.assignment.exam?.gradingMode) === 'NORMAL';
+      const score = isNormalMode ? null : (sub.simceScore != null ? sub.simceScore : null);
+      const grade = sub.grade != null ? sub.grade : 1.0;
       const percent = sub.percent != null ? sub.percent : 0;
       const ach = sub.achievementLevel || 'ELEMENTAL';
 
@@ -386,6 +447,7 @@ router.get('/dashboard/multiannual', async (req, res, next) => {
           totalSubmissions: 0,
           studentRuts: new Set(),
           totalSimce: 0,
+          simceCount: 0,
           totalGrade: 0,
           totalPercent: 0,
           levels: { INSUFICIENTE: 0, ELEMENTAL: 0, ADECUADO: 0 },
@@ -398,26 +460,38 @@ router.get('/dashboard/multiannual', async (req, res, next) => {
       const yEntry = yearsMap[year];
       yEntry.totalSubmissions++;
       yEntry.studentRuts.add(sub.studentRut);
-      yEntry.totalSimce += score;
+      if (score != null) {
+        yEntry.totalSimce += score;
+        yEntry.simceCount++;
+      }
       yEntry.totalGrade += grade;
       yEntry.totalPercent += percent;
       if (yEntry.levels[ach] !== undefined) yEntry.levels[ach]++;
 
       // Por Nivel
-      if (!yEntry.byLevel[cLevel]) yEntry.byLevel[cLevel] = { totalSimce: 0, count: 0 };
-      yEntry.byLevel[cLevel].totalSimce += score;
+      if (!yEntry.byLevel[cLevel]) yEntry.byLevel[cLevel] = { totalSimce: 0, simceCount: 0, count: 0 };
+      if (score != null) {
+        yEntry.byLevel[cLevel].totalSimce += score;
+        yEntry.byLevel[cLevel].simceCount++;
+      }
       yEntry.byLevel[cLevel].count++;
 
       // Por Curso
-      if (!yEntry.byCourse[cKey]) yEntry.byCourse[cKey] = { totalSimce: 0, totalGrade: 0, count: 0 };
-      yEntry.byCourse[cKey].totalSimce += score;
+      if (!yEntry.byCourse[cKey]) yEntry.byCourse[cKey] = { totalSimce: 0, simceCount: 0, totalGrade: 0, count: 0 };
+      if (score != null) {
+        yEntry.byCourse[cKey].totalSimce += score;
+        yEntry.byCourse[cKey].simceCount++;
+      }
       yEntry.byCourse[cKey].totalGrade += grade;
       yEntry.byCourse[cKey].count++;
 
       // Por Ensayo
       const examKey = `${examOrder || 1}_${examTitle}`;
-      if (!yEntry.byExam[examKey]) yEntry.byExam[examKey] = { title: examTitle, orderNumber: examOrder, totalSimce: 0, count: 0 };
-      yEntry.byExam[examKey].totalSimce += score;
+      if (!yEntry.byExam[examKey]) yEntry.byExam[examKey] = { title: examTitle, orderNumber: examOrder, totalSimce: 0, simceCount: 0, count: 0 };
+      if (score != null) {
+        yEntry.byExam[examKey].totalSimce += score;
+        yEntry.byExam[examKey].simceCount++;
+      }
       yEntry.byExam[examKey].count++;
     });
 
@@ -432,7 +506,7 @@ router.get('/dashboard/multiannual', async (req, res, next) => {
         const coursesBreakdown = {};
         for (const [cName, cStats] of Object.entries(y.byCourse)) {
           coursesBreakdown[cName] = {
-            avgSimce: Math.round(cStats.totalSimce / cStats.count),
+            avgSimce: cStats.simceCount > 0 ? Math.round(cStats.totalSimce / cStats.simceCount) : null,
             avgGrade: Number((cStats.totalGrade / cStats.count).toFixed(1)),
             count: cStats.count
           };
@@ -440,7 +514,7 @@ router.get('/dashboard/multiannual', async (req, res, next) => {
 
         const levelsBreakdown = {};
         for (const [lvlName, lStats] of Object.entries(y.byLevel)) {
-          levelsBreakdown[lvlName] = Math.round(lStats.totalSimce / lStats.count);
+          levelsBreakdown[lvlName] = lStats.simceCount > 0 ? Math.round(lStats.totalSimce / lStats.simceCount) : null;
         }
 
         const examsList = Object.values(y.byExam)
@@ -448,7 +522,7 @@ router.get('/dashboard/multiannual', async (req, res, next) => {
           .map(e => ({
             title: e.title,
             orderNumber: e.orderNumber,
-            avgSimce: Math.round(e.totalSimce / e.count),
+            avgSimce: e.simceCount > 0 ? Math.round(e.totalSimce / e.simceCount) : null,
             count: e.count
           }));
 
@@ -456,7 +530,7 @@ router.get('/dashboard/multiannual', async (req, res, next) => {
           year: y.year,
           submissionsCount: count,
           studentsCount: y.studentRuts.size,
-          avgSimce: count ? Math.round(y.totalSimce / count) : 0,
+          avgSimce: y.simceCount > 0 ? Math.round(y.totalSimce / y.simceCount) : null,
           avgGrade: count ? Number((y.totalGrade / count).toFixed(1)) : 0,
           avgPercent: count ? Math.round(y.totalPercent / count) : 0,
           levels: {
@@ -471,9 +545,10 @@ router.get('/dashboard/multiannual', async (req, res, next) => {
         };
       });
 
-    let deltaSimce = 0;
-    if (yearlyData.length >= 2) {
-      deltaSimce = yearlyData[yearlyData.length - 1].avgSimce - yearlyData[0].avgSimce;
+    let deltaSimce = null;
+    const yearsWithSimce = yearlyData.filter(y => y.avgSimce != null);
+    if (yearsWithSimce.length >= 2) {
+      deltaSimce = yearsWithSimce[yearsWithSimce.length - 1].avgSimce - yearsWithSimce[0].avgSimce;
     }
 
     res.json({
@@ -550,8 +625,9 @@ router.get('/dashboard/multiannual/export.xlsx', async (req, res, next) => {
     const yearsMap = {};
     allSubmissions.forEach(sub => {
       const year = sub.assignment.course.year;
-      const score = sub.simceScore || (sub.percent ? Math.round(250 + (sub.percent - 50) * 2) : 250);
-      const grade = sub.grade || 1.0;
+      const isNormalMode = normalizeGradingMode(sub.assignment.exam?.gradingMode) === 'NORMAL';
+      const score = isNormalMode ? null : (sub.simceScore != null ? sub.simceScore : null);
+      const grade = sub.grade != null ? sub.grade : 1.0;
       const percent = sub.percent != null ? sub.percent : 0;
       const ach = sub.achievementLevel || 'ELEMENTAL';
 
@@ -561,6 +637,7 @@ router.get('/dashboard/multiannual/export.xlsx', async (req, res, next) => {
           submissions: 0,
           studentRuts: new Set(),
           totalSimce: 0,
+          simceCount: 0,
           totalGrade: 0,
           totalPercent: 0,
           levels: { INSUFICIENTE: 0, ELEMENTAL: 0, ADECUADO: 0 },
@@ -570,15 +647,21 @@ router.get('/dashboard/multiannual/export.xlsx', async (req, res, next) => {
       const yEntry = yearsMap[year];
       yEntry.submissions++;
       yEntry.studentRuts.add(sub.studentRut);
-      yEntry.totalSimce += score;
+      if (score != null) {
+        yEntry.totalSimce += score;
+        yEntry.simceCount++;
+      }
       yEntry.totalGrade += grade;
       yEntry.totalPercent += percent;
       if (yEntry.levels[ach] !== undefined) yEntry.levels[ach]++;
 
       const cLvl = sub.assignment.course.level.replace('B', '° Básico').replace('M', '° Medio');
       const cKey = `${cLvl} ${sub.assignment.course.letter}`;
-      if (!yEntry.courses[cKey]) yEntry.courses[cKey] = { totalSimce: 0, totalGrade: 0, count: 0 };
-      yEntry.courses[cKey].totalSimce += score;
+      if (!yEntry.courses[cKey]) yEntry.courses[cKey] = { totalSimce: 0, simceCount: 0, totalGrade: 0, count: 0 };
+      if (score != null) {
+        yEntry.courses[cKey].totalSimce += score;
+        yEntry.courses[cKey].simceCount++;
+      }
       yEntry.courses[cKey].totalGrade += grade;
       yEntry.courses[cKey].count++;
     });
@@ -589,7 +672,7 @@ router.get('/dashboard/multiannual/export.xlsx', async (req, res, next) => {
         year: y.year,
         students: y.studentRuts.size,
         submissions: count,
-        avgSimce: count ? Math.round(y.totalSimce / count) : 0,
+        avgSimce: y.simceCount > 0 ? Math.round(y.totalSimce / y.simceCount) : 'N/A',
         avgGrade: count ? (y.totalGrade / count).toFixed(1) : '0.0',
         avgPercent: count ? `${Math.round(y.totalPercent / count)}%` : '0%',
         adecuado: count ? `${Math.round((y.levels.ADECUADO / count) * 100)}%` : '0%',
@@ -614,7 +697,7 @@ router.get('/dashboard/multiannual/export.xlsx', async (req, res, next) => {
           year: y.year,
           course: cName,
           count: cStats.count,
-          avgSimce: Math.round(cStats.totalSimce / cStats.count),
+          avgSimce: cStats.simceCount > 0 ? Math.round(cStats.totalSimce / cStats.simceCount) : 'N/A',
           avgGrade: (cStats.totalGrade / cStats.count).toFixed(1)
         });
       });
@@ -1668,6 +1751,9 @@ router.get('/exams', async (req, res, next) => {
           name: `${(a.course.level || '').replace('B', '° Básico').replace('M', '° Medio')} ${a.course.letter || ''} (${a.course.year || ''})`.trim()
         }));
 
+      const normalizedMode = normalizeGradingMode(e.gradingMode);
+      const normalizedThreshold = normalizePassThreshold(e.passThreshold, 0.6);
+
       return {
         id: e.id,
         title: e.title || 'Ensayo',
@@ -1677,6 +1763,10 @@ router.get('/exams', async (req, res, next) => {
         examType: e.examType || 'ENSAYO',
         durationMinutes: e.durationMinutes,
         optionsCount: e.optionsCount || 4,
+        gradingMode: normalizedMode,
+        passThreshold: normalizedThreshold,
+        passThresholdPercent: Math.round(normalizedThreshold * 1000) / 10,
+        minGrade: e.minGrade ?? 1.0,
         questionCount: (e.questions || []).length,
         submittedCount,
         createdAt: e.createdAt,
@@ -1724,18 +1814,22 @@ router.get('/exams/export.xlsx', async (req, res, next) => {
       { header: 'Asignatura', key: 'subject', width: 20 },
       { header: 'Nivel', key: 'level', width: 14 },
       { header: 'Tipo de Ensayo', key: 'type', width: 16 },
+      { header: 'Modo Calificación', key: 'gradingMode', width: 24 },
       { header: 'Preguntas', key: 'qCount', width: 12 },
       { header: 'Asignaciones Cursos', key: 'aCount', width: 20 },
       { header: 'Fecha Creación', key: 'createdAt', width: 16 }
     ];
 
     exams.forEach(e => {
+      const gMode = normalizeGradingMode(e.gradingMode);
+      const pPct = Math.round(normalizePassThreshold(e.passThreshold, 0.6) * 1000) / 10;
       sheet.addRow({
         id: e.id,
         title: e.title,
         subject: e.subject,
         level: e.level,
         type: e.examType,
+        gradingMode: gMode === 'NORMAL' ? `Normal (${pPct}% exigencia)` : `SIMCE TRI (${pPct}% exigencia)`,
         qCount: e._count.questions,
         aCount: e._count.assignments,
         createdAt: new Date(e.createdAt).toLocaleDateString('es-CL')
@@ -1819,6 +1913,9 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
       })
     ]);
 
+    const normalizedMode = normalizeGradingMode(e.gradingMode);
+    const normalizedThreshold = normalizePassThreshold(e.passThreshold, 0.6);
+
     res.json({
       id: e.id,
       title: e.title,
@@ -1827,6 +1924,10 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
       orderNumber: e.orderNumber,
       examType: e.examType,
       optionsCount: e.optionsCount,
+      gradingMode: normalizedMode,
+      passThreshold: normalizedThreshold,
+      passThresholdPercent: Math.round(normalizedThreshold * 1000) / 10,
+      minGrade: e.minGrade ?? 1.0,
       questionCount: e.questions.length,
       submittedCount,
       inProgressCount,
@@ -1864,16 +1965,30 @@ router.post('/exams', checkAdmin, (req, res, next) => {
     next();
   });
 }, async (req, res, next) => {
+  const cleanupUploadedFile = () => {
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+    }
+  };
+
   try {
     const { title, subject, level, questionCount, optionsCount, orderNumber, examType, openQuestions } = req.body;
     if (!req.file) {
       return res.status(400).json({ error: 'Debes seleccionar y subir un archivo PDF para el ensayo' });
     }
     if (!title || !String(title).trim()) {
+      cleanupUploadedFile();
       return res.status(400).json({ error: 'El título del ensayo es obligatorio' });
     }
     if (!subject || !String(subject).trim()) {
+      cleanupUploadedFile();
       return res.status(400).json({ error: 'Debes seleccionar la asignatura del ensayo' });
+    }
+
+    const gradingConfig = parseGradingConfigInput(req.body, 'SIMCE', 0.6);
+    if (gradingConfig.error) {
+      cleanupUploadedFile();
+      return res.status(400).json({ error: gradingConfig.error });
     }
 
     const qCount = parseInt(questionCount, 10) || 30;
@@ -1935,6 +2050,8 @@ router.post('/exams', checkAdmin, (req, res, next) => {
         optionsCount: optCount,
         orderNumber: ordNum,
         examType: eType,
+        gradingMode: gradingConfig.gradingMode,
+        passThreshold: gradingConfig.passThreshold,
         pdfPath: req.file.filename,
         questions: {
           create: questions
@@ -1942,8 +2059,14 @@ router.post('/exams', checkAdmin, (req, res, next) => {
       }
     });
 
-    return res.json(exam);
+    return res.json({
+      ...exam,
+      gradingMode: normalizeGradingMode(exam.gradingMode),
+      passThreshold: normalizePassThreshold(exam.passThreshold, 0.6),
+      passThresholdPercent: gradingConfig.passThresholdPercent,
+    });
   } catch (error) {
+    cleanupUploadedFile();
     console.error('[Error al crear ensayo en DB]:', error);
     return res.status(500).json({ error: 'Error al registrar el ensayo en la base de datos: ' + error.message });
   }
@@ -1952,6 +2075,14 @@ router.post('/exams', checkAdmin, (req, res, next) => {
 router.put('/exams/:id', checkAdmin, async (req, res, next) => {
   try {
     const examId = parseInt(req.params.id, 10);
+    if (isNaN(examId)) {
+      return res.status(400).json({ error: 'ID de evaluación inválido' });
+    }
+    const existingExam = await prisma.exam.findUnique({ where: { id: examId } });
+    if (!existingExam) {
+      return res.status(404).json({ error: 'Evaluación o ensayo no encontrado' });
+    }
+
     const { title, subject, level, optionsCount, questionCount } = req.body;
     const updateData = {};
     if (title !== undefined) updateData.title = String(title).trim();
@@ -1959,6 +2090,25 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
     if (level !== undefined) updateData.level = level;
     if (optionsCount !== undefined && !isNaN(parseInt(optionsCount, 10))) {
       updateData.optionsCount = parseInt(optionsCount, 10);
+    }
+
+    const hasGradingConfigInput =
+      req.body.gradingMode !== undefined ||
+      req.body.passThreshold !== undefined ||
+      req.body.passThresholdPercent !== undefined ||
+      req.body.exigencia !== undefined;
+
+    if (hasGradingConfigInput) {
+      const gradingConfig = parseGradingConfigInput(
+        req.body,
+        existingExam.gradingMode,
+        existingExam.passThreshold
+      );
+      if (gradingConfig.error) {
+        return res.status(400).json({ error: gradingConfig.error });
+      }
+      updateData.gradingMode = gradingConfig.gradingMode;
+      updateData.passThreshold = gradingConfig.passThreshold;
     }
 
     const exam = await prisma.exam.update({
@@ -1992,7 +2142,13 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
       }
     }
 
-    res.json(exam);
+    const finalThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
+    res.json({
+      ...exam,
+      gradingMode: normalizeGradingMode(exam.gradingMode),
+      passThreshold: finalThreshold,
+      passThresholdPercent: Math.round(finalThreshold * 1000) / 10,
+    });
   } catch (error) {
     next(error);
   }
@@ -2136,6 +2292,9 @@ const handleStartMockSession = async (req, res, next) => {
         level: exam.level,
         examType: exam.examType,
         optionsCount: exam.optionsCount || 4,
+        gradingMode: normalizeGradingMode(exam.gradingMode),
+        passThreshold: normalizePassThreshold(exam.passThreshold, 0.6),
+        passThresholdPercent: Math.round(normalizePassThreshold(exam.passThreshold, 0.6) * 1000) / 10,
         durationMinutes,
         pdfVersion: pdfInfo.pdfPath || '',
         hasPdfFile: pdfInfo.hasPdfFile
@@ -2210,7 +2369,17 @@ router.post('/exams/:id/mock-grade', async (req, res, next) => {
       }
     }
 
-    const results = computeResults(exam.questions || [], answersMap, exam, awardedPointsMap);
+    const effectiveGradingConfig = parseGradingConfigInput(req.body || {}, exam.gradingMode, exam.passThreshold);
+    if (effectiveGradingConfig.error) {
+      return res.status(400).json({ error: effectiveGradingConfig.error });
+    }
+    const effectiveExam = {
+      ...exam,
+      gradingMode: effectiveGradingConfig.gradingMode,
+      passThreshold: effectiveGradingConfig.passThreshold
+    };
+
+    const results = computeResults(exam.questions || [], answersMap, effectiveExam, awardedPointsMap);
     const perQuestion = results.perQuestion.map((pq) => {
       const q = questionById[pq.questionId];
       return {
@@ -2236,7 +2405,10 @@ router.post('/exams/:id/mock-grade', async (req, res, next) => {
         subject: exam.subject,
         level: exam.level,
         examType: exam.examType,
-        optionsCount: exam.optionsCount || 4
+        optionsCount: exam.optionsCount || 4,
+        gradingMode: results.gradingMode,
+        passThreshold: results.passThreshold,
+        passThresholdPercent: Math.round(results.passThreshold * 1000) / 10
       },
       submittedAt: new Date().toISOString(),
       correctCount: results.correctCount,
@@ -2249,6 +2421,9 @@ router.post('/exams/:id/mock-grade', async (req, res, next) => {
       simceScore: results.simceScore,
       theta: results.theta,
       seTheta: results.seTheta,
+      gradingMode: results.gradingMode,
+      passThreshold: results.passThreshold,
+      passThresholdPercent: Math.round(results.passThreshold * 1000) / 10,
       bySkill: results.bySkill,
       byAxis: results.byAxis,
       perQuestion
@@ -2508,6 +2683,14 @@ router.get('/exams/:id/audios/:clipId/stream', async (req, res, next) => {
 router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
   try {
     const examId = parseInt(req.params.id, 10);
+    if (isNaN(examId)) {
+      return res.status(400).json({ error: 'ID de evaluación inválido' });
+    }
+    const existingExam = await prisma.exam.findUnique({ where: { id: examId } });
+    if (!existingExam) {
+      return res.status(404).json({ error: 'Evaluación o ensayo no encontrado' });
+    }
+
     const {
       answerKey,
       questionTypesKeys,
@@ -2518,6 +2701,31 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       difficultiesKeys,
       totalQuestions
     } = req.body;
+
+    const hasGradingConfigInput =
+      req.body.gradingMode !== undefined ||
+      req.body.passThreshold !== undefined ||
+      req.body.passThresholdPercent !== undefined ||
+      req.body.exigencia !== undefined;
+
+    let finalGradingMode = normalizeGradingMode(existingExam.gradingMode);
+    let finalPassThreshold = normalizePassThreshold(existingExam.passThreshold, 0.6);
+
+    if (hasGradingConfigInput) {
+      const gradingConfig = parseGradingConfigInput(req.body, existingExam.gradingMode, existingExam.passThreshold);
+      if (gradingConfig.error) {
+        return res.status(400).json({ error: gradingConfig.error });
+      }
+      finalGradingMode = gradingConfig.gradingMode;
+      finalPassThreshold = gradingConfig.passThreshold;
+      await prisma.exam.update({
+        where: { id: examId },
+        data: {
+          gradingMode: finalGradingMode,
+          passThreshold: finalPassThreshold,
+        }
+      });
+    }
     
     const allQNums = new Set([
       ...Object.keys(answerKey || {}),
@@ -2585,7 +2793,13 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       });
     }
 
-    res.json({ message: 'Pauta actualizada', totalQuestions: !isNaN(totalQ) && totalQ > 0 ? totalQ : allQNums.size });
+    res.json({
+      message: 'Pauta actualizada',
+      totalQuestions: !isNaN(totalQ) && totalQ > 0 ? totalQ : allQNums.size,
+      gradingMode: finalGradingMode,
+      passThreshold: finalPassThreshold,
+      passThresholdPercent: Math.round(finalPassThreshold * 1000) / 10,
+    });
   } catch (error) {
     next(error);
   }

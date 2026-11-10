@@ -8,12 +8,14 @@ import Link from "next/link";
 import { 
   ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, 
   Sparkles, Headphones, Scissors, Plus, Trash2, ListPlus,
-  FileText, Eye, RefreshCw, Play, Calculator, AlertTriangle, CheckCircle2, X
+  FileText, Eye, RefreshCw, Play, Calculator, AlertTriangle, CheckCircle2, X,
+  SlidersHorizontal
 } from "lucide-react";
 import { getToken } from "@/lib/session";
 import AiPromptModal from "@/components/AiPromptModal";
 import AudioCutterModal from "@/components/AudioCutterModal";
 import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdfModal";
+import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function AnswerKeyPage({ params }: { params: { id: string } }) {
@@ -34,6 +36,8 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const [axesKeys, setAxesKeys] = useState<Record<string, string>>({});
   const [learningObjectivesKeys, setLearningObjectivesKeys] = useState<Record<string, string>>({});
   const [difficultiesKeys, setDifficultiesKeys] = useState<Record<string, string>>({});
+  const [gradingMode, setGradingMode] = useState<GradingMode>("SIMCE");
+  const [passThresholdPercent, setPassThresholdPercent] = useState<number>(60);
 
   const [customQuestionCount, setCustomQuestionCount] = useState<number | null>(null);
   const [customAddAmount, setCustomAddAmount] = useState<number>(2);
@@ -85,6 +89,14 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     setAxesKeys(e.axesKeys || {});
     setLearningObjectivesKeys(e.learningObjectivesKeys || {});
     setDifficultiesKeys(dk);
+    setGradingMode(e.gradingMode === "NORMAL" ? "NORMAL" : "SIMCE");
+    const rawPct =
+      e.passThresholdPercent !== undefined && e.passThresholdPercent !== null
+        ? Number(e.passThresholdPercent)
+        : e.passThreshold !== undefined && e.passThreshold !== null
+        ? Math.round(Number(e.passThreshold) * 1000) / 10
+        : 60;
+    setPassThresholdPercent(Math.min(99, Math.max(1, Math.round(rawPct) || 60)));
 
     const initialCount = e.questions?.length || e.questionCount || Object.keys(e.answerKey || {}).length || 45;
     setCustomQuestionCount(initialCount);
@@ -133,6 +145,20 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     ...Object.keys(answerKey).map(Number).filter(n => !isNaN(n))
   );
   const questions = Array.from({ length: maxQ }, (_, i) => String(i + 1));
+  const totalMaxPoints =
+    Math.round(
+      questions.reduce((sum, qNum) => {
+        const currentKey = answerKey[qNum] || "";
+        const qType =
+          questionTypesKeys[qNum] ||
+          (currentKey === "DESARROLLO" ? "WRITTEN" : currentKey === "ORAL" ? "ORAL" : "MULTIPLE_CHOICE");
+        if (qType === "WRITTEN" || qType === "ORAL") {
+          const pts = maxPointsKeys[qNum] ?? (qType === "ORAL" ? 4 : 5);
+          return sum + Math.max(0.5, Number(pts) || 1);
+        }
+        return sum + 1;
+      }, 0) * 10
+    ) / 10;
 
   const handleAddQuestions = (count: number = 1) => {
     const safeCount = Math.max(1, count);
@@ -220,11 +246,16 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
 
   const saveAnswerKey = async (silent: boolean = false): Promise<boolean> => {
     setSaving(true);
+    const safePct = Math.min(99, Math.max(1, Math.round(Number(passThresholdPercent) || 60)));
+    const normalizedPassThreshold = Number((safePct / 100).toFixed(4));
     try {
       await apiFetch(`/admin/exams/${id}/answer-key`, {
         method: "PUT",
         body: {
           totalQuestions: maxQ,
+          gradingMode,
+          passThresholdPercent: safePct,
+          passThreshold: normalizedPassThreshold,
           answerKey,
           questionTypesKeys,
           maxPointsKeys,
@@ -234,7 +265,13 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
           difficultiesKeys
         }
       });
-      setExam((prev: any) => ({ ...prev, questionCount: maxQ }));
+      setExam((prev: any) => ({
+        ...prev,
+        questionCount: maxQ,
+        gradingMode,
+        passThreshold: normalizedPassThreshold,
+        passThresholdPercent: safePct,
+      }));
       setIsDirty(false);
       if (!silent) {
         alert("Pauta guardada correctamente (" + maxQ + " preguntas registradas)");
@@ -390,12 +427,23 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                 <Link href="/admin/exams" className="text-blue-600 hover:underline flex items-center gap-1 inline-flex mb-1.5 text-xs font-semibold">
                   <ArrowLeft className="w-3.5 h-3.5" /> Volver al catálogo de {isPruebas ? "Pruebas" : "Ensayos"}
                 </Link>
-                <div className="flex items-center gap-2.5">
+                <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-xl md:text-2xl font-black text-gray-900 tracking-tight">
                     {isPruebas ? "Prueba" : "Pauta"}: {exam.title}
                   </h1>
                   <span className="bg-blue-100 text-blue-800 font-black text-xs px-2.5 py-0.5 rounded-full border border-blue-200">
                     {maxQ} preguntas
+                  </span>
+                  <span
+                    className={`font-black text-xs px-2.5 py-0.5 rounded-full border ${
+                      gradingMode === "NORMAL"
+                        ? "bg-indigo-100 text-indigo-800 border-indigo-200"
+                        : "bg-slate-100 text-slate-700 border-slate-200"
+                    }`}
+                  >
+                    {gradingMode === "NORMAL"
+                      ? `Prueba normal · Exig. ${passThresholdPercent}%`
+                      : `Escala SIMCE TRI · ${passThresholdPercent}%`}
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
@@ -536,6 +584,33 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
               
               {/* Sidebar herramientas */}
               <div className="md:col-span-1 space-y-4">
+
+                {/* Card Sistema de Calificación y Exigencia */}
+                <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
+                      <SlidersHorizontal className="w-4 h-4 text-blue-600" />
+                      <span>Calificación</span>
+                    </h3>
+                    <span className="text-[10px] font-extrabold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                      {totalMaxPoints} pts
+                    </span>
+                  </div>
+                  <GradingModeSelector
+                    variant="compact"
+                    gradingMode={gradingMode}
+                    onGradingModeChange={(mode) => {
+                      setGradingMode(mode);
+                      setIsDirty(true);
+                    }}
+                    passThresholdPercent={passThresholdPercent}
+                    onPassThresholdPercentChange={(pct) => {
+                      setPassThresholdPercent(pct);
+                      setIsDirty(true);
+                    }}
+                    totalPoints={totalMaxPoints}
+                  />
+                </div>
 
                 {/* Card Recalcular Notas Post-Rendición */}
                 {user.role === "ADMIN" && (
@@ -803,7 +878,14 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                         <th className="p-3 font-bold">Eje / Tema</th>
                         <th className="p-3 font-bold w-20">OA</th>
                         <th className="p-3 font-bold">Habilidad Cognitiva</th>
-                        <th className="p-3 font-bold w-28">Dificultad (TRI)</th>
+                        <th className="p-3 font-bold w-32">
+                          Dificultad (TRI)
+                          {gradingMode === "NORMAL" && (
+                            <span className="block text-[10px] font-medium text-gray-400 normal-case">
+                              (Solo SIMCE TRI)
+                            </span>
+                          )}
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -955,7 +1037,10 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                                   setIsDirty(true);
                                   setDifficultiesKeys({ ...difficultiesKeys, [qNum]: e.target.value });
                                 }}
-                                className="border rounded px-2 py-1.5 w-full text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                title={gradingMode === "NORMAL" ? "En modo Prueba normal no se calcula TRI" : "Dificultad TRI"}
+                                className={`border rounded px-2 py-1.5 w-full text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none ${
+                                  gradingMode === "NORMAL" ? "opacity-55 text-gray-500" : ""
+                                }`}
                               >
                                 <option value="-1.5">Fácil (-1.5)</option>
                                 <option value="0.0">Media (0.0)</option>
@@ -1101,7 +1186,12 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                   </p>
 
                   <ul className="space-y-1 text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <li>• Se actualizarán nota, porcentaje, nivel de logro, puntaje SIMCE/TRI y aciertos por pregunta.</li>
+                    <li>
+                      •{" "}
+                      {gradingMode === "NORMAL"
+                        ? `Modo Prueba normal (${passThresholdPercent}% exigencia): actualizará nota 1,0–7,0, porcentaje, nivel de logro y aciertos (sin puntaje SIMCE/TRI).`
+                        : `Modo Escala SIMCE TRI (${passThresholdPercent}% exigencia para nota 4,0): actualizará nota, porcentaje, nivel de logro, puntaje SIMCE/TRI y aciertos.`}
+                    </li>
                     <li>• Se conservarán intactos los intentos <code className="font-mono">IN_PROGRESS</code>.</li>
                     <li>• Se respetará el puntaje manual ya otorgado en preguntas de desarrollo/oral.</li>
                   </ul>

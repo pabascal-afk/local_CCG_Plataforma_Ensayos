@@ -17,6 +17,17 @@ async function initDatabase() {
   await prisma.$queryRawUnsafe('PRAGMA busy_timeout=5000;');
   await prisma.$queryRawUnsafe('PRAGMA synchronous=NORMAL;');
   await prisma.$queryRawUnsafe('PRAGMA foreign_keys=ON;');
+  try {
+    const examColumns = await prisma.$queryRawUnsafe(`PRAGMA table_info('Exam');`);
+    const hasGradingMode = Array.isArray(examColumns) && examColumns.some((col) => col.name === 'gradingMode');
+    if (!hasGradingMode) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE "Exam" ADD COLUMN "gradingMode" TEXT NOT NULL DEFAULT 'SIMCE';`);
+    }
+  } catch (err) {
+    if (!String(err?.message || '').toLowerCase().includes('duplicate column')) {
+      throw err;
+    }
+  }
   initialized = true;
 }
 

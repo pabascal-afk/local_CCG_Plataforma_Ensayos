@@ -154,19 +154,21 @@ export default function AdminDashboardPage() {
     return "bg-emerald-100 text-emerald-700 font-bold border-emerald-200 border";
   };
 
-  // Datos para LongitudinalChart
-  const chartData = evolutionList.map((e: any, idx: number) => {
-    let score = e.avgSimce;
-    if (selectedCourseFilter !== "TODOS" && e.courses?.[selectedCourseFilter]?.avgSimce) {
-      score = e.courses[selectedCourseFilter].avgSimce;
-    }
-    return {
-      id: e.examId || idx,
-      title: e.examTitle,
-      date: e.date,
-      simceScore: score,
-    };
-  });
+  // Datos para LongitudinalChart (solo evaluaciones con escala SIMCE/TRI)
+  const chartData = evolutionList
+    .map((e: any, idx: number) => {
+      let score = e.gradingMode === "NORMAL" ? null : e.avgSimce;
+      if (selectedCourseFilter !== "TODOS" && e.courses?.[selectedCourseFilter]) {
+        score = e.gradingMode === "NORMAL" ? null : e.courses[selectedCourseFilter].avgSimce;
+      }
+      return {
+        id: e.examId || idx,
+        title: e.examTitle,
+        date: e.date,
+        simceScore: score,
+      };
+    })
+    .filter((pt: any) => pt.simceScore !== null && pt.simceScore !== undefined);
 
   const toggleCustomExam = (num: number) => {
     setCustomSelectedExams(prev => 
@@ -629,14 +631,37 @@ export default function AdminDashboardPage() {
                                 {new Date(item.date).toLocaleDateString("es-CL", { dateStyle: "short" })}
                               </td>
                               <td className="px-4 py-3.5 text-center font-extrabold text-blue-600 text-sm">
-                                {item.avgSimce} ptos
+                                {item.gradingMode === "NORMAL" || item.avgSimce == null ? (
+                                  <div>
+                                    <span className="text-indigo-700 font-bold">
+                                      {item.avgGrade != null ? `Nota ${Number(item.avgGrade).toFixed(1)}` : `${item.avgPercent ?? 0}%`}
+                                    </span>
+                                    <span className="block text-[10px] font-semibold text-indigo-600">
+                                      Normal · Exig. {Math.round(((item.passThreshold ?? 0.6) * 1000) / 10)}%
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span>{item.avgSimce} ptos</span>
+                                )}
                               </td>
                               {courses.map(c => {
                                 const cData = item.courses?.[c];
-                                const cScore = typeof cData === 'object' ? cData.avgSimce : cData;
+                                const cScore = typeof cData === 'object' && cData !== null ? cData.avgSimce : cData;
+                                const cGrade = typeof cData === 'object' && cData !== null ? cData.avgGrade : null;
                                 return (
                                   <td key={c} className="px-4 py-3.5 text-center">
-                                    {cScore !== undefined ? (
+                                    {item.gradingMode === "NORMAL" ? (
+                                      cGrade !== null && cGrade !== undefined ? (
+                                        <span className={`inline-block px-2.5 py-0.5 rounded text-[11px] font-bold ${
+                                          cGrade >= 6.0 ? "bg-emerald-100 text-emerald-800 border border-emerald-200" :
+                                          cGrade >= 4.0 ? "bg-amber-100 text-amber-800 border border-amber-200" : "bg-red-100 text-red-800 border border-red-200"
+                                        }`}>
+                                          {Number(cGrade).toFixed(1)}
+                                        </span>
+                                      ) : (
+                                        <span className="text-gray-300">—</span>
+                                      )
+                                    ) : cScore !== undefined && cScore !== null ? (
                                       <span className={`inline-block px-2.5 py-0.5 rounded text-[11px] font-bold ${
                                         cScore >= 284 ? "bg-emerald-100 text-emerald-800 border border-emerald-200" :
                                         cScore >= 241 ? "bg-amber-100 text-amber-800 border border-amber-200" : "bg-red-100 text-red-800 border border-red-200"
@@ -736,7 +761,9 @@ export default function AdminDashboardPage() {
                       <div>
                         <div className="text-[11px] text-indigo-700 font-semibold uppercase tracking-wider">Crecimiento Histórico</div>
                         <div className="text-base font-black text-indigo-950">
-                          {multiannualData.deltaSimce >= 0 ? `+${multiannualData.deltaSimce}` : multiannualData.deltaSimce} {isPruebas ? "ptos" : "ptos SIMCE"}
+                          {multiannualData.deltaSimce !== null && multiannualData.deltaSimce !== undefined
+                            ? `${multiannualData.deltaSimce >= 0 ? `+${multiannualData.deltaSimce}` : multiannualData.deltaSimce} ${isPruebas ? "ptos" : "ptos SIMCE"}`
+                            : "N/A (sin datos SIMCE)"}
                           <span className="text-xs font-normal text-indigo-600 ml-1">
                             ({multiannualData.yearsCount} años evaluados)
                           </span>
@@ -773,7 +800,10 @@ export default function AdminDashboardPage() {
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 py-4">
                       {multiannualData.yearly.map((y: any, yIdx: number) => {
                         const prevYear = yIdx > 0 ? multiannualData.yearly[yIdx - 1] : null;
-                        const yDiff = prevYear ? y.avgSimce - prevYear.avgSimce : null;
+                        const yDiff =
+                          prevYear && prevYear.avgSimce != null && y.avgSimce != null
+                            ? y.avgSimce - prevYear.avgSimce
+                            : null;
 
                         return (
                           <div 
@@ -788,9 +818,17 @@ export default function AdminDashboardPage() {
                             </div>
 
                             <div className="space-y-1 text-center py-2">
-                              <span className="text-xs text-slate-500 font-semibold block uppercase tracking-wider">{isPruebas ? "Puntaje Promedio" : "Promedio SIMCE"}</span>
+                              <span className="text-xs text-slate-500 font-semibold block uppercase tracking-wider">
+                                {y.avgSimce != null
+                                  ? isPruebas ? "Puntaje Promedio" : "Promedio SIMCE"
+                                  : "Nota Promedio"}
+                              </span>
                               <span className="text-3xl font-black text-indigo-700 tracking-tight">
-                                {y.avgSimce} ptos
+                                {y.avgSimce != null
+                                  ? `${y.avgSimce} ptos`
+                                  : y.avgGrade != null
+                                  ? Number(y.avgGrade).toFixed(1)
+                                  : "N/A"}
                               </span>
 
                               {yDiff !== null && (
@@ -865,7 +903,7 @@ export default function AdminDashboardPage() {
                               </td>
                               <td className="px-4 py-4 text-center">
                                 <span className="text-base font-black text-indigo-700">
-                                  {y.avgSimce} ptos
+                                  {y.avgSimce !== null && y.avgSimce !== undefined ? `${y.avgSimce} ptos` : "N/A"}
                                 </span>
                               </td>
                               <td className="px-4 py-4 text-center font-bold text-gray-800">
