@@ -6,6 +6,7 @@ import { ArrowLeft, Save, Sparkles, Plus, Trash2, PenTool, Mic } from "lucide-re
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import AiPromptModal from "@/components/AiPromptModal";
+import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
 import { getToken } from "@/lib/session";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
@@ -24,6 +25,8 @@ export default function NewExamPage() {
   const [optionCount, setOptionCount] = useState(4);
   const [orderNumber, setOrderNumber] = useState(1);
   const [examType, setExamType] = useState("ENSAYO");
+  const [gradingMode, setGradingMode] = useState<GradingMode>("SIMCE");
+  const [passThresholdPercent, setPassThresholdPercent] = useState<number>(60);
   const [openQuestions, setOpenQuestions] = useState<OpenQuestionItem[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -68,6 +71,7 @@ export default function NewExamPage() {
 
     setSaving(true);
     setError("");
+    const safePercent = Math.min(99, Math.max(1, Math.round(Number(passThresholdPercent) || 60)));
     const formData = new FormData();
     formData.append("title", title);
     formData.append("subject", subject);
@@ -76,6 +80,9 @@ export default function NewExamPage() {
     formData.append("optionsCount", optionCount.toString());
     formData.append("orderNumber", orderNumber.toString());
     formData.append("examType", examType);
+    formData.append("gradingMode", gradingMode);
+    formData.append("passThresholdPercent", String(safePercent));
+    formData.append("passThreshold", (safePercent / 100).toFixed(4));
     if (openQuestions.length > 0) {
       const openMap: Record<number, { questionType: string; maxPoints: number }> = {};
       openQuestions.forEach((oq) => {
@@ -113,6 +120,18 @@ export default function NewExamPage() {
   };
 
   const isPruebas = useIsPruebas();
+  const openMapForEstimate = new Map<number, number>();
+  openQuestions.forEach((oq) => {
+    if (oq.questionNumber >= 1 && oq.questionNumber <= questionCount) {
+      openMapForEstimate.set(oq.questionNumber, Math.max(0.5, Number(oq.maxPoints) || 1));
+    }
+  });
+  let openPtsSum = 0;
+  openMapForEstimate.forEach((pts) => {
+    openPtsSum += pts;
+  });
+  const estimatedTotalPoints =
+    Math.round((Math.max(0, questionCount - openMapForEstimate.size) + openPtsSum) * 10) / 10;
 
   return (
     <RequireRole roles={["ADMIN", "DIRECTOR"]}>
@@ -264,6 +283,15 @@ export default function NewExamPage() {
                   </select>
                 </div>
               </div>
+
+              <GradingModeSelector
+                variant="full"
+                gradingMode={gradingMode}
+                onGradingModeChange={setGradingMode}
+                passThresholdPercent={passThresholdPercent}
+                onPassThresholdPercentChange={setPassThresholdPercent}
+                totalPoints={estimatedTotalPoints}
+              />
 
               {/* Preguntas de Desarrollo Escrito / Respuesta Oral */}
               <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-3">

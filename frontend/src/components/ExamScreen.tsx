@@ -55,6 +55,9 @@ interface StartData {
     durationMinutes?: number;
     pdfVersion?: string;
     hasPdfFile?: boolean;
+    gradingMode?: "SIMCE" | "NORMAL";
+    passThreshold?: number;
+    passThresholdPercent?: number;
   };
   questions: { id: number; questionNumber: number; questionType?: string; maxPoints?: number }[];
   audioClips?: StudentAudioClip[];
@@ -85,6 +88,9 @@ interface MockGradeResult {
     subject: string;
     level?: string;
     optionsCount: number;
+    gradingMode?: "SIMCE" | "NORMAL";
+    passThreshold?: number;
+    passThresholdPercent?: number;
   };
   submittedAt: string;
   correctCount: number;
@@ -94,9 +100,12 @@ interface MockGradeResult {
   percent: number;
   grade: number;
   achievementLevel: string;
-  simceScore: number;
-  theta: number;
-  seTheta: number;
+  simceScore: number | null;
+  theta: number | null;
+  seTheta: number | null;
+  gradingMode?: "SIMCE" | "NORMAL";
+  passThreshold?: number;
+  passThresholdPercent?: number;
   bySkill: { name: string; total: number; correct: number; percent: number }[];
   byAxis: { name: string; total: number; correct: number; percent: number }[];
   perQuestion: MockQuestionAudit[];
@@ -614,7 +623,15 @@ export default function ExamScreen({
               {mockResult.exam.subject} · Simulado el {new Date(mockResult.submittedAt).toLocaleString()}
             </p>
 
-            {mockResult.simceScore ? (
+            {mockResult.gradingMode === "NORMAL" && (
+              <div className="inline-flex items-center gap-2 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-xl px-4 py-2 text-xs font-bold mb-6">
+                <span>
+                  Escala Prueba Normal (1,0 a 7,0) · Exigencia {mockResult.passThresholdPercent ?? mockResult.exam?.passThresholdPercent ?? 60}% para nota 4,0
+                </span>
+              </div>
+            )}
+
+            {mockResult.simceScore != null && mockResult.gradingMode !== "NORMAL" ? (
               <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-2xl p-6 mb-6 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="text-left">
                   <span className="text-xs font-semibold uppercase tracking-wider text-blue-200">
@@ -645,6 +662,9 @@ export default function ExamScreen({
               <div className="bg-blue-50 rounded-xl p-4">
                 <p className="text-sm text-blue-600 font-medium mb-1">Nota Escolar</p>
                 <p className="text-3xl font-bold text-blue-900">{mockResult.grade?.toFixed(1)}</p>
+                <p className="text-[11px] text-blue-600/80 font-medium mt-0.5">
+                  Exigencia {mockResult.passThresholdPercent ?? mockResult.exam?.passThresholdPercent ?? 60}%
+                </p>
               </div>
               <div className="bg-purple-50 rounded-xl p-4">
                 <p className="text-sm text-purple-600 font-medium mb-1">Logro</p>
@@ -875,6 +895,11 @@ export default function ExamScreen({
             </span>
             <span className="hidden lg:inline-block text-[11px] text-amber-300 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded">
               No guarda datos reales ni afecta reportes
+            </span>
+            <span className="text-[11px] bg-indigo-950 text-indigo-200 border border-indigo-800 px-2 py-0.5 rounded font-semibold">
+              {data.exam.gradingMode === "NORMAL"
+                ? `Prueba normal · Exig. ${data.exam.passThresholdPercent ?? 60}%`
+                : `SIMCE TRI · Exig. ${data.exam.passThresholdPercent ?? 60}%`}
             </span>
           </div>
 

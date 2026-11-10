@@ -17,7 +17,15 @@ interface StudentAssignment {
   applicationMode?: "DIGITAL" | "PRINTED";
   submissionId: number | null;
   isExtended?: boolean;
-  exam: { title: string; subject: string; durationMinutes: number | null; questionCount: number };
+  exam: {
+    title: string;
+    subject: string;
+    durationMinutes: number | null;
+    questionCount: number;
+    gradingMode?: "SIMCE" | "NORMAL";
+    passThreshold?: number;
+    passThresholdPercent?: number;
+  };
 }
 
 const fmt = (d: string) =>
@@ -53,15 +61,18 @@ function StudentDashboard() {
       .catch((e) => console.error("Error al cargar trayectoria:", e));
   }, []);
 
-  const chartData = (trajectoryData?.trajectory || []).map((t: any) => ({
-    id: t.id,
-    title: t.examTitle,
-    date: t.date,
-    simceScore: t.simceScore || (t.percent ? Math.round(250 + (t.percent - 50) * 2) : 250),
-    grade: t.grade,
-    percent: t.percent,
-    level: t.level
-  }));
+  const trajectoryItems = trajectoryData?.trajectory || [];
+  const chartData = trajectoryItems
+    .filter((t: any) => t.gradingMode !== "NORMAL" && t.simceScore != null)
+    .map((t: any) => ({
+      id: t.id,
+      title: t.examTitle,
+      date: t.date,
+      simceScore: t.simceScore,
+      grade: t.grade,
+      percent: t.percent,
+      level: t.level
+    }));
 
   return (
     <div className="p-8 max-w-4xl space-y-6">
@@ -122,7 +133,8 @@ function StudentDashboard() {
                   <h2 className="text-lg font-bold text-gray-800">{a.exam.title}</h2>
                   <p className="text-sm text-gray-500 mt-1">
                     {a.exam.questionCount} preguntas
-                    {a.exam.durationMinutes ? ` · ${a.exam.durationMinutes} minutos` : ""} · Disponible del{" "}
+                    {a.exam.durationMinutes ? ` · ${a.exam.durationMinutes} minutos` : ""}
+                    {a.exam.gradingMode === "NORMAL" ? ` · Escala normal (Exig. ${a.exam.passThresholdPercent ?? 60}%)` : ""} · Disponible del{" "}
                     {fmt(a.opensAt)} al {fmt(a.closesAt)}
                   </p>
                   <div className="flex items-center gap-2 mt-3 flex-wrap">
@@ -166,40 +178,63 @@ function StudentDashboard() {
         </div>
       ) : (
         <div className="space-y-6">
-          <LongitudinalChart data={chartData} />
+          <LongitudinalChart
+            data={chartData}
+            emptyMessage={
+              trajectoryItems.length > 0
+                ? "Tus evaluaciones con resultados usan escala normal (sin puntaje SIMCE)."
+                : undefined
+            }
+          />
 
-          {chartData.length > 0 && (
+          {trajectoryItems.length > 0 && (
             <div className="bg-white rounded-xl border p-5 shadow-sm space-y-3">
               <h3 className="font-bold text-gray-900 text-sm">Historial Detallado de Evaluaciones</h3>
               <div className="divide-y text-sm">
-                {chartData.map((d: any, idx: number) => (
-                  <div key={idx} className="py-3 flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold text-gray-800">{d.title}</div>
-                      <div className="text-xs text-gray-400">
-                        {new Date(d.date).toLocaleDateString("es-CL", { dateStyle: "long" })}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <span className="text-xs text-gray-400 block">{isPruebas ? "Puntaje" : "SIMCE"}</span>
-                        <span className="font-bold text-blue-600">{d.simceScore} ptos</span>
-                      </div>
-                      {d.grade && (
-                        <div className="text-right">
-                          <span className="text-xs text-gray-400 block">Nota</span>
-                          <span className="font-semibold text-gray-700">{d.grade.toFixed(1)}</span>
+                {trajectoryItems.map((d: any, idx: number) => {
+                  const pct = Math.round(d.percent > 1 ? d.percent : (d.percent || 0) * 100);
+                  const isNormal = d.gradingMode === "NORMAL" || d.simceScore == null;
+                  return (
+                    <div key={d.id || idx} className="py-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-gray-800">{d.examTitle}</div>
+                        <div className="text-xs text-gray-400">
+                          {new Date(d.date).toLocaleDateString("es-CL", { dateStyle: "long" })}
+                          {isNormal && (
+                            <span className="ml-2 inline-block px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold text-[10px]">
+                              Normal · Exig. {d.passThresholdPercent ?? 60}%
+                            </span>
+                          )}
                         </div>
-                      )}
-                      <span className={`px-2.5 py-1 rounded text-xs font-bold ${
-                        d.level === "ADECUADO" ? "bg-emerald-100 text-emerald-700" :
-                        d.level === "ELEMENTAL" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
-                      }`}>
-                        {d.level}
-                      </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {isNormal ? (
+                          <div className="text-right">
+                            <span className="text-xs text-gray-400 block">Logro</span>
+                            <span className="font-bold text-indigo-600">{pct}%</span>
+                          </div>
+                        ) : (
+                          <div className="text-right">
+                            <span className="text-xs text-gray-400 block">{isPruebas ? "Puntaje" : "SIMCE"}</span>
+                            <span className="font-bold text-blue-600">{d.simceScore} ptos</span>
+                          </div>
+                        )}
+                        {d.grade != null && (
+                          <div className="text-right">
+                            <span className="text-xs text-gray-400 block">Nota</span>
+                            <span className="font-semibold text-gray-700">{Number(d.grade).toFixed(1)}</span>
+                          </div>
+                        )}
+                        <span className={`px-2.5 py-1 rounded text-xs font-bold ${
+                          d.level === "ADECUADO" ? "bg-emerald-100 text-emerald-700" :
+                          d.level === "ELEMENTAL" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
+                        }`}>
+                          {d.level}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

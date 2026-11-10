@@ -72,15 +72,17 @@ export default function EvolutionTab({ assignmentId }: { assignmentId: number })
 
   const timeline = rawTimeline;
 
-  // Mapear para LongitudinalChart
-  const chartPoints = timeline.map((t: any) => ({
-    id: t.assignmentId,
-    title: t.examTitle,
-    date: t.date,
-    simceScore: t.avgSimceScore || (t.avgPercent ? Math.round(250 + (t.avgPercent - 50) * 2) : 250),
-    grade: t.avgGrade,
-    percent: t.avgPercent,
-  }));
+  // Mapear para LongitudinalChart (solo evaluaciones con escala SIMCE/TRI)
+  const chartPoints = timeline
+    .filter((t: any) => t.gradingMode !== "NORMAL" && t.avgSimceScore != null)
+    .map((t: any) => ({
+      id: t.assignmentId,
+      title: t.examTitle,
+      date: t.date,
+      simceScore: t.avgSimceScore,
+      grade: t.avgGrade,
+      percent: t.avgPercent,
+    }));
 
   return (
     <div className="space-y-6">
@@ -195,7 +197,14 @@ export default function EvolutionTab({ assignmentId }: { assignmentId: number })
       </div>
 
       {/* Gráfico Longitudinal de la clase */}
-      <LongitudinalChart data={chartPoints} />
+      <LongitudinalChart
+        data={chartPoints}
+        emptyMessage={
+          timeline.length > 0
+            ? "Las evaluaciones filtradas utilizan escala normal (sin puntaje SIMCE)."
+            : undefined
+        }
+      />
 
       {/* Tabla comparativa ensayo a ensayo */}
       <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
@@ -270,9 +279,20 @@ export default function EvolutionTab({ assignmentId }: { assignmentId: number })
                         {item.submissionsCount} / {item.totalStudents} ({Math.round((item.submissionsCount / (item.totalStudents || 1)) * 100)}%)
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <span className="text-base font-extrabold text-blue-600">
-                          {item.avgSimceScore || "—"} ptos
-                        </span>
+                        {item.gradingMode === "NORMAL" || item.avgSimceScore == null ? (
+                          <div>
+                            <span className="text-sm font-bold text-indigo-700">
+                              {item.avgPercent != null ? `${Math.round(item.avgPercent)}% logro` : "N/A"}
+                            </span>
+                            <span className="block text-[10px] font-semibold text-indigo-600">
+                              Normal · Exig. {item.passThresholdPercent ?? 60}%
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-base font-extrabold text-blue-600">
+                            {item.avgSimceScore} ptos
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-4 text-center font-bold text-gray-800">
                         {item.avgGrade ? item.avgGrade.toFixed(1) : "—"}

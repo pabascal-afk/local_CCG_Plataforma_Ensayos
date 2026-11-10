@@ -55,6 +55,7 @@ model Exam {
   pdfPath         String // nombre de archivo dentro de backend/uploads
   optionsCount    Int              @default(4) // 4 = A-D, 5 = A-E
   durationMinutes Int?
+  gradingMode     String           @default("SIMCE") // SIMCE | NORMAL
   passThreshold   Float            @default(0.6) // exigencia para el 4.0
   minGrade        Float            @default(1.0)
   cutElemental    Float            @default(0.50)

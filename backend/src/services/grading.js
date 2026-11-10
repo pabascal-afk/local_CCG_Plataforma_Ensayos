@@ -4,6 +4,27 @@
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
+const GRADING_MODES = ['SIMCE', 'NORMAL'];
+
+function normalizeGradingMode(mode) {
+  if (mode === undefined || mode === null || String(mode).trim() === '') return 'SIMCE';
+  const clean = String(mode).trim().toUpperCase();
+  if (clean === 'NORMAL' || clean === 'STANDARD' || clean === 'TRADITIONAL') return 'NORMAL';
+  if (clean === 'SIMCE' || clean === 'IRT' || clean === 'TRI') return 'SIMCE';
+  return 'SIMCE';
+}
+
+function normalizePassThreshold(value, fallback = 0.6) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const cleaned = String(value).trim().replace(/%/g, '').replace(',', '.');
+  if (!cleaned) return fallback;
+  const num = Number(cleaned);
+  if (!Number.isFinite(num) || num <= 0) return fallback;
+  const ratio = num > 1 ? num / 100 : num;
+  if (ratio <= 0 || ratio >= 1) return fallback;
+  return Math.round(ratio * 10000) / 10000;
+}
+
 /**
  * Nota chilena 1.0–7.0 con exigencia configurable.
  * @param {number} p proporción de logro (0..1)
@@ -13,15 +34,15 @@ const round1 = (n) => Math.round(n * 10) / 10;
 function chileanGrade(p, e = 0.6, min = 1.0) {
   const ratio = Math.max(0, Math.min(1, p));
   let grade;
-  if (ratio < e) {
+  if (ratio + 1e-9 < e) {
     grade = min + (4 - min) * (ratio / e);
   } else if (e >= 1) {
     grade = 7;
   } else {
-    grade = 4 + 3 * ((ratio - e) / (1 - e));
+    grade = 4 + 3 * (Math.max(0, ratio - e) / (1 - e));
   }
   // Evita que el redondeo suba a 4.0 a quien no alcanzó la exigencia.
-  if (ratio < e) return Math.min(round1(grade), 3.9);
+  if (ratio + 1e-9 < e) return Math.min(round1(grade), 3.9);
   return Math.min(7, round1(grade));
 }
 
@@ -73,10 +94,15 @@ const { estimateThetaEAP, thetaToSimceScore, simceAchievementLevel } = require('
 /**
  * @param {Array<{id:number, correctAnswer:string, questionType?:string, maxPoints?:number, skill?:string, axis?:string, difficulty?:number, discrimination?:number, guessing?:number}>} questions
  * @param {Record<number,string>} answers  mapa questionId -> alternativa marcada o respuesta
- * @param {{passThreshold?:number, minGrade?:number, cutElemental?:number, cutAdecuado?:number, simceCutElemental?:number, simceCutAdecuado?:number}} exam
+ * @param {{gradingMode?:string, passThreshold?:number, minGrade?:number, cutElemental?:number, cutAdecuado?:number, simceCutElemental?:number|null, simceCutAdecuado?:number|null}} exam
  * @param {Record<number,number|null>} awardedPointsMap  mapa questionId -> puntos otorgados por el docente en preguntas WRITTEN / ORAL
  */
 function computeResults(questions, answers, exam = {}, awardedPointsMap = {}) {
+  const mode = normalizeGradingMode(exam?.gradingMode);
+  const passThreshold = normalizePassThreshold(exam?.passThreshold, 0.6);
+  const minGradeRaw = Number(exam?.minGrade);
+  const minGrade = Number.isFinite(minGradeRaw) && minGradeRaw >= 1 && minGradeRaw < 4 ? minGradeRaw : 1.0;
+
   let totalMaxPoints = 0;
   let totalEarnedPoints = 0;
   const irtResponsesMap = {};
@@ -93,7 +119,7 @@ function computeResults(questions, answers, exam = {}, awardedPointsMap = {}) {
       const earnedPoints = hasAwarded ? Math.max(0, Math.min(maxPts, Number(rawAwarded))) : 0;
       totalEarnedPoints += earnedPoints;
 
-      const isCorrect = hasAwarded ? earnedPoints >= maxPts * (exam.passThreshold ?? 0.6) : null;
+      const isCorrect = hasAwarded ? earnedPoints + 1e-9 >= maxPts * passThreshold : null;
       if (hasAwarded) {
         irtResponsesMap[q.id] = maxPts > 0 ? earnedPoints / maxPts : 0;
       }
@@ -122,19 +148,44 @@ function computeResults(questions, answers, exam = {}, awardedPointsMap = {}) {
   });
 
   const ratio = totalMaxPoints > 0 ? totalEarnedPoints / totalMaxPoints : 0;
+  const grade = chileanGrade(ratio, passThreshold, minGrade);
 
-  // Cálculo psicométrico TRI / Modelo 3PL
-  const { theta, seTheta } = estimateThetaEAP(questions, irtResponsesMap);
-  const simceScore = totalMaxPoints > 0 ? thetaToSimceScore(theta) : 100;
-  
-  // Nivel de logro:
-  // Si el examen define cortes SIMCE explícitos, clasifica por escala SIMCE.
-  // De lo contrario, clasifica por porcentaje de exigencia tradicional.
+  let theta = null;
+  let seTheta = null;
+  let simceScore = null;
   let level;
-  if (exam.simceCutElemental !== undefined || exam.simceCutAdecuado !== undefined) {
-    level = simceAchievementLevel(simceScore, exam.simceCutElemental ?? 241, exam.simceCutAdecuado ?? 284);
+
+  if (mode === 'NORMAL') {
+    // Escala tradicional chilena según % de exigencia editable:
+    // Nota < 4.0 (< exigencia) -> INSUFICIENTE
+    // Nota 4.0 a 5.9 -> ELEMENTAL
+    // Nota 6.0 a 7.0 -> ADECUADO
+    if (ratio + 1e-9 < passThreshold || grade < 4.0) {
+      level = 'INSUFICIENTE';
+    } else if (grade >= 6.0) {
+      level = 'ADECUADO';
+    } else {
+      level = 'ELEMENTAL';
+    }
   } else {
-    level = achievementLevel(ratio, exam.cutElemental ?? 0.5, exam.cutAdecuado ?? 0.75);
+    // Cálculo psicométrico TRI / Modelo 3PL (Modo SIMCE)
+    const irt = estimateThetaEAP(questions, irtResponsesMap);
+    theta = irt.theta;
+    seTheta = irt.seTheta;
+    simceScore = totalMaxPoints > 0 ? thetaToSimceScore(theta) : 100;
+
+    // Nivel de logro:
+    // Si el examen define cortes SIMCE explícitos, clasifica por escala SIMCE.
+    // De lo contrario, clasifica por porcentaje de exigencia tradicional.
+    if (exam?.simceCutElemental != null || exam?.simceCutAdecuado != null) {
+      level = simceAchievementLevel(
+        simceScore,
+        exam.simceCutElemental ?? 241,
+        exam.simceCutAdecuado ?? 284
+      );
+    } else {
+      level = achievementLevel(ratio, exam?.cutElemental ?? 0.5, exam?.cutAdecuado ?? 0.75);
+    }
   }
 
   return {
@@ -143,16 +194,27 @@ function computeResults(questions, answers, exam = {}, awardedPointsMap = {}) {
     earnedPoints: round1(totalEarnedPoints),
     correctCount: Math.round(totalEarnedPoints),
     percent: Math.round(ratio * 1000) / 10,
-    grade: chileanGrade(ratio, exam.passThreshold ?? 0.6, exam.minGrade ?? 1.0),
+    grade,
     achievementLevel: level,
     simceScore,
     theta,
     seTheta,
+    gradingMode: mode,
+    passThreshold,
     perQuestion,
     bySkill: groupStats(questions, answers, 'skill', awardedPointsMap),
     byAxis: groupStats(questions, answers, 'axis', awardedPointsMap),
   };
 }
 
-module.exports = { chileanGrade, achievementLevel, computeResults, isOpenQuestion, getQuestionMaxPoints };
+module.exports = {
+  GRADING_MODES,
+  normalizeGradingMode,
+  normalizePassThreshold,
+  chileanGrade,
+  achievementLevel,
+  computeResults,
+  isOpenQuestion,
+  getQuestionMaxPoints,
+};
 

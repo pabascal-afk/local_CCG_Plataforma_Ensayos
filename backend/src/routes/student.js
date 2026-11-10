@@ -5,7 +5,7 @@ const { z } = require('zod');
 const { prisma } = require('../lib/prisma');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { getDeadline, finalizeSubmission } = require('../services/submissions');
-const { computeResults } = require('../services/grading');
+const { computeResults, normalizeGradingMode, normalizePassThreshold } = require('../services/grading');
 
 const router = express.Router();
 router.use(requireAuth, requireRole('STUDENT'));
@@ -48,7 +48,17 @@ router.get('/assignments', async (req, res) => {
   const assignments = await prisma.examAssignment.findMany({
     where: { courseId: student.courseId },
     include: {
-      exam: { select: { id: true, title: true, subject: true, durationMinutes: true, _count: { select: { questions: true } } } },
+      exam: {
+        select: {
+          id: true,
+          title: true,
+          subject: true,
+          durationMinutes: true,
+          gradingMode: true,
+          passThreshold: true,
+          _count: { select: { questions: true } }
+        }
+      },
       submissions: { where: { studentRut: req.user.rut } },
     },
     orderBy: { opensAt: 'desc' },
@@ -56,6 +66,7 @@ router.get('/assignments', async (req, res) => {
 
   res.json(assignments.map((a) => {
     const submission = a.submissions[0] || null;
+    const pThresh = normalizePassThreshold(a.exam?.passThreshold, 0.6);
     return {
       id: a.id,
       opensAt: a.opensAt,
@@ -63,7 +74,14 @@ router.get('/assignments', async (req, res) => {
       isExtended: Boolean(submission?.extendedDeadline),
       released: a.released,
       applicationMode: a.applicationMode || 'DIGITAL',
-      exam: { ...a.exam, questionCount: a.exam._count.questions, _count: undefined },
+      exam: {
+        ...a.exam,
+        gradingMode: normalizeGradingMode(a.exam?.gradingMode),
+        passThreshold: pThresh,
+        passThresholdPercent: Math.round(pThresh * 1000) / 10,
+        questionCount: a.exam._count.questions,
+        _count: undefined
+      },
       state: assignmentState(a, submission),
       submissionId: submission?.id ?? null,
     };
@@ -156,6 +174,7 @@ router.post('/assignments/:id/start', async (req, res) => {
     };
   });
 
+  const startPassThreshold = normalizePassThreshold(assignment.exam.passThreshold, 0.6);
   res.json({
     submissionId: submission.id,
     assignmentId: assignment.id,
@@ -164,6 +183,9 @@ router.post('/assignments/:id/start', async (req, res) => {
       title: assignment.exam.title,
       subject: assignment.exam.subject,
       optionsCount: assignment.exam.optionsCount,
+      gradingMode: normalizeGradingMode(assignment.exam.gradingMode),
+      passThreshold: startPassThreshold,
+      passThresholdPercent: Math.round(startPassThreshold * 1000) / 10,
       pdfVersion: assignment.exam.pdfPath ? path.basename(assignment.exam.pdfPath) : '',
     },
     questions,
@@ -318,17 +340,32 @@ router.get('/submissions/:id/result', async (req, res) => {
     awardedPointsMap
   );
 
+  const gradingMode = normalizeGradingMode(exam.gradingMode);
+  const passThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
+  const passThresholdPercent = Math.round(passThreshold * 1000) / 10;
+
   // No se incluye la pauta ni el detalle por pregunta (evita que circule entre cursos).
   res.json({
-    exam: { title: exam.title, subject: exam.subject },
+    exam: {
+      title: exam.title,
+      subject: exam.subject,
+      gradingMode,
+      passThreshold,
+      passThresholdPercent,
+    },
     submittedAt: submission.submittedAt,
     correctCount: submission.correctCount,
     total: results.total,
+    maxScore: results.maxPoints,
+    totalScore: results.earnedPoints,
     percent: submission.percent,
     grade: submission.grade,
     achievementLevel: submission.achievementLevel,
-    simceScore: submission.simceScore ?? results.simceScore,
-    theta: submission.theta ?? results.theta,
+    simceScore: gradingMode === 'NORMAL' ? null : (submission.simceScore ?? results.simceScore),
+    theta: gradingMode === 'NORMAL' ? null : (submission.theta ?? results.theta),
+    gradingMode,
+    passThreshold,
+    passThresholdPercent,
     bySkill: results.bySkill,
     byAxis: results.byAxis,
   });
@@ -356,17 +393,24 @@ router.get('/trajectory', async (req, res) => {
     orderBy: { submittedAt: 'asc' }
   });
 
-  const trajectory = submissions.map((s) => ({
-    id: s.id,
-    assignmentId: s.assignmentId,
-    examTitle: s.assignment.exam.title,
-    subject: s.assignment.exam.subject,
-    date: s.submittedAt,
-    grade: s.grade,
-    percent: s.percent,
-    simceScore: s.simceScore,
-    level: s.achievementLevel,
-  }));
+  const trajectory = submissions.map((s) => {
+    const gMode = normalizeGradingMode(s.assignment.exam?.gradingMode);
+    const pThresh = normalizePassThreshold(s.assignment.exam?.passThreshold, 0.6);
+    return {
+      id: s.id,
+      assignmentId: s.assignmentId,
+      examTitle: s.assignment.exam.title,
+      subject: s.assignment.exam.subject,
+      gradingMode: gMode,
+      passThreshold: pThresh,
+      passThresholdPercent: Math.round(pThresh * 1000) / 10,
+      date: s.submittedAt,
+      grade: s.grade,
+      percent: s.percent,
+      simceScore: gMode === 'NORMAL' ? null : s.simceScore,
+      level: s.achievementLevel,
+    };
+  });
 
   res.json({
     student: {

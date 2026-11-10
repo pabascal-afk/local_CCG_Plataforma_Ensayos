@@ -21,6 +21,7 @@ interface LongitudinalChartProps {
   minScore?: number;     // default 150
   maxScore?: number;     // default 350
   height?: number;
+  emptyMessage?: string;
 }
 
 export default function LongitudinalChart({
@@ -30,6 +31,7 @@ export default function LongitudinalChart({
   minScore = 160,
   maxScore = 360,
   height = 280,
+  emptyMessage,
 }: LongitudinalChartProps) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const isPruebas = useIsPruebas();
@@ -37,20 +39,20 @@ export default function LongitudinalChart({
   if (!data || data.length === 0) {
     return (
       <div className="flex items-center justify-center p-8 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-sm">
-        No hay datos suficientes de evaluaciones para trazar la trayectoria.
+        {emptyMessage || "No hay datos suficientes de evaluaciones para trazar la trayectoria."}
       </div>
     );
   }
 
   // Filtrar y ordenar por fecha ascendente
   const validData = data
-    .filter((d) => d.simceScore && !isNaN(d.simceScore))
+    .filter((d) => d.simceScore !== null && d.simceScore !== undefined && !isNaN(d.simceScore) && d.simceScore > 0)
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   if (validData.length === 0) {
     return (
       <div className="flex items-center justify-center p-8 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-sm">
-        {isPruebas ? "No hay puntajes registrados para esta serie." : "No hay puntajes SIMCE registrados para esta serie."}
+        {emptyMessage || (isPruebas ? "No hay puntajes registrados para esta serie." : "No hay puntajes SIMCE registrados para esta serie.")}
       </div>
     );
   }

@@ -52,13 +52,27 @@ export default function SummaryTab({ id }: { id: number }) {
           <p className="text-3xl font-bold text-orange-900">{Math.round(avgPct)}%</p>
         </div>
         <div className="bg-emerald-50 rounded-xl p-4 text-center">
-          <p className="text-sm text-emerald-600 font-medium mb-1">
-            {isPruebas ? "Puntaje Promedio" : "Puntaje SIMCE Promedio"}
-          </p>
-          <p className="text-3xl font-bold text-emerald-900">
-            {data.averageSimceScore ? `${data.averageSimceScore} pts` : "N/A"}
-          </p>
-          <p className="text-xs text-emerald-600 mt-1">Escala 200 - 350 pts</p>
+          {data.gradingMode === "NORMAL" ? (
+            <>
+              <p className="text-sm text-emerald-600 font-medium mb-1">Escala / Exigencia</p>
+              <p className="text-2xl font-bold text-emerald-900">Prueba Normal</p>
+              <p className="text-xs text-emerald-700 mt-1">
+                Exigencia {data.passThresholdPercent ?? 60}% (Nota 4,0)
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-emerald-600 font-medium mb-1">
+                {isPruebas ? "Puntaje Promedio" : "Puntaje SIMCE Promedio"}
+              </p>
+              <p className="text-3xl font-bold text-emerald-900">
+                {data.averageSimceScore != null ? `${data.averageSimceScore} pts` : "N/A"}
+              </p>
+              <p className="text-xs text-emerald-600 mt-1">
+                Escala 100 - 400 pts · Exig. {data.passThresholdPercent ?? 60}%
+              </p>
+            </>
+          )}
         </div>
       </div>
 
