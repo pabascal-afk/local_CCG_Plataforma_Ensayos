@@ -8,7 +8,7 @@ import Link from "next/link";
 import { 
   ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, 
   Sparkles, Headphones, Scissors, Plus, Trash2, ListPlus,
-  FileText, Eye, RefreshCw, Play
+  FileText, Eye, RefreshCw, Play, Calculator, AlertTriangle, CheckCircle2, X
 } from "lucide-react";
 import { getToken } from "@/lib/session";
 import AiPromptModal from "@/components/AiPromptModal";
@@ -43,6 +43,11 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
 
   const [pasteText, setPasteText] = useState("");
   const [showPaste, setShowPaste] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showRecalcModal, setShowRecalcModal] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
+  const [recalcResult, setRecalcResult] = useState<any>(null);
+  const [recalcError, setRecalcError] = useState("");
 
   const normalizeDifficultySelectValue = (raw: any): string => {
     if (raw === undefined || raw === null || raw === "") return "0.0";
@@ -83,6 +88,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
 
     const initialCount = e.questions?.length || e.questionCount || Object.keys(e.answerKey || {}).length || 45;
     setCustomQuestionCount(initialCount);
+    setIsDirty(false);
   };
 
   const handleDownloadTemplate = async () => {
@@ -133,6 +139,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     const currentTotal = maxQ;
     const newTotal = currentTotal + safeCount;
     setCustomQuestionCount(newTotal);
+    setIsDirty(true);
 
     setAnswerKey(prev => {
       const next = { ...prev };
@@ -172,6 +179,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     const qToRemove = String(maxQ);
     const newTotal = maxQ - 1;
     setCustomQuestionCount(newTotal);
+    setIsDirty(true);
 
     setAnswerKey(prev => {
       const next = { ...prev };
@@ -210,7 +218,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     });
   };
 
-  const handleSave = async () => {
+  const saveAnswerKey = async (silent: boolean = false): Promise<boolean> => {
     setSaving(true);
     try {
       await apiFetch(`/admin/exams/${id}/answer-key`, {
@@ -227,11 +235,45 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
         }
       });
       setExam((prev: any) => ({ ...prev, questionCount: maxQ }));
-      alert("Pauta guardada correctamente (" + maxQ + " preguntas registradas)");
+      setIsDirty(false);
+      if (!silent) {
+        alert("Pauta guardada correctamente (" + maxQ + " preguntas registradas)");
+      }
+      return true;
     } catch (err: any) {
       alert(err.message);
+      return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSave = async () => {
+    await saveAnswerKey(false);
+  };
+
+  const handleConfirmRecalculate = async () => {
+    setRecalcError("");
+    setRecalculating(true);
+    try {
+      if (isDirty) {
+        const savedOk = await saveAnswerKey(true);
+        if (!savedOk) {
+          setRecalculating(false);
+          return;
+        }
+      }
+      const data = await apiFetch<any>(`/admin/exams/${id}/recalculate-grades`, {
+        method: "POST",
+        body: {}
+      });
+      setRecalcResult(data);
+      setShowRecalcModal(false);
+      await loadExam();
+    } catch (err: any) {
+      setRecalcError(err.message || "No se pudieron recalcular las notas");
+    } finally {
+      setRecalculating(false);
     }
   };
 
@@ -281,6 +323,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     }
     setAnswerKey(newKey);
     setQuestionTypesKeys(newTypes);
+    setIsDirty(true);
     setShowPaste(false);
     setPasteText("");
   };
@@ -288,6 +331,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const [selectedAudioQuestion, setSelectedAudioQuestion] = useState<number | null>(null);
 
   const handleTypeChange = (qNum: string, newType: string) => {
+    setIsDirty(true);
     setQuestionTypesKeys(prev => ({ ...prev, [qNum]: newType }));
     if (newType === "WRITTEN") {
       setAnswerKey(prev => ({ ...prev, [qNum]: "DESARROLLO" }));
@@ -306,6 +350,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   };
 
   const handleKeyChange = (qNum: string, newKey: string) => {
+    setIsDirty(true);
     setAnswerKey(prev => ({ ...prev, [qNum]: newKey }));
   };
 
@@ -420,20 +465,112 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                   </button>
                 )}
 
+                {user.role === "ADMIN" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecalcError("");
+                      setShowRecalcModal(true);
+                    }}
+                    disabled={recalculating}
+                    className="px-3 py-2 rounded-lg font-bold text-xs md:text-sm flex items-center gap-1.5 border bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-300 shadow-2xs transition cursor-pointer disabled:opacity-50"
+                    title="Reevaluar todas las entregas finalizadas (SUBMITTED) con la pauta actual"
+                  >
+                    <Calculator className="w-3.5 h-3.5" />
+                    <span>Recalcular notas con la pauta actual</span>
+                  </button>
+                )}
+
                 <button 
                   onClick={handleSave}
                   disabled={saving}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-xs md:text-sm hover:bg-blue-700 flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-xs md:text-sm hover:bg-blue-700 flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer relative"
                 >
-                  {saving ? "Guardando..." : <><Save className="w-4 h-4" /> Guardar Pauta ({maxQ} preg)</>}
+                  {saving ? "Guardando..." : <><Save className="w-4 h-4" /> Guardar Pauta ({maxQ} preg){isDirty ? " *" : ""}</>}
                 </button>
               </div>
             </div>
+
+            {isDirty && (
+              <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    Tienes cambios sin guardar en la pauta. Haz clic en <strong>Guardar Pauta</strong> (o se guardarán automáticamente si recalculas notas).
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {recalcResult && (
+              <div className="mb-5 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs md:text-sm flex items-start justify-between gap-3 shadow-xs">
+                <div className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="font-bold text-emerald-900">{recalcResult.message}</div>
+                    <div className="text-xs text-emerald-800 flex flex-wrap gap-x-4 gap-y-1">
+                      <span>Entregas evaluadas: <strong>{recalcResult.evaluatedCount}</strong></span>
+                      <span>Con cambios: <strong>{recalcResult.updatedCount}</strong></span>
+                      <span>Notas recalculadas: <strong>{recalcResult.updatedGradesCount}</strong></span>
+                      <span>Cursos afectados: <strong>{recalcResult.assignmentsAffected}</strong></span>
+                      {recalcResult.avgGradeBefore != null && recalcResult.avgGradeAfter != null && (
+                        <span>
+                          Promedio general: <strong>{Number(recalcResult.avgGradeBefore).toFixed(1)} → {Number(recalcResult.avgGradeAfter).toFixed(1)}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRecalcResult(null)}
+                  className="text-emerald-700 hover:text-emerald-900 p-1 rounded-md hover:bg-emerald-100 cursor-pointer"
+                  aria-label="Cerrar resumen de recálculo"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               
               {/* Sidebar herramientas */}
               <div className="md:col-span-1 space-y-4">
+
+                {/* Card Recalcular Notas Post-Rendición */}
+                {user.role === "ADMIN" && (
+                  <div className="bg-indigo-50/80 border border-indigo-200 p-4 rounded-xl shadow-sm space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="font-bold text-sm text-indigo-950 flex items-center gap-1.5">
+                        <Calculator className="w-4 h-4 text-indigo-600" />
+                        <span>Recálculo Post-Rendición</span>
+                      </h3>
+                      <span className="bg-indigo-100 text-indigo-800 font-extrabold text-[10px] px-2 py-0.5 rounded-full border border-indigo-200">
+                        {exam.submittedCount ?? 0} rendidas
+                      </span>
+                    </div>
+                    <p className="text-xs text-indigo-900/80 leading-snug">
+                      Si corregiste una clave o puntaje después de que los cursos entregaron, reevalúa las entregas finalizadas (<code className="font-mono text-[11px]">SUBMITTED</code>) sin alterar intentos en curso.
+                    </p>
+                    {Boolean(exam.inProgressCount && exam.inProgressCount > 0) && (
+                      <p className="text-[11px] text-indigo-800 font-medium">
+                        • {exam.inProgressCount} intento(s) en curso no se verán afectados.
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecalcError("");
+                        setShowRecalcModal(true);
+                      }}
+                      disabled={recalculating}
+                      className="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs transition cursor-pointer disabled:opacity-50"
+                    >
+                      <Calculator className="w-3.5 h-3.5" />
+                      <span>Recalcular notas con la pauta actual</span>
+                    </button>
+                  </div>
+                )}
 
                 {/* Card Cuadernillo PDF */}
                 <div className={`p-4 rounded-xl border shadow-sm space-y-2.5 ${
@@ -720,14 +857,17 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                                   ))}
                                 </select>
                               ) : (
-                                <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1" title="Puntaje máximo de esta pregunta">
+                                  <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1" title="Puntaje máximo de esta pregunta">
                                   <input
                                     type="number"
                                     min={0.5}
                                     max={100}
                                     step={0.5}
                                     value={maxPts}
-                                    onChange={e => setMaxPointsKeys(prev => ({ ...prev, [qNum]: Math.max(0.5, parseFloat(e.target.value) || 1) }))}
+                                    onChange={e => {
+                                      setIsDirty(true);
+                                      setMaxPointsKeys(prev => ({ ...prev, [qNum]: Math.max(0.5, parseFloat(e.target.value) || 1) }));
+                                    }}
                                     className="w-12 text-center font-black text-xs text-slate-900 outline-none"
                                   />
                                   <span className="text-[11px] font-bold text-slate-500">pts</span>
@@ -770,7 +910,10 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                               <input 
                                 type="text" 
                                 value={axesKeys[qNum] || ""} 
-                                onChange={e => setAxesKeys({ ...axesKeys, [qNum]: e.target.value })}
+                                onChange={e => {
+                                  setIsDirty(true);
+                                  setAxesKeys({ ...axesKeys, [qNum]: e.target.value });
+                                }}
                                 placeholder="Ej: Geometría"
                                 className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none text-xs"
                               />
@@ -781,7 +924,10 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                               <input 
                                 type="text" 
                                 value={learningObjectivesKeys[qNum] || ""} 
-                                onChange={e => setLearningObjectivesKeys({ ...learningObjectivesKeys, [qNum]: e.target.value })}
+                                onChange={e => {
+                                  setIsDirty(true);
+                                  setLearningObjectivesKeys({ ...learningObjectivesKeys, [qNum]: e.target.value });
+                                }}
                                 placeholder="OA 14"
                                 className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none text-xs"
                               />
@@ -792,7 +938,10 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                               <input 
                                 type="text" 
                                 value={skillsKeys[qNum] || ""} 
-                                onChange={e => setSkillsKeys({ ...skillsKeys, [qNum]: e.target.value })}
+                                onChange={e => {
+                                  setIsDirty(true);
+                                  setSkillsKeys({ ...skillsKeys, [qNum]: e.target.value });
+                                }}
                                 placeholder="Ej: Argumentar"
                                 className="border rounded px-2 py-1.5 w-full focus:ring-2 focus:ring-blue-500 outline-none text-xs"
                               />
@@ -802,7 +951,10 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                             <td className="p-3">
                               <select
                                 value={normalizeDifficultySelectValue(difficultiesKeys[qNum])}
-                                onChange={e => setDifficultiesKeys({ ...difficultiesKeys, [qNum]: e.target.value })}
+                                onChange={e => {
+                                  setIsDirty(true);
+                                  setDifficultiesKeys({ ...difficultiesKeys, [qNum]: e.target.value });
+                                }}
                                 className="border rounded px-2 py-1.5 w-full text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                               >
                                 <option value="-1.5">Fácil (-1.5)</option>
@@ -909,6 +1061,86 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
               );
             }}
           />
+
+          {/* Modal Confirmación Recalcular Notas */}
+          {showRecalcModal && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-indigo-50/70">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-indigo-600 text-white">
+                      <Calculator className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm">Recalcular notas con la pauta actual</h3>
+                      <p className="text-[11px] text-slate-500 line-clamp-1">{exam.title}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !recalculating && setShowRecalcModal(false)}
+                    disabled={recalculating}
+                    className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-3 text-xs text-slate-700 leading-relaxed">
+                  {isDirty && (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Hay cambios sin guardar en el editor.</strong> Al confirmar, primero se guardará la pauta actual ({maxQ} preguntas) y luego se recalcularán las entregas.
+                      </div>
+                    </div>
+                  )}
+
+                  <p>
+                    Se reevaluarán <strong>{exam.submittedCount ?? 0} entrega(s) finalizada(s)</strong> (<code className="font-mono">SUBMITTED</code>) asociadas a esta evaluación usando la pauta vigente.
+                  </p>
+
+                  <ul className="space-y-1 text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <li>• Se actualizarán nota, porcentaje, nivel de logro, puntaje SIMCE/TRI y aciertos por pregunta.</li>
+                    <li>• Se conservarán intactos los intentos <code className="font-mono">IN_PROGRESS</code>.</li>
+                    <li>• Se respetará el puntaje manual ya otorgado en preguntas de desarrollo/oral.</li>
+                  </ul>
+
+                  {recalcError && (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 font-semibold">
+                      {recalcError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowRecalcModal(false)}
+                    disabled={recalculating}
+                    className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmRecalculate}
+                    disabled={recalculating}
+                    className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${recalculating ? "animate-spin" : ""}`} />
+                    <span>
+                      {recalculating
+                        ? "Recalculando..."
+                        : isDirty
+                        ? "Guardar pauta y recalcular notas"
+                        : "Confirmar recálculo"}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </AppShell>
       )}
     </RequireRole>

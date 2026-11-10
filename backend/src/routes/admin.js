@@ -10,6 +10,7 @@ const { normalizeRut } = require('../utils/rut');
 const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet');
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
 const { computeResults } = require('../services/grading');
+const { recalculateExamSubmissions } = require('../services/submissions');
 
 const router = express.Router();
 const uploadMemory = multer({ storage: multer.memoryStorage() });
@@ -1582,7 +1583,16 @@ router.get('/exams', async (req, res, next) => {
       include: { 
         questions: true,
         assignments: {
-          include: { course: true }
+          include: {
+            course: true,
+            _count: {
+              select: {
+                submissions: {
+                  where: { status: 'SUBMITTED' }
+                }
+              }
+            }
+          }
         },
         audioClips: true
       },
@@ -1643,6 +1653,11 @@ router.get('/exams', async (req, res, next) => {
       const audioClipsCount = (e.audioClips || []).length;
       const hasAudios = audioClipsCount > 0 || audioQuestionsList.length > 0;
 
+      const submittedCount = (e.assignments || []).reduce(
+        (acc, a) => acc + (a?._count?.submissions || 0),
+        0
+      );
+
       const assignedCourses = (e.assignments || [])
         .filter(a => a && a.course)
         .map(a => ({
@@ -1663,6 +1678,7 @@ router.get('/exams', async (req, res, next) => {
         durationMinutes: e.durationMinutes,
         optionsCount: e.optionsCount || 4,
         questionCount: (e.questions || []).length,
+        submittedCount,
         createdAt: e.createdAt,
         assignedCourses,
         answerKey,
@@ -1794,6 +1810,15 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
     const audioClipsCount = (e.audioClips || []).length;
     const hasAudios = audioClipsCount > 0 || audioQuestionsList.length > 0;
 
+    const [submittedCount, inProgressCount] = await Promise.all([
+      prisma.submission.count({
+        where: { status: 'SUBMITTED', assignment: { examId: id } }
+      }),
+      prisma.submission.count({
+        where: { status: 'IN_PROGRESS', assignment: { examId: id } }
+      })
+    ]);
+
     res.json({
       id: e.id,
       title: e.title,
@@ -1803,6 +1828,8 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
       examType: e.examType,
       optionsCount: e.optionsCount,
       questionCount: e.questions.length,
+      submittedCount,
+      inProgressCount,
       answerKey,
       questionTypesKeys,
       maxPointsKeys,
@@ -2670,6 +2697,45 @@ router.post('/exams/:id/import-questions', checkAdmin, uploadMemory.single('file
   } catch (error) {
     console.error('[Error importando pauta]:', error);
     return res.status(500).json({ error: 'Error al importar pauta: ' + error.message });
+  }
+});
+
+// Recalcular notas de entregas SUBMITTED usando la pauta actual del instrumento
+router.post('/exams/:id/recalculate-grades', checkAdmin, async (req, res, next) => {
+  try {
+    const examId = parseInt(req.params.id, 10);
+    if (isNaN(examId)) {
+      return res.status(400).json({ error: 'ID de evaluación inválido' });
+    }
+
+    const rawAssignmentId = req.body?.assignmentId;
+    let assignmentId = null;
+    if (rawAssignmentId !== undefined && rawAssignmentId !== null && rawAssignmentId !== '') {
+      assignmentId = parseInt(rawAssignmentId, 10);
+      if (isNaN(assignmentId)) {
+        return res.status(400).json({ error: 'ID de asignación inválido' });
+      }
+    }
+
+    const note = req.body?.note ? String(req.body.note).trim() : null;
+
+    const result = await recalculateExamSubmissions(examId, {
+      assignmentId,
+      actor: req.user,
+      note
+    });
+
+    if (result.badRequest) {
+      return res.status(400).json({ error: result.error || 'Solicitud inválida' });
+    }
+    if (result.notFound) {
+      return res.status(404).json({ error: result.error || 'Evaluación o ensayo no encontrado' });
+    }
+
+    return res.json(result);
+  } catch (error) {
+    console.error('[Error recalculando notas con la pauta actual]:', error);
+    return next(error);
   }
 });
 
