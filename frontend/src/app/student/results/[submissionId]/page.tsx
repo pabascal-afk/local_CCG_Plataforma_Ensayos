@@ -88,16 +88,31 @@ export default function ResultsPage() {
                         {data.achievementLevel || "N/A"}
                       </p>
                     </div>
-                    <div className="bg-green-50 rounded-xl p-4">
-                      <p className="text-sm text-green-600 font-medium mb-1">
-                        {data.maxScore && data.maxScore !== data.total ? "Puntaje" : "Correctas"}
-                      </p>
-                      <p className="text-3xl font-bold text-green-900">
-                        {data.maxScore && data.maxScore !== data.total
-                          ? `${data.totalScore ?? data.correctCount} / ${data.maxScore}`
-                          : `${data.correctCount} / ${data.total}`}
-                      </p>
-                    </div>
+                    {(() => {
+                      const showAsPoints = Boolean(
+                        data.hasWeightedPoints ||
+                        data.gradingMode === "NORMAL" ||
+                        data.exam?.gradingMode === "NORMAL" ||
+                        (data.maxScore && data.maxScore !== data.total)
+                      );
+                      return (
+                        <div className="bg-green-50 rounded-xl p-4">
+                          <p className="text-sm text-green-600 font-medium mb-1">
+                            {showAsPoints ? "Puntaje" : "Correctas"}
+                          </p>
+                          <p className="text-3xl font-bold text-green-900">
+                            {showAsPoints
+                              ? `${data.totalScore ?? data.correctCount} / ${data.maxScore ?? data.total}`
+                              : `${data.correctCount} / ${data.total}`}
+                          </p>
+                          {showAsPoints && (
+                            <p className="text-[11px] text-green-600/80 font-medium mt-0.5">
+                              puntos obtenidos
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
                     <div className="bg-orange-50 rounded-xl p-4">
                       <p className="text-sm text-orange-600 font-medium mb-1">% de Logro</p>
                       <p className="text-3xl font-bold text-orange-900">

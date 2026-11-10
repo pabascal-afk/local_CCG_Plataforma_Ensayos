@@ -93,6 +93,8 @@ interface MockGradeResult {
     passThresholdPercent?: number;
   };
   submittedAt: string;
+  questionCount?: number;
+  hasWeightedPoints?: boolean;
   correctCount: number;
   total: number;
   maxPoints: number;
@@ -672,16 +674,30 @@ export default function ExamScreen({
                   {mockResult.achievementLevel || "N/A"}
                 </p>
               </div>
-              <div className="bg-green-50 rounded-xl p-4">
-                <p className="text-sm text-green-600 font-medium mb-1">
-                  {mockResult.maxPoints !== mockResult.total ? "Puntaje" : "Correctas"}
-                </p>
-                <p className="text-3xl font-bold text-green-900">
-                  {mockResult.maxPoints !== mockResult.total
-                    ? `${mockResult.earnedPoints} / ${mockResult.maxPoints}`
-                    : `${mockResult.correctCount} / ${mockResult.total}`}
-                </p>
-              </div>
+              {(() => {
+                const showAsPoints = Boolean(
+                  mockResult.hasWeightedPoints ||
+                  mockResult.gradingMode === "NORMAL" ||
+                  mockResult.maxPoints !== mockResult.total
+                );
+                return (
+                  <div className="bg-green-50 rounded-xl p-4">
+                    <p className="text-sm text-green-600 font-medium mb-1">
+                      {showAsPoints ? "Puntaje" : "Correctas"}
+                    </p>
+                    <p className="text-3xl font-bold text-green-900">
+                      {showAsPoints
+                        ? `${mockResult.earnedPoints} / ${mockResult.maxPoints}`
+                        : `${mockResult.correctCount} / ${mockResult.total}`}
+                    </p>
+                    {showAsPoints && (
+                      <p className="text-[11px] text-green-600/80 font-medium mt-0.5">
+                        puntos ({(mockResult.perQuestion || []).filter((p) => p.isCorrect).length}/{mockResult.questionCount ?? (mockResult.perQuestion || []).length} buenas)
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="bg-orange-50 rounded-xl p-4">
                 <p className="text-sm text-orange-600 font-medium mb-1">% de Logro</p>
                 <p className="text-3xl font-bold text-orange-900">{Math.round(mockResult.percent)}%</p>
@@ -1155,7 +1171,14 @@ export default function ExamScreen({
                     </div>
                   ) : (
                     <div className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-lg border">
-                      <span className="font-bold text-gray-700 w-8">{q.questionNumber}.</span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-bold text-gray-700">{q.questionNumber}.</span>
+                        {q.maxPoints !== undefined && Math.abs(Number(q.maxPoints) - 1) > 1e-6 && (
+                          <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded">
+                            {q.maxPoints} pts
+                          </span>
+                        )}
+                      </div>
                       <div className="flex gap-1.5">
                         {options.map((option) => (
                           <button

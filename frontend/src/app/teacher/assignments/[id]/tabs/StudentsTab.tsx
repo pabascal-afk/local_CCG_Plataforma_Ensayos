@@ -467,11 +467,14 @@ export default function StudentsTab({ id }: { id: number }) {
                       st.percent != null ? (
                         <div>
                           <span>{Math.round(st.percent)}%</span>
-                          {st.correctCount != null && st.maxTotalPoints ? (
-                            <span className="block text-[10px] font-medium text-slate-500">
-                              {st.correctCount}/{st.maxTotalPoints} pts
-                            </span>
-                          ) : null}
+                          {(() => {
+                            const ptsEarned = st.earnedPoints ?? st.correctCount;
+                            return ptsEarned != null && st.maxTotalPoints ? (
+                              <span className="block text-[10px] font-medium text-slate-500">
+                                {ptsEarned}/{st.maxTotalPoints} pts
+                              </span>
+                            ) : null;
+                          })()}
                         </div>
                       ) : (
                         "-"
