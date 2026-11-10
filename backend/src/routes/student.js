@@ -354,6 +354,8 @@ router.get('/submissions/:id/result', async (req, res) => {
       passThresholdPercent,
     },
     submittedAt: submission.submittedAt,
+    questionCount: exam.questions.length,
+    hasWeightedPoints: exam.questions.some((q) => Math.abs((Number(q.maxPoints ?? 1)) - 1) > 1e-6),
     correctCount: submission.correctCount,
     total: results.total,
     maxScore: results.maxPoints,

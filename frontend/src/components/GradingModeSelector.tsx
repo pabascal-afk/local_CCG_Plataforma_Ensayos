@@ -141,7 +141,7 @@ export default function GradingModeSelector({
           </p>
           {isNormal ? (
             <p className="text-indigo-800">
-              Nota directa según <strong>{safePercent}%</strong> de exigencia (sin puntaje SIMCE ni TRI).
+              Nota directa según <strong>{safePercent}%</strong> de exigencia, asignando puntaje individual por pregunta (sin escala SIMCE ni TRI).
               {minPassPoints !== null && (
                 <> Nota 4,0 desde <strong>{formatPointValue(minPassPoints)}</strong> / {totalPoints} pts.</>
               )}
@@ -259,7 +259,7 @@ export default function GradingModeSelector({
                 Evaluación Normal (Nota 1,0 a 7,0 con {safePercent}% de exigencia)
               </p>
               <p className="text-indigo-800">
-                Calcula la nota chilena directamente desde el porcentaje de logro sin estimación TRI ni puntaje SIMCE.
+                Calcula la nota chilena directamente desde el porcentaje de logro obtenido según el puntaje que asignes a cada pregunta (en vez de la escala TRI / SIMCE).
                 {minPassPoints !== null && (
                   <>
                     {" "}

@@ -488,7 +488,9 @@ router.get('/assignments/:id/live', async (req, res, next) => {
     });
 
     const openQuestions = questions.filter(q => isOpenQuestion(q));
-    const maxTotalPoints = questions.reduce((sum, q) => sum + getQuestionMaxPoints(q), 0);
+    const maxTotalPoints = Math.round(questions.reduce((sum, q) => sum + getQuestionMaxPoints(q), 0) * 10) / 10;
+    const hasWeightedPoints = questions.some(q => Math.abs(getQuestionMaxPoints(q) - 1) > 1e-6);
+    const questionById = Object.fromEntries(questions.map(q => [q.id, q]));
 
     const liveGradingMode = normalizeGradingMode(assignment.exam?.gradingMode);
     const livePassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
@@ -504,6 +506,8 @@ router.get('/assignments/:id/live', async (req, res, next) => {
       let state = 'NOT_STARTED';
       let submittedAt = null;
       let startedAt = null;
+      let earnedPoints = null;
+      let correctQuestionsCount = null;
       
       const openAnswers = {};
       let openGradedCount = 0;
@@ -512,6 +516,24 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         if (sub.status === 'SUBMITTED') {
           state = 'SUBMITTED';
           submittedAt = sub.submittedAt;
+          let ptsSum = 0;
+          let correctQ = 0;
+          for (const ans of sub.answers || []) {
+            const q = questionById[ans.questionId];
+            if (!q) continue;
+            const qMax = getQuestionMaxPoints(q);
+            if (isOpenQuestion(q)) {
+              if (ans.awardedPoints !== null && ans.awardedPoints !== undefined) {
+                ptsSum += Math.max(0, Math.min(qMax, Number(ans.awardedPoints)));
+              }
+              if (ans.isCorrect) correctQ++;
+            } else if (ans.isCorrect) {
+              ptsSum += qMax;
+              correctQ++;
+            }
+          }
+          earnedPoints = Math.round(ptsSum * 10) / 10;
+          correctQuestionsCount = correctQ;
         } else {
           state = 'IN_PROGRESS';
           startedAt = sub.startedAt;
@@ -557,6 +579,8 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         grade: sub?.grade || null,
         percent: sub?.percent ?? null,
         correctCount: sub?.correctCount ?? null,
+        earnedPoints,
+        correctQuestionsCount,
         maxTotalPoints,
         simceScore: liveGradingMode === 'NORMAL' ? null : (sub?.simceScore ?? null),
         achievementLevel: sub?.achievementLevel || null,
@@ -584,6 +608,7 @@ router.get('/assignments/:id/live', async (req, res, next) => {
       applicationMode: assignment.applicationMode || 'DIGITAL',
       questionCount: questions.length,
       maxTotalPoints,
+      hasWeightedPoints,
       hasOpenQuestions: openQuestions.length > 0,
       openQuestions: openQuestions.map(oq => ({
         id: oq.id,
@@ -1068,6 +1093,8 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
     const exportPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
     const exportPassPercent = Math.round(exportPassThreshold * 1000) / 10;
     const isNormalExport = exportGradingMode === 'NORMAL';
+    const hasWeightedPoints = questions.some(q => Math.abs(getQuestionMaxPoints(q) - 1) > 1e-6);
+    const maxTotalPoints = Math.round(questions.reduce((sum, q) => sum + getQuestionMaxPoints(q), 0) * 10) / 10;
 
     const workbook = new exceljs.Workbook();
     workbook.creator = 'Colegio Concepción de Chillán';
@@ -1080,14 +1107,16 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       { header: 'Nota', key: 'grade', width: 10 },
       ...(isNormalExport ? [] : [{ header: 'Puntaje SIMCE', key: 'simceScore', width: 16 }]),
       { header: 'Nivel de Logro', key: 'level', width: 16 },
+      ...(isNormalExport || hasWeightedPoints ? [{ header: 'Puntaje', key: 'points', width: 16 }] : []),
       { header: '% Logro', key: 'percent', width: 12 }
     ];
     questions.forEach(q => {
       const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
+      const qMax = getQuestionMaxPoints(q);
       const label = isOpen
-        ? `${q.questionType === 'ORAL' ? 'Oral' : 'Des.'} ${q.maxPoints || 1}pts`
-        : q.correctAnswer;
-      columns1.push({ header: `P${q.questionNumber} (${label})`, key: `q_${q.id}`, width: isOpen ? 16 : 10 });
+        ? `${q.questionType === 'ORAL' ? 'Oral' : 'Des.'} ${qMax}pts`
+        : (qMax !== 1 ? `${q.correctAnswer} · ${qMax}pts` : q.correctAnswer);
+      columns1.push({ header: `P${q.questionNumber} (${label})`, key: `q_${q.id}`, width: isOpen || qMax !== 1 ? 16 : 10 });
     });
     sheet1.columns = columns1;
 
@@ -1096,12 +1125,27 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       const pVal = sub?.percent != null
         ? (sub.percent > 1 ? Math.round(sub.percent) : Math.round(sub.percent * 100)) + '%'
         : '';
+      let earnedPts = 0;
+      if (sub) {
+        sub.answers.forEach(a => {
+          const q = a.question;
+          if (!q) return;
+          const qMax = getQuestionMaxPoints(q);
+          if (q.questionType === 'WRITTEN' || q.questionType === 'ORAL') {
+            if (a.awardedPoints != null) earnedPts += Math.max(0, Math.min(qMax, Number(a.awardedPoints)));
+          } else if (a.isCorrect) {
+            earnedPts += qMax;
+          }
+        });
+      }
+      earnedPts = Math.round(earnedPts * 10) / 10;
       const row = {
         rut: st.rut,
         name: st.name,
         grade: sub?.grade != null ? sub.grade.toFixed(1) : '',
         ...(isNormalExport ? {} : { simceScore: sub?.simceScore != null ? sub.simceScore : '' }),
         level: sub?.achievementLevel || '',
+        ...(isNormalExport || hasWeightedPoints ? { points: sub ? `${earnedPts} / ${maxTotalPoints} pts` : '' } : {}),
         percent: pVal
       };
       if (sub) {
@@ -1169,7 +1213,7 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
     const skillMap = {};
     const axisMap = {};
     questions.forEach(q => {
-      const qMax = (q.questionType === 'WRITTEN' || q.questionType === 'ORAL') ? (q.maxPoints || 1) : 1;
+      const qMax = getQuestionMaxPoints(q);
       if (q.skill) {
         if (!skillMap[q.skill]) skillMap[q.skill] = { questions: 0, correct: 0, total: 0 };
         skillMap[q.skill].questions += 1;
@@ -1187,10 +1231,10 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
         const q = a.question;
         if (!q) return;
         const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
-        const qMax = isOpen ? (q.maxPoints || 1) : 1;
+        const qMax = getQuestionMaxPoints(q);
         const earned = isOpen
           ? (a.awardedPoints != null ? Math.max(0, Math.min(qMax, Number(a.awardedPoints))) : 0)
-          : (a.isCorrect ? 1 : 0);
+          : (a.isCorrect ? qMax : 0);
         if (q.skill && skillMap[q.skill]) skillMap[q.skill].correct += earned;
         if (q.axis && axisMap[q.axis]) axisMap[q.axis].correct += earned;
       });
@@ -1198,12 +1242,12 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
 
     Object.entries(skillMap).forEach(([name, st]) => {
       const pct = st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0;
-      sheet3.addRow({ dim: 'Habilidad', name, qCount: st.questions, correct: Math.round(st.correct * 10) / 10, total: st.total, percent: `${pct}%` });
+      sheet3.addRow({ dim: 'Habilidad', name, qCount: st.questions, correct: Math.round(st.correct * 10) / 10, total: Math.round(st.total * 10) / 10, percent: `${pct}%` });
     });
 
     Object.entries(axisMap).forEach(([name, st]) => {
       const pct = st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0;
-      sheet3.addRow({ dim: 'Eje Temático', name, qCount: st.questions, correct: Math.round(st.correct * 10) / 10, total: st.total, percent: `${pct}%` });
+      sheet3.addRow({ dim: 'Eje Temático', name, qCount: st.questions, correct: Math.round(st.correct * 10) / 10, total: Math.round(st.total * 10) / 10, percent: `${pct}%` });
     });
 
     // HOJA 4: Análisis de Preguntas
@@ -1226,7 +1270,7 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
 
     questions.forEach(q => {
       const isOpen = q.questionType === 'WRITTEN' || q.questionType === 'ORAL';
-      const maxPts = isOpen ? (q.maxPoints || 1) : 1;
+      const maxPts = getQuestionMaxPoints(q);
       let correctCount = 0;
       let sumPts = 0;
       const opts = { A: 0, B: 0, C: 0, D: 0 };
@@ -1262,7 +1306,7 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
         qType: q.questionType === 'ORAL' ? 'Desarrollo Oral' : q.questionType === 'WRITTEN' ? 'Desarrollo Escrito' : 'Selección Múltiple',
         skill: q.skill || 'Sin habilidad',
         axis: q.axis || 'Sin eje',
-        correctAnswer: isOpen ? `${maxPts} pts máx.` : q.correctAnswer,
+        correctAnswer: isOpen ? `${maxPts} pts máx.` : (maxPts !== 1 ? `${q.correctAnswer} (${maxPts} pts)` : q.correctAnswer),
         correctCount: isOpen ? `Prom: ${(totalAns > 0 ? sumPts / totalAns : 0).toFixed(1)} pts` : correctCount,
         total: totalAns,
         percent: `${pct}%`,

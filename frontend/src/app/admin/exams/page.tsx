@@ -16,6 +16,7 @@ import AiPromptModal from "@/components/AiPromptModal";
 import AudioCutterModal from "@/components/AudioCutterModal";
 import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdfModal";
 import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
+import PointsInput from "@/components/PointsInput";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 type CourseItem = {
@@ -48,6 +49,9 @@ type Exam = {
   oralCount?: number;
   multipleChoiceCount?: number;
   totalMaxPoints?: number;
+  hasWeightedPoints?: boolean;
+  questionTypesKeys?: Record<string, string>;
+  maxPointsKeys?: Record<string, number>;
   submittedCount?: number;
   gradingMode?: GradingMode;
   passThreshold?: number;
@@ -124,10 +128,23 @@ export default function ExamsPage() {
   const [gradingExam, setGradingExam] = useState<Exam | null>(null);
   const [editGradingMode, setEditGradingMode] = useState<GradingMode>("SIMCE");
   const [editPassPercent, setEditPassPercent] = useState<number>(60);
+  const [editMaxPointsKeys, setEditMaxPointsKeys] = useState<Record<string, number>>({});
+  const [modalBulkPoints, setModalBulkPoints] = useState<string>("1");
   const [recalcAfterGradingSave, setRecalcAfterGradingSave] = useState<boolean>(true);
   const [savingGrading, setSavingGrading] = useState<boolean>(false);
   const [gradingError, setGradingError] = useState<string>("");
   const isPruebas = useIsPruebas();
+
+  const modalTotalPoints = useMemo(() => {
+    if (!gradingExam) return 0;
+    const qCount = gradingExam.questionCount || Object.keys(editMaxPointsKeys).length || 0;
+    let sum = 0;
+    for (let i = 1; i <= qCount; i++) {
+      const val = Number(editMaxPointsKeys[String(i)]);
+      sum += Number.isFinite(val) && val > 0 ? val : 1;
+    }
+    return Math.round(sum * 10) / 10;
+  }, [gradingExam, editMaxPointsKeys]);
 
   // Tarjetas compactas por defecto (disclosure progresivo)
   const [expandedExams, setExpandedExams] = useState<Set<number>>(new Set());
@@ -333,8 +350,38 @@ export default function ExamsPage() {
         ? Math.round(Number(examItem.passThreshold) * 1000) / 10
         : 60;
     setEditPassPercent(Math.min(99, Math.max(1, Math.round(rawPct) || 60)));
+
+    const qCount = examItem.questionCount || Object.keys(examItem.maxPointsKeys || {}).length || 0;
+    const initialPoints: Record<string, number> = {};
+    for (let i = 1; i <= qCount; i++) {
+      const k = String(i);
+      const raw = examItem.maxPointsKeys?.[k];
+      const qType = examItem.questionTypesKeys?.[k] || "MULTIPLE_CHOICE";
+      const fallback = qType === "ORAL" ? 4 : qType === "WRITTEN" ? 5 : 1;
+      const parsed = Number(raw);
+      initialPoints[k] = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    }
+    setEditMaxPointsKeys(initialPoints);
+    setModalBulkPoints("1");
+
     setRecalcAfterGradingSave((examItem.submittedCount ?? 0) > 0);
     setGradingError("");
+  };
+
+  const handleModalApplyPoints = (pointsVal: number, onlyMultipleChoice: boolean = false) => {
+    if (!gradingExam) return;
+    const safePts = Math.round(Math.min(1000, Math.max(0.1, pointsVal)) * 100) / 100;
+    const qCount = gradingExam.questionCount || Object.keys(editMaxPointsKeys).length || 0;
+    setEditMaxPointsKeys((prev) => {
+      const next = { ...prev };
+      for (let i = 1; i <= qCount; i++) {
+        const k = String(i);
+        const qType = gradingExam.questionTypesKeys?.[k] || "MULTIPLE_CHOICE";
+        if (onlyMultipleChoice && qType !== "MULTIPLE_CHOICE") continue;
+        next[k] = safePts;
+      }
+      return next;
+    });
   };
 
   const handleSaveGradingConfig = async () => {
@@ -350,6 +397,7 @@ export default function ExamsPage() {
           gradingMode: editGradingMode,
           passThresholdPercent: safePct,
           passThreshold: normalizedPassThreshold,
+          ...(editGradingMode === "NORMAL" ? { maxPointsKeys: editMaxPointsKeys } : {}),
         },
       });
 
@@ -1199,8 +1247,12 @@ export default function ExamsPage() {
           {/* Modal Configurar Modalidad de Calificación y Exigencia */}
           {gradingExam && (
             <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden">
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div
+                className={`bg-white rounded-2xl border border-slate-200 shadow-2xl w-full overflow-hidden flex flex-col max-h-[90vh] ${
+                  editGradingMode === "NORMAL" ? "max-w-2xl" : "max-w-lg"
+                }`}
+              >
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
                   <div className="flex items-center gap-2.5">
                     <div className="p-2 rounded-xl bg-blue-600 text-white">
                       <SlidersHorizontal className="w-4 h-4" />
@@ -1220,16 +1272,147 @@ export default function ExamsPage() {
                   </button>
                 </div>
 
-                <div className="p-5 space-y-4">
+                <div className="p-5 space-y-4 overflow-y-auto">
                   <GradingModeSelector
                     variant="full"
                     gradingMode={editGradingMode}
                     onGradingModeChange={setEditGradingMode}
                     passThresholdPercent={editPassPercent}
                     onPassThresholdPercentChange={setEditPassPercent}
-                    totalPoints={gradingExam.totalMaxPoints ?? gradingExam.questionCount}
+                    totalPoints={
+                      editGradingMode === "NORMAL"
+                        ? modalTotalPoints
+                        : gradingExam.totalMaxPoints ?? gradingExam.questionCount
+                    }
                     disabled={savingGrading}
                   />
+
+                  {editGradingMode === "NORMAL" && (gradingExam.questionCount || Object.keys(editMaxPointsKeys).length) > 0 && (
+                    <div className="border border-indigo-200 rounded-xl bg-indigo-50/40 p-3.5 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <h4 className="text-xs font-extrabold text-indigo-950">
+                            Puntaje por pregunta (en vez de escala TRI)
+                          </h4>
+                          <p className="text-[11px] text-indigo-800">
+                            Asigna el puntaje individual de cada pregunta o aplica un valor uniforme.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-black bg-indigo-100 text-indigo-900 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+                            Total: {modalTotalPoints} pts
+                          </span>
+                          <Link
+                            href={`/admin/exams/${gradingExam.id}`}
+                            className="text-[11px] font-bold text-blue-700 hover:underline"
+                          >
+                            Editor completo →
+                          </Link>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={savingGrading}
+                          onClick={() => handleModalApplyPoints(1, false)}
+                          className="px-2 py-1 bg-white hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
+                        >
+                          Todas = 1 pt
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingGrading}
+                          onClick={() => handleModalApplyPoints(2, false)}
+                          className="px-2 py-1 bg-white hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
+                        >
+                          Todas = 2 pts
+                        </button>
+                        <div className="flex items-center gap-1 bg-white border border-indigo-300 rounded-lg px-2 py-0.5">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            disabled={savingGrading}
+                            value={modalBulkPoints}
+                            onChange={(e) => setModalBulkPoints(e.target.value.replace(/[^0-9.,]/g, ""))}
+                            className="w-10 text-center text-xs font-black text-indigo-950 outline-none"
+                            aria-label="Puntaje masivo modal"
+                          />
+                          <span className="text-[11px] font-bold text-indigo-500">pts</span>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={savingGrading}
+                          onClick={() => {
+                            const parsed = parseFloat(modalBulkPoints.replace(",", "."));
+                            if (Number.isFinite(parsed) && parsed > 0) {
+                              handleModalApplyPoints(parsed, false);
+                            }
+                          }}
+                          className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
+                        >
+                          Aplicar a todas
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingGrading}
+                          onClick={() => {
+                            const parsed = parseFloat(modalBulkPoints.replace(",", "."));
+                            if (Number.isFinite(parsed) && parsed > 0) {
+                              handleModalApplyPoints(parsed, true);
+                            }
+                          }}
+                          className="px-2.5 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 border border-indigo-200 rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
+                        >
+                          Solo Sel. Múltiple
+                        </button>
+                      </div>
+
+                      <div className="max-h-56 overflow-y-auto pr-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                        {Array.from(
+                          { length: gradingExam.questionCount || Object.keys(editMaxPointsKeys).length },
+                          (_, idx) => String(idx + 1)
+                        ).map((qNum) => {
+                          const qType = gradingExam.questionTypesKeys?.[qNum] || "MULTIPLE_CHOICE";
+                          const ptsVal = editMaxPointsKeys[qNum] ?? 1;
+                          return (
+                            <div
+                              key={qNum}
+                              className="flex items-center justify-between gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1.5"
+                            >
+                              <div className="flex items-center gap-1 min-w-0">
+                                <span className="text-xs font-black text-slate-700">P{qNum}</span>
+                                {qType === "WRITTEN" && (
+                                  <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1 rounded">
+                                    Esc.
+                                  </span>
+                                )}
+                                {qType === "ORAL" && (
+                                  <span className="text-[9px] font-bold bg-purple-100 text-purple-800 px-1 rounded">
+                                    Oral
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                <PointsInput
+                                  value={ptsVal}
+                                  min={0.1}
+                                  max={1000}
+                                  disabled={savingGrading}
+                                  ariaLabel={`Puntaje pregunta ${qNum}`}
+                                  onChange={(val) =>
+                                    setEditMaxPointsKeys((prev) => ({ ...prev, [qNum]: val }))
+                                  }
+                                  className="w-12 border border-indigo-200 rounded px-1 py-0.5 text-center text-xs font-black text-indigo-950 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                />
+                                <span className="text-[10px] font-bold text-slate-400">p</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {(gradingExam.submittedCount ?? 0) > 0 && (
                     <label className="flex items-start gap-2.5 p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 text-xs text-indigo-950 cursor-pointer">
@@ -1242,7 +1425,7 @@ export default function ExamsPage() {
                       />
                       <span>
                         <strong>Recalcular notas automáticamente después de guardar</strong>{" "}
-                        ({gradingExam.submittedCount} entrega(s) <code className="font-mono">SUBMITTED</code> se reevaluarán inmediatamente con esta modalidad).
+                        ({gradingExam.submittedCount} entrega(s) <code className="font-mono">SUBMITTED</code> se reevaluarán inmediatamente con esta modalidad y puntajes).
                       </span>
                     </label>
                   )}
@@ -1254,7 +1437,7 @@ export default function ExamsPage() {
                   )}
                 </div>
 
-                <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+                <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => setGradingExam(null)}

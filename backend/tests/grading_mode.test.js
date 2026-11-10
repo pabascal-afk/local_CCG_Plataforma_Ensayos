@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const request = require('supertest');
 const bcrypt = require('bcryptjs');
+const exceljs = require('exceljs');
 const app = require('../src/app');
 const { prisma } = require('../src/lib/prisma');
 const { signToken } = require('../src/middleware/auth');
@@ -25,7 +26,9 @@ describe('Selector de modalidad de calificación (SIMCE TRI vs Prueba normal edi
   let course;
   let normalExamId;
   let simceExamId;
+  let weightedExamId;
   let normalAssignment;
+  let weightedAssignment;
   let inProgressSub;
 
   beforeAll(async () => {
@@ -34,7 +37,15 @@ describe('Selector de modalidad de calificación (SIMCE TRI vs Prueba normal edi
     }
     // Limpiar posibles restos de ejecuciones previas fallidas
     await prisma.exam.deleteMany({
-      where: { title: { in: ['Prueba Normal Geometría 70%', 'Ensayo SIMCE Default 60%'] } },
+      where: {
+        title: {
+          in: [
+            'Prueba Normal Geometría 70%',
+            'Ensayo SIMCE Default 60%',
+            'Prueba Normal Puntaje por Pregunta',
+          ],
+        },
+      },
     });
     const hash = await bcrypt.hash('test1234', 10);
 
@@ -87,10 +98,10 @@ describe('Selector de modalidad de calificación (SIMCE TRI vs Prueba normal edi
   });
 
   afterAll(async () => {
-    if (normalAssignment?.id) {
-      await prisma.examAssignment.delete({ where: { id: normalAssignment.id } }).catch(() => {});
+    for (const aid of [normalAssignment?.id, weightedAssignment?.id].filter(Boolean)) {
+      await prisma.examAssignment.delete({ where: { id: aid } }).catch(() => {});
     }
-    for (const eid of [normalExamId, simceExamId].filter(Boolean)) {
+    for (const eid of [normalExamId, simceExamId, weightedExamId].filter(Boolean)) {
       await prisma.exam.delete({ where: { id: eid } }).catch(() => {});
     }
     for (const r of [studentRut, inProgressStudentRut, teacherRut]) {
@@ -537,6 +548,265 @@ describe('Selector de modalidad de calificación (SIMCE TRI vs Prueba normal edi
       expect(dbInProg.status).toBe('IN_PROGRESS');
       expect(dbInProg.grade).toBeNull();
       expect(dbInProg.simceScore).toBeNull();
+    });
+
+    test('4. Puntaje ponderado por pregunta en modo NORMAL: creación, pauta, mocktest, alumno, docente, Excel y recálculo', async () => {
+      // Validación HTTP 400 ante puntajes inválidos en creación
+      const badDefaultPtsRes = await request(app)
+        .post('/api/admin/exams')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .field('title', 'Prueba Inválida Puntaje Base')
+        .field('subject', 'Matemática')
+        .field('level', '5B')
+        .field('questionCount', '4')
+        .field('gradingMode', 'NORMAL')
+        .field('defaultMcPoints', '0')
+        .attach('pdf', dummyPdf, 'bad-default-pts.pdf');
+      expect(badDefaultPtsRes.status).toBe(400);
+
+      const badQuestionPtsRes = await request(app)
+        .post('/api/admin/exams')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .field('title', 'Prueba Inválida Puntaje Individual')
+        .field('subject', 'Matemática')
+        .field('level', '5B')
+        .field('questionCount', '4')
+        .field('gradingMode', 'NORMAL')
+        .field('questionPoints', JSON.stringify({ '1': -2 }))
+        .attach('pdf', dummyPdf, 'bad-q-pts.pdf');
+      expect(badQuestionPtsRes.status).toBe(400);
+
+      // Creación con defaultMcPoints=2, questionPoints={1:3, 3:1.5} y openQuestions en formato mapa objeto (#4 escrita 5 pts)
+      // Total esperado: P1(3) + P2(2) + P3(1.5) + P4(5) = 11.5 pts
+      const createWeightedRes = await request(app)
+        .post('/api/admin/exams')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .field('title', 'Prueba Normal Puntaje por Pregunta')
+        .field('subject', 'Matemática')
+        .field('level', '5B')
+        .field('questionCount', '4')
+        .field('optionsCount', '4')
+        .field('orderNumber', '97')
+        .field('gradingMode', 'NORMAL')
+        .field('passThresholdPercent', '60')
+        .field('defaultMcPoints', '2')
+        .field('questionPoints', JSON.stringify({ '1': 3, '3': 1.5 }))
+        .field('openQuestions', JSON.stringify({ '4': { questionType: 'WRITTEN', maxPoints: 5 } }))
+        .attach('pdf', dummyPdf, 'weighted-normal.pdf');
+
+      weightedExamId = createWeightedRes.body?.id;
+      if (createWeightedRes.body?.pdfPath) uploadedPdfPaths.push(createWeightedRes.body.pdfPath);
+
+      expect(createWeightedRes.status).toBe(200);
+      expect(createWeightedRes.body.gradingMode).toBe('NORMAL');
+      expect(createWeightedRes.body.maxPointsKeys).toEqual({ '1': 3, '2': 2, '3': 1.5, '4': 5 });
+      expect(createWeightedRes.body.totalMaxPoints).toBe(11.5);
+      expect(createWeightedRes.body.hasWeightedPoints).toBe(true);
+
+      // Catálogo GET /exams expone maxPointsKeys, totalMaxPoints y hasWeightedPoints
+      const catalogRes = await request(app)
+        .get('/api/admin/exams')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(catalogRes.status).toBe(200);
+      const listed = catalogRes.body.find((item) => item.id === weightedExamId);
+      expect(listed).toBeDefined();
+      expect(listed.maxPointsKeys).toEqual({ '1': 3, '2': 2, '3': 1.5, '4': 5 });
+      expect(listed.totalMaxPoints).toBe(11.5);
+      expect(listed.hasWeightedPoints).toBe(true);
+
+      // Validación 400 en PUT /exams/:id y PUT /exams/:id/answer-key con puntaje <= 0
+      const badPutPtsRes = await request(app)
+        .put(`/api/admin/exams/${weightedExamId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ gradingMode: 'NORMAL', maxPointsKeys: { '2': 0 } });
+      expect(badPutPtsRes.status).toBe(400);
+
+      const badAkPtsRes = await request(app)
+        .put(`/api/admin/exams/${weightedExamId}/answer-key`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ totalQuestions: 4, answerKey: { '1': 'A' }, maxPointsKeys: { '1': -1 } });
+      expect(badAkPtsRes.status).toBe(400);
+
+      // Actualizar pauta completa con 4 MC ponderadas: P1=2, P2=2, P3=3, P4=3 => Total = 10 pts
+      // Con 60% exigencia, 6 pts = 60% => nota 4.0
+      const akWeightedRes = await request(app)
+        .put(`/api/admin/exams/${weightedExamId}/answer-key`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          totalQuestions: 4,
+          gradingMode: 'NORMAL',
+          passThresholdPercent: 60,
+          answerKey: { '1': 'A', '2': 'B', '3': 'C', '4': 'D' },
+          questionTypesKeys: {
+            '1': 'MULTIPLE_CHOICE',
+            '2': 'MULTIPLE_CHOICE',
+            '3': 'MULTIPLE_CHOICE',
+            '4': 'MULTIPLE_CHOICE',
+          },
+          maxPointsKeys: { '1': 2, '2': 2, '3': 3, '4': 3 },
+          skillsKeys: { '1': 'Calcular', '2': 'Calcular', '3': 'Resolver', '4': 'Modelar' },
+          axesKeys: { '1': 'Números', '2': 'Números', '3': 'Álgebra', '4': 'Geometría' },
+        });
+      expect(akWeightedRes.status).toBe(200);
+      expect(akWeightedRes.body.maxPointsKeys).toEqual({ '1': 2, '2': 2, '3': 3, '4': 3 });
+      expect(akWeightedRes.body.totalMaxPoints).toBe(10);
+
+      // Mocktest: responde P1(2), P2(2), P4(3) buenas => 7 / 10 pts = 70% => nota 4.8
+      const mockSess = await request(app)
+        .post(`/api/admin/exams/${weightedExamId}/mock-session`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(mockSess.status).toBe(200);
+      const mQuestions = mockSess.body.questions;
+      expect(mQuestions.map((q) => q.maxPoints)).toEqual([2, 2, 3, 3]);
+
+      const mockGrade = await request(app)
+        .post(`/api/admin/exams/${weightedExamId}/mock-grade`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          answers: {
+            [mQuestions[0].id]: 'A', // +2
+            [mQuestions[1].id]: 'B', // +2
+            [mQuestions[2].id]: 'A', // 0
+            [mQuestions[3].id]: 'D', // +3
+          },
+        });
+      expect(mockGrade.status).toBe(200);
+      expect(mockGrade.body.earnedPoints).toBe(7);
+      expect(mockGrade.body.maxPoints).toBe(10);
+      expect(mockGrade.body.questionCount).toBe(4);
+      expect(mockGrade.body.hasWeightedPoints).toBe(true);
+      expect(mockGrade.body.percent).toBe(70);
+      expect(mockGrade.body.grade).toBe(4.8);
+      expect(mockGrade.body.simceScore).toBeNull();
+
+      // Rendición real del estudiante: responde P1(A:+2) y P3(C:+3) => 5 / 10 pts = 50% (<60% => 3.5)
+      const now = new Date();
+      weightedAssignment = await prisma.examAssignment.create({
+        data: {
+          examId: weightedExamId,
+          courseId: course.id,
+          assignedTeacherRut: teacherRut,
+          opensAt: new Date(now.getTime() - 3600 * 1000),
+          closesAt: new Date(now.getTime() + 3600 * 1000),
+          status: 'ONGOING',
+          released: true,
+        },
+      });
+
+      const startWeighted = await request(app)
+        .post(`/api/student/assignments/${weightedAssignment.id}/start`)
+        .set('Authorization', `Bearer ${studentToken}`);
+      expect(startWeighted.status).toBe(200);
+      expect(startWeighted.body.questions.map((q) => q.maxPoints)).toEqual([2, 2, 3, 3]);
+      const wSubId = startWeighted.body.submissionId;
+
+      await request(app)
+        .put(`/api/student/submissions/${wSubId}/answers`)
+        .set('Authorization', `Bearer ${studentToken}`)
+        .send({
+          answers: [
+            { questionId: mQuestions[0].id, selectedAnswer: 'A' },
+            { questionId: mQuestions[1].id, selectedAnswer: 'D' },
+            { questionId: mQuestions[2].id, selectedAnswer: 'C' },
+            { questionId: mQuestions[3].id, selectedAnswer: 'A' },
+          ],
+        });
+
+      const submitWeighted = await request(app)
+        .post(`/api/student/submissions/${wSubId}/submit`)
+        .set('Authorization', `Bearer ${studentToken}`);
+      expect(submitWeighted.status).toBe(200);
+
+      // Resultado estudiante muestra totalScore=5, maxScore=10, questionCount=4, hasWeightedPoints=true
+      const sResultWeighted = await request(app)
+        .get(`/api/student/submissions/${wSubId}/result`)
+        .set('Authorization', `Bearer ${studentToken}`);
+      expect(sResultWeighted.status).toBe(200);
+      expect(sResultWeighted.body.totalScore).toBe(5);
+      expect(sResultWeighted.body.maxScore).toBe(10);
+      expect(sResultWeighted.body.questionCount).toBe(4);
+      expect(sResultWeighted.body.hasWeightedPoints).toBe(true);
+      expect(sResultWeighted.body.percent).toBe(50);
+      expect(sResultWeighted.body.grade).toBe(3.5);
+
+      // Vista Live Docente expone earnedPoints=5, correctQuestionsCount=2, maxTotalPoints=10, hasWeightedPoints=true
+      const liveWeighted = await request(app)
+        .get(`/api/teacher/assignments/${weightedAssignment.id}/live`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(liveWeighted.status).toBe(200);
+      expect(liveWeighted.body.maxTotalPoints).toBe(10);
+      expect(liveWeighted.body.hasWeightedPoints).toBe(true);
+      const stLive = liveWeighted.body.students.find((s) => s.rut === studentRut);
+      expect(stLive.earnedPoints).toBe(5);
+      expect(stLive.correctQuestionsCount).toBe(2);
+      expect(stLive.maxTotalPoints).toBe(10);
+
+      // Vista Skills Docente usa puntajes ponderados (Calcular=2/4=50%, Resolver=3/3=100%)
+      const skillsWeighted = await request(app)
+        .get(`/api/teacher/assignments/${weightedAssignment.id}/skills`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(skillsWeighted.status).toBe(200);
+      const calcSkill = skillsWeighted.body.skills.find((sk) => sk.name === 'Calcular');
+      expect(calcSkill).toEqual({ name: 'Calcular', correct: 2, total: 4, percent: 0.5 });
+
+      // Exportación Excel: Sheet 1 incluye 'Puntaje' ('5 / 10 pts') y Sheet 3 usa Puntos Posibles ponderados
+      const excelRes = await request(app)
+        .get(`/api/teacher/assignments/${weightedAssignment.id}/export.xlsx`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .buffer(true)
+        .parse((res, cb) => {
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => cb(null, Buffer.concat(chunks)));
+        });
+      expect(excelRes.status).toBe(200);
+
+      const wb = new exceljs.Workbook();
+      await wb.xlsx.load(excelRes.body);
+      const sheet1 = wb.getWorksheet('Resultados Alumnos');
+      const headerRow1 = sheet1.getRow(1).values;
+      expect(headerRow1).toContain('Puntaje');
+      const rowsSheet1 = [];
+      sheet1.eachRow((row, rowNumber) => {
+        if (rowNumber > 1) rowsSheet1.push(row.values);
+      });
+      const studentRowValues = rowsSheet1.find((r) => r[1] === studentRut);
+      expect(studentRowValues).toBeDefined();
+      expect(studentRowValues).toContain('5 / 10 pts');
+
+      const sheet3 = wb.getWorksheet('Habilidades y Ejes');
+      const rowsSheet3 = [];
+      sheet3.eachRow((row, rowNumber) => {
+        if (rowNumber > 1) rowsSheet3.push(row.values);
+      });
+      const calcRow = rowsSheet3.find((r) => r[2] === 'Calcular');
+      expect(calcRow).toBeDefined();
+      expect(calcRow[4]).toBe(2); // Puntos Obtenidos (P1=2)
+      expect(calcRow[5]).toBe(4); // Puntos Posibles (P1=2 + P2=2)
+
+      // Cambiar puntajes desde modal Calificación (PUT /admin/exams/:id): subir P3 de 3 a 6 pts => total 13, alumno 8/13 = 61.5% => >= 4.0 tras recálculo!
+      const putWeightsRes = await request(app)
+        .put(`/api/admin/exams/${weightedExamId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          gradingMode: 'NORMAL',
+          passThresholdPercent: 60,
+          maxPointsKeys: { '1': 2, '2': 2, '3': 6, '4': 3 },
+        });
+      expect(putWeightsRes.status).toBe(200);
+      expect(putWeightsRes.body.totalMaxPoints).toBe(13);
+
+      const recalcWeightedRes = await request(app)
+        .post(`/api/admin/exams/${weightedExamId}/recalculate-grades`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({});
+      expect(recalcWeightedRes.status).toBe(200);
+      expect(recalcWeightedRes.body.updatedGradesCount).toBe(1);
+
+      const subAfterWeightRecalc = await prisma.submission.findUnique({ where: { id: wSubId } });
+      expect(subAfterWeightRecalc.percent).toBe(61.5);
+      expect(subAfterWeightRecalc.grade).toBe(4.1);
+      expect(subAfterWeightRecalc.achievementLevel).toBe('ELEMENTAL');
     });
   });
 });

@@ -60,7 +60,14 @@ export default function ItemsTab({ id }: { id: number }) {
                       <span className="text-[11px] font-bold text-slate-600">Máx: {maxPts} pts</span>
                     </div>
                   ) : (
-                    <span className="font-bold text-blue-600">{q.correctAnswer}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-blue-600">{q.correctAnswer}</span>
+                      {maxPts !== 1 && (
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded">
+                          {maxPts} pts
+                        </span>
+                      )}
+                    </div>
                   )}
                 </td>
                 <td className="p-3">

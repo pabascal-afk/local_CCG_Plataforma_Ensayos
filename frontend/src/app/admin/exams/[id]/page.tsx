@@ -16,7 +16,13 @@ import AiPromptModal from "@/components/AiPromptModal";
 import AudioCutterModal from "@/components/AudioCutterModal";
 import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdfModal";
 import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
+import PointsInput from "@/components/PointsInput";
 import { useIsPruebas } from "@/lib/useIsPruebas";
+
+function formatPointDisplay(val: number) {
+  const rounded = Math.round(val * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1).replace(".", ",");
+}
 
 export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const { id } = params;
@@ -41,6 +47,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
 
   const [customQuestionCount, setCustomQuestionCount] = useState<number | null>(null);
   const [customAddAmount, setCustomAddAmount] = useState<number>(2);
+  const [bulkPointsInput, setBulkPointsInput] = useState<string>("2");
 
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
@@ -69,7 +76,8 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     const mpk: Record<string, number> = {};
     if (e.maxPointsKeys) {
       Object.entries(e.maxPointsKeys).forEach(([k, v]) => {
-        mpk[k] = Number(v) || 1;
+        const parsed = Number(v);
+        mpk[k] = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
       });
     }
     Object.entries(qtk).forEach(([qNum, qType]) => {
@@ -152,13 +160,16 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
         const qType =
           questionTypesKeys[qNum] ||
           (currentKey === "DESARROLLO" ? "WRITTEN" : currentKey === "ORAL" ? "ORAL" : "MULTIPLE_CHOICE");
-        if (qType === "WRITTEN" || qType === "ORAL") {
-          const pts = maxPointsKeys[qNum] ?? (qType === "ORAL" ? 4 : 5);
-          return sum + Math.max(0.5, Number(pts) || 1);
-        }
-        return sum + 1;
+        const fallbackPts = qType === "ORAL" ? 4 : qType === "WRITTEN" ? 5 : 1;
+        const rawPts = maxPointsKeys[qNum];
+        const pts =
+          rawPts !== undefined && Number.isFinite(Number(rawPts)) && Number(rawPts) > 0
+            ? Number(rawPts)
+            : fallbackPts;
+        return sum + pts;
       }, 0) * 10
     ) / 10;
+  const minPassPoints = Math.round(((totalMaxPoints * passThresholdPercent) / 100) * 10) / 10;
 
   const handleAddQuestions = (count: number = 1) => {
     const safeCount = Math.max(1, count);
@@ -382,8 +393,28 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
         const defaultLetter = (curr && curr !== "DESARROLLO" && curr !== "ORAL") ? curr : "A";
         return { ...prev, [qNum]: defaultLetter };
       });
-      setMaxPointsKeys(prev => ({ ...prev, [qNum]: 1 }));
+      setMaxPointsKeys(prev => ({
+        ...prev,
+        [qNum]: gradingMode === "NORMAL" && prev[qNum] && prev[qNum] > 0 ? prev[qNum] : 1,
+      }));
     }
+  };
+
+  const handleApplyPointsToQuestions = (pointsVal: number, onlyMultipleChoice: boolean = false) => {
+    const safePts = Math.round(Math.min(1000, Math.max(0.1, pointsVal)) * 100) / 100;
+    setIsDirty(true);
+    setMaxPointsKeys(prev => {
+      const next = { ...prev };
+      questions.forEach((qNum) => {
+        const currentKey = answerKey[qNum] || "";
+        const qType =
+          questionTypesKeys[qNum] ||
+          (currentKey === "DESARROLLO" ? "WRITTEN" : currentKey === "ORAL" ? "ORAL" : "MULTIPLE_CHOICE");
+        if (onlyMultipleChoice && qType !== "MULTIPLE_CHOICE") return;
+        next[qNum] = safePts;
+      });
+      return next;
+    });
   };
 
   const handleKeyChange = (qNum: string, newKey: string) => {
@@ -433,6 +464,9 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                   </h1>
                   <span className="bg-blue-100 text-blue-800 font-black text-xs px-2.5 py-0.5 rounded-full border border-blue-200">
                     {maxQ} preguntas
+                  </span>
+                  <span className="bg-emerald-50 text-emerald-800 font-black text-xs px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    {totalMaxPoints} pts totales
                   </span>
                   <span
                     className={`font-black text-xs px-2.5 py-0.5 rounded-full border ${
@@ -827,7 +861,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                     <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Importar Pauta
                   </h3>
                   <p className="text-xs text-emerald-700 mb-3">
-                    Sube la pauta en Excel (.xlsx) o CSV con claves (A-E, DESARROLLO, ORAL), habilidades, ejes, OAs y dificultad TRI.
+                    Sube la pauta en Excel (.xlsx) o CSV con claves (A-E, DESARROLLO, ORAL), habilidades, ejes, OAs, dificultad TRI y Puntos_Max.
                   </p>
                   <form onSubmit={handleImportQuestions} className="space-y-2">
                     <input 
@@ -866,26 +900,104 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
               </div>
 
               {/* Editor principal */}
-              <div className="md:col-span-3">
+              <div className="md:col-span-3 space-y-3">
+                {gradingMode === "NORMAL" && (
+                  <div className="bg-indigo-50/90 border border-indigo-200 rounded-xl p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-xs">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-extrabold text-indigo-950">
+                          Puntaje por pregunta activo (en vez de escala TRI)
+                        </span>
+                        <span className="text-[11px] font-extrabold bg-white text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded-full">
+                          Total: {totalMaxPoints} pts
+                        </span>
+                        <span className="text-[11px] font-bold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">
+                          Nota 4,0 ({passThresholdPercent}%): {formatPointDisplay(minPassPoints)} pts
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-indigo-800">
+                        Asigna el puntaje individual de cada pregunta (incluyendo Selección Múltiple) directamente en la columna <strong>Puntaje (pts)</strong> o aplica un valor rápido:
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPointsToQuestions(1, false)}
+                        className="px-2.5 py-1.5 bg-white hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                      >
+                        Todas = 1 pt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPointsToQuestions(2, false)}
+                        className="px-2.5 py-1.5 bg-white hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                      >
+                        Todas = 2 pts
+                      </button>
+                      <div className="flex items-center gap-1 bg-white border border-indigo-300 rounded-lg px-2 py-1">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={bulkPointsInput}
+                          onChange={(e) => setBulkPointsInput(e.target.value.replace(/[^0-9.,]/g, ""))}
+                          className="w-11 text-center text-xs font-black text-indigo-950 outline-none"
+                          aria-label="Puntaje masivo personalizado"
+                        />
+                        <span className="text-[11px] font-bold text-indigo-500">pts</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const parsed = parseFloat(bulkPointsInput.replace(",", "."));
+                          if (Number.isFinite(parsed) && parsed > 0) {
+                            handleApplyPointsToQuestions(parsed, false);
+                          }
+                        }}
+                        className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-bold transition cursor-pointer"
+                      >
+                        Aplicar a todas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const parsed = parseFloat(bulkPointsInput.replace(",", "."));
+                          if (Number.isFinite(parsed) && parsed > 0) {
+                            handleApplyPointsToQuestions(parsed, true);
+                          }
+                        }}
+                        className="px-2.5 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 border border-indigo-200 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                        title="Aplicar este puntaje solo a preguntas de Selección Múltiple"
+                      >
+                        Solo Sel. Múltiple
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-gray-50 border-b text-gray-600 text-xs">
                       <tr>
                         <th className="p-3 font-bold w-12 text-center">Nº</th>
                         <th className="p-3 font-bold w-44">Tipo de Pregunta</th>
-                        <th className="p-3 font-bold w-36">Clave / Puntaje</th>
+                        <th className="p-3 font-bold w-36">
+                          {gradingMode === "NORMAL" ? "Clave" : "Clave / Puntaje"}
+                        </th>
                         <th className="p-3 font-bold w-36">Audio (Listening)</th>
                         <th className="p-3 font-bold">Eje / Tema</th>
                         <th className="p-3 font-bold w-20">OA</th>
                         <th className="p-3 font-bold">Habilidad Cognitiva</th>
-                        <th className="p-3 font-bold w-32">
-                          Dificultad (TRI)
-                          {gradingMode === "NORMAL" && (
-                            <span className="block text-[10px] font-medium text-gray-400 normal-case">
-                              (Solo SIMCE TRI)
+                        {gradingMode === "NORMAL" ? (
+                          <th className="p-3 font-bold w-32 text-indigo-900 bg-indigo-50/70">
+                            Puntaje (pts)
+                            <span className="block text-[10px] font-medium text-indigo-600 normal-case">
+                              (En vez de TRI)
                             </span>
-                          )}
-                        </th>
+                          </th>
+                        ) : (
+                          <th className="p-3 font-bold w-32">Dificultad (TRI)</th>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -938,19 +1050,28 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                                     <option key={opt} value={opt}>Alternativa {opt}</option>
                                   ))}
                                 </select>
+                              ) : gradingMode === "NORMAL" ? (
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold border ${
+                                    qType === "ORAL"
+                                      ? "bg-purple-50 border-purple-200 text-purple-800"
+                                      : "bg-amber-50 border-amber-200 text-amber-800"
+                                  }`}
+                                >
+                                  {qType === "ORAL" ? "🗣️ Oral (manual)" : "📝 Desarrollo (manual)"}
+                                </span>
                               ) : (
-                                  <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1" title="Puntaje máximo de esta pregunta">
-                                  <input
-                                    type="number"
-                                    min={0.5}
-                                    max={100}
-                                    step={0.5}
+                                <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1" title="Puntaje máximo de esta pregunta">
+                                  <PointsInput
                                     value={maxPts}
-                                    onChange={e => {
+                                    min={0.5}
+                                    max={1000}
+                                    ariaLabel={`Puntaje pregunta abierta ${qNum}`}
+                                    onChange={(val) => {
                                       setIsDirty(true);
-                                      setMaxPointsKeys(prev => ({ ...prev, [qNum]: Math.max(0.5, parseFloat(e.target.value) || 1) }));
+                                      setMaxPointsKeys(prev => ({ ...prev, [qNum]: val }));
                                     }}
-                                    className="w-12 text-center font-black text-xs text-slate-900 outline-none"
+                                    className="w-12 text-center font-black text-xs text-slate-900 outline-none bg-transparent"
                                   />
                                   <span className="text-[11px] font-bold text-slate-500">pts</span>
                                 </div>
@@ -1029,24 +1150,44 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                               />
                             </td>
 
-                            {/* 7. Dificultad (TRI) */}
-                            <td className="p-3">
-                              <select
-                                value={normalizeDifficultySelectValue(difficultiesKeys[qNum])}
-                                onChange={e => {
-                                  setIsDirty(true);
-                                  setDifficultiesKeys({ ...difficultiesKeys, [qNum]: e.target.value });
-                                }}
-                                title={gradingMode === "NORMAL" ? "En modo Prueba normal no se calcula TRI" : "Dificultad TRI"}
-                                className={`border rounded px-2 py-1.5 w-full text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none ${
-                                  gradingMode === "NORMAL" ? "opacity-55 text-gray-500" : ""
-                                }`}
-                              >
-                                <option value="-1.5">Fácil (-1.5)</option>
-                                <option value="0.0">Media (0.0)</option>
-                                <option value="1.5">Difícil (+1.5)</option>
-                              </select>
-                            </td>
+                            {/* 7. Puntaje (Normal) o Dificultad (TRI) */}
+                            {gradingMode === "NORMAL" ? (
+                              <td className="p-3 bg-indigo-50/25">
+                                <div
+                                  className="flex items-center gap-1 bg-white border border-indigo-200 rounded-lg px-2 py-1 focus-within:ring-2 focus-within:ring-indigo-500"
+                                  title={`Puntaje máximo asignado a la pregunta ${qNum}`}
+                                >
+                                  <PointsInput
+                                    value={maxPts}
+                                    min={0.1}
+                                    max={1000}
+                                    ariaLabel={`Puntaje pregunta ${qNum}`}
+                                    onChange={(val) => {
+                                      setIsDirty(true);
+                                      setMaxPointsKeys(prev => ({ ...prev, [qNum]: val }));
+                                    }}
+                                    className="w-14 text-center font-black text-xs text-indigo-950 outline-none bg-transparent"
+                                  />
+                                  <span className="text-[11px] font-bold text-indigo-500">pts</span>
+                                </div>
+                              </td>
+                            ) : (
+                              <td className="p-3">
+                                <select
+                                  value={normalizeDifficultySelectValue(difficultiesKeys[qNum])}
+                                  onChange={e => {
+                                    setIsDirty(true);
+                                    setDifficultiesKeys({ ...difficultiesKeys, [qNum]: e.target.value });
+                                  }}
+                                  title="Dificultad TRI"
+                                  className="border rounded px-2 py-1.5 w-full text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                >
+                                  <option value="-1.5">Fácil (-1.5)</option>
+                                  <option value="0.0">Media (0.0)</option>
+                                  <option value="1.5">Difícil (+1.5)</option>
+                                </select>
+                              </td>
+                            )}
                           </tr>
                         );
                       })}

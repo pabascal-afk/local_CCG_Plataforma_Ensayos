@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Save, Sparkles, Plus, Trash2, PenTool, Mic } from "lucide-react";
+import { ArrowLeft, Save, Sparkles, Plus, Trash2, PenTool, Mic, ChevronDown, ChevronUp } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import AiPromptModal from "@/components/AiPromptModal";
 import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
+import PointsInput from "@/components/PointsInput";
 import { getToken } from "@/lib/session";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
@@ -27,6 +28,9 @@ export default function NewExamPage() {
   const [examType, setExamType] = useState("ENSAYO");
   const [gradingMode, setGradingMode] = useState<GradingMode>("SIMCE");
   const [passThresholdPercent, setPassThresholdPercent] = useState<number>(60);
+  const [defaultMcPoints, setDefaultMcPoints] = useState<number>(1);
+  const [questionPointsMap, setQuestionPointsMap] = useState<Record<string, number>>({});
+  const [showPerQuestionPoints, setShowPerQuestionPoints] = useState<boolean>(false);
   const [openQuestions, setOpenQuestions] = useState<OpenQuestionItem[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -50,10 +54,28 @@ export default function NewExamPage() {
   };
 
   const updateOpenQuestion = (idx: number, patch: Partial<OpenQuestionItem>) => {
-    setOpenQuestions((prev) => prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)));
+    setOpenQuestions((prev) => {
+      const target = prev[idx];
+      if (target && patch.maxPoints !== undefined) {
+        setQuestionPointsMap((pm) => {
+          const next = { ...pm };
+          delete next[String(patch.questionNumber ?? target.questionNumber)];
+          return next;
+        });
+      }
+      return prev.map((item, i) => (i === idx ? { ...item, ...patch } : item));
+    });
   };
 
   const removeOpenQuestion = (idx: number) => {
+    const target = openQuestions[idx];
+    if (target) {
+      setQuestionPointsMap((pm) => {
+        const next = { ...pm };
+        delete next[String(target.questionNumber)];
+        return next;
+      });
+    }
     setOpenQuestions((prev) => prev.filter((_, i) => i !== idx));
   };
 
@@ -83,6 +105,20 @@ export default function NewExamPage() {
     formData.append("gradingMode", gradingMode);
     formData.append("passThresholdPercent", String(safePercent));
     formData.append("passThreshold", (safePercent / 100).toFixed(4));
+    if (gradingMode === "NORMAL") {
+      formData.append("defaultMcPoints", String(defaultMcPoints));
+      const customPointsPayload: Record<string, number> = {};
+      for (let i = 1; i <= questionCount; i++) {
+        const k = String(i);
+        const val = questionPointsMap[k];
+        if (val !== undefined && val > 0) {
+          customPointsPayload[k] = val;
+        }
+      }
+      if (Object.keys(customPointsPayload).length > 0) {
+        formData.append("questionPoints", JSON.stringify(customPointsPayload));
+      }
+    }
     if (openQuestions.length > 0) {
       const openMap: Record<number, { questionType: string; maxPoints: number }> = {};
       openQuestions.forEach((oq) => {
@@ -120,18 +156,30 @@ export default function NewExamPage() {
   };
 
   const isPruebas = useIsPruebas();
-  const openMapForEstimate = new Map<number, number>();
+  const openMapForEstimate = new Map<number, OpenQuestionItem>();
   openQuestions.forEach((oq) => {
     if (oq.questionNumber >= 1 && oq.questionNumber <= questionCount) {
-      openMapForEstimate.set(oq.questionNumber, Math.max(0.5, Number(oq.maxPoints) || 1));
+      openMapForEstimate.set(oq.questionNumber, oq);
     }
   });
-  let openPtsSum = 0;
-  openMapForEstimate.forEach((pts) => {
-    openPtsSum += pts;
-  });
-  const estimatedTotalPoints =
-    Math.round((Math.max(0, questionCount - openMapForEstimate.size) + openPtsSum) * 10) / 10;
+  let totalPointsEstimateSum = 0;
+  for (let i = 1; i <= questionCount; i++) {
+    const k = String(i);
+    const oq = openMapForEstimate.get(i);
+    if (oq) {
+      const override = questionPointsMap[k];
+      totalPointsEstimateSum +=
+        gradingMode === "NORMAL" && override !== undefined && override > 0
+          ? override
+          : Math.max(0.5, Number(oq.maxPoints) || 1);
+    } else if (gradingMode === "NORMAL") {
+      const override = questionPointsMap[k];
+      totalPointsEstimateSum += override !== undefined && override > 0 ? override : defaultMcPoints;
+    } else {
+      totalPointsEstimateSum += 1;
+    }
+  }
+  const estimatedTotalPoints = Math.round(totalPointsEstimateSum * 10) / 10;
 
   return (
     <RequireRole roles={["ADMIN", "DIRECTOR"]}>
@@ -292,6 +340,144 @@ export default function NewExamPage() {
                 onPassThresholdPercentChange={setPassThresholdPercent}
                 totalPoints={estimatedTotalPoints}
               />
+
+              {gradingMode === "NORMAL" && (
+                <div className="border border-indigo-200 bg-indigo-50/45 rounded-xl p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-indigo-950">
+                        Puntaje por pregunta (en vez de escala TRI)
+                      </h3>
+                      <p className="text-xs text-indigo-800 mt-0.5">
+                        Define el puntaje base de las preguntas de Selección Múltiple o personaliza cada pregunta por separado.
+                      </p>
+                    </div>
+                    <span className="text-xs font-black bg-indigo-100 text-indigo-900 border border-indigo-200 px-3 py-1 rounded-full self-start sm:self-auto shrink-0">
+                      Total: {estimatedTotalPoints} pts
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-indigo-100 rounded-lg p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold text-slate-700">
+                        Puntaje base (Sel. Múltiple):
+                      </span>
+                      <div className="flex items-center gap-1 border border-indigo-300 rounded-lg px-2 py-1 bg-indigo-50/40">
+                        <PointsInput
+                          value={defaultMcPoints}
+                          min={0.1}
+                          max={1000}
+                          ariaLabel="Puntaje base preguntas de selección múltiple"
+                          onChange={(val) => setDefaultMcPoints(val)}
+                          className="w-12 text-center text-xs font-black text-indigo-950 outline-none bg-transparent"
+                        />
+                        <span className="text-xs font-bold text-indigo-500">pts</span>
+                      </div>
+                      {[1, 2, 3].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setDefaultMcPoints(preset)}
+                          className={`px-2 py-1 rounded-md text-xs font-bold border transition cursor-pointer ${
+                            defaultMcPoints === preset
+                              ? "bg-indigo-600 text-white border-indigo-600"
+                              : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                          }`}
+                        >
+                          {preset} pt{preset === 1 ? "" : "s"}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPerQuestionPoints((v) => !v)}
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-lg transition cursor-pointer"
+                    >
+                      {showPerQuestionPoints ? (
+                        <>
+                          <ChevronUp className="w-3.5 h-3.5" />
+                          <span>Ocultar detalle por pregunta</span>
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="w-3.5 h-3.5" />
+                          <span>Personalizar puntaje por pregunta ({questionCount})</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {showPerQuestionPoints && (
+                    <div className="space-y-2.5 pt-1">
+                      <div className="flex items-center justify-between text-[11px] text-indigo-900">
+                        <span>Asigna puntajes individuales (también puedes editarlos luego en la pauta):</span>
+                        {Object.keys(questionPointsMap).length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setQuestionPointsMap({})}
+                            className="font-bold text-indigo-700 hover:underline cursor-pointer"
+                          >
+                            Restablecer al base
+                          </button>
+                        )}
+                      </div>
+                      <div className="max-h-56 overflow-y-auto pr-1 grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                        {Array.from({ length: Math.max(1, questionCount) }, (_, idx) => idx + 1).map((qNum) => {
+                          const k = String(qNum);
+                          const oq = openMapForEstimate.get(qNum);
+                          const currentVal =
+                            questionPointsMap[k] !== undefined && questionPointsMap[k] > 0
+                              ? questionPointsMap[k]
+                              : oq
+                              ? Math.max(0.5, Number(oq.maxPoints) || 1)
+                              : defaultMcPoints;
+                          return (
+                            <div
+                              key={k}
+                              className="flex items-center justify-between gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5"
+                            >
+                              <div className="flex items-center gap-1 min-w-0">
+                                <span className="text-xs font-black text-slate-700">P{qNum}</span>
+                                {oq?.questionType === "WRITTEN" && (
+                                  <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1 rounded">
+                                    Esc.
+                                  </span>
+                                )}
+                                {oq?.questionType === "ORAL" && (
+                                  <span className="text-[9px] font-bold bg-purple-100 text-purple-800 px-1 rounded">
+                                    Oral
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                <PointsInput
+                                  value={currentVal}
+                                  min={0.1}
+                                  max={1000}
+                                  ariaLabel={`Puntaje pregunta ${qNum}`}
+                                  onChange={(val) => {
+                                    setQuestionPointsMap((prev) => ({ ...prev, [k]: val }));
+                                    if (oq) {
+                                      setOpenQuestions((prev) =>
+                                        prev.map((item) =>
+                                          item.questionNumber === qNum ? { ...item, maxPoints: val } : item
+                                        )
+                                      );
+                                    }
+                                  }}
+                                  className="w-11 border border-indigo-200 rounded px-1 py-0.5 text-center text-xs font-black text-indigo-950 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                />
+                                <span className="text-[10px] font-bold text-slate-400">p</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Preguntas de Desarrollo Escrito / Respuesta Oral */}
               <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-4 space-y-3">

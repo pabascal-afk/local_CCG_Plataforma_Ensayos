@@ -82,6 +82,49 @@ function parseGradingConfigInput(body = {}, defaultMode = 'SIMCE', defaultThresh
   };
 }
 
+function parsePositiveQuestionPoints(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+  const cleaned = String(raw).trim().replace(',', '.');
+  const num = Number(cleaned);
+  if (!Number.isFinite(num) || num <= 0 || num > 1000) return NaN;
+  return Math.round(num * 100) / 100;
+}
+
+function parseQuestionPointsMap(rawInput) {
+  if (rawInput === undefined || rawInput === null || rawInput === '') {
+    return { map: null };
+  }
+  let obj = rawInput;
+  if (typeof rawInput === 'string') {
+    const trimmed = rawInput.trim();
+    if (!trimmed) return { map: null };
+    try {
+      obj = JSON.parse(trimmed);
+    } catch {
+      return { error: 'Formato inválido para puntajes por pregunta.' };
+    }
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+    return { error: 'Formato inválido para puntajes por pregunta.' };
+  }
+  const map = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const qNum = parseInt(k, 10);
+    if (isNaN(qNum) || qNum < 1) {
+      return { error: `Número de pregunta inválido en puntajes: ${k}` };
+    }
+    if (v === undefined || v === null || String(v).trim() === '') continue;
+    const pts = parsePositiveQuestionPoints(v);
+    if (Number.isNaN(pts)) {
+      return { error: `El puntaje de la pregunta ${qNum} debe ser mayor a 0 y menor o igual a 1000.` };
+    }
+    if (pts !== null) {
+      map[qNum] = pts;
+    }
+  }
+  return { map };
+}
+
 // ==========================================
 // PLANTILLAS VACÍAS (FORMATOS DE SUBIDA .xlsx)
 // ==========================================
@@ -1785,6 +1828,7 @@ router.get('/exams', async (req, res, next) => {
         oralCount,
         multipleChoiceCount,
         totalMaxPoints: Math.round(totalMaxPoints * 10) / 10,
+        hasWeightedPoints: (e.questions || []).some((q) => Math.abs((Number(q?.maxPoints ?? 1)) - 1) > 1e-6),
         ...getPdfFileInfo(e.pdfPath)
       };
     });
@@ -1946,6 +1990,7 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
       oralCount,
       multipleChoiceCount,
       totalMaxPoints: Math.round(totalMaxPoints * 10) / 10,
+      hasWeightedPoints: (e.questions || []).some((q) => Math.abs((Number(q?.maxPoints ?? 1)) - 1) > 1e-6),
       ...getPdfFileInfo(e.pdfPath)
     });
   } catch (error) {
@@ -1997,6 +2042,23 @@ router.post('/exams', checkAdmin, (req, res, next) => {
     const eType = examType || 'ENSAYO';
     const lvl = level || '4B';
 
+    let defaultMcPoints = 1.0;
+    if (req.body.defaultMcPoints !== undefined && req.body.defaultMcPoints !== null && String(req.body.defaultMcPoints).trim() !== '') {
+      const parsedDefault = parsePositiveQuestionPoints(req.body.defaultMcPoints);
+      if (Number.isNaN(parsedDefault) || parsedDefault === null) {
+        cleanupUploadedFile();
+        return res.status(400).json({ error: 'El puntaje base por pregunta debe ser mayor a 0 y menor o igual a 1000.' });
+      }
+      defaultMcPoints = parsedDefault;
+    }
+
+    const customPointsParsed = parseQuestionPointsMap(req.body.questionPoints ?? req.body.maxPointsKeys);
+    if (customPointsParsed.error) {
+      cleanupUploadedFile();
+      return res.status(400).json({ error: customPointsParsed.error });
+    }
+    const customPointsMap = customPointsParsed.map || {};
+
     // Mapa de preguntas abiertas (Desarrollo Escrito / Desarrollo Oral) configuradas desde la creación
     const openQMap = new Map();
     if (openQuestions) {
@@ -2006,11 +2068,24 @@ router.post('/exams', checkAdmin, (req, res, next) => {
           for (const item of parsed) {
             const qn = parseInt(item.questionNumber, 10);
             const qt = item.questionType === 'ORAL' ? 'ORAL' : 'WRITTEN';
-            const mp = parseFloat(item.maxPoints);
+            const mp = parsePositiveQuestionPoints(item.maxPoints);
             if (!isNaN(qn) && qn >= 1 && qn <= qCount) {
               openQMap.set(qn, {
                 questionType: qt,
-                maxPoints: !isNaN(mp) && mp > 0 ? mp : 5,
+                maxPoints: mp !== null && !Number.isNaN(mp) ? mp : (qt === 'ORAL' ? 4 : 5),
+                correctAnswer: qt === 'ORAL' ? 'ORAL' : 'DESARROLLO'
+              });
+            }
+          }
+        } else if (parsed && typeof parsed === 'object') {
+          for (const [key, item] of Object.entries(parsed)) {
+            const qn = parseInt(item?.questionNumber ?? key, 10);
+            const qt = item?.questionType === 'ORAL' ? 'ORAL' : 'WRITTEN';
+            const mp = parsePositiveQuestionPoints(item?.maxPoints);
+            if (!isNaN(qn) && qn >= 1 && qn <= qCount) {
+              openQMap.set(qn, {
+                questionType: qt,
+                maxPoints: mp !== null && !Number.isNaN(mp) ? mp : (qt === 'ORAL' ? 4 : 5),
                 correctAnswer: qt === 'ORAL' ? 'ORAL' : 'DESARROLLO'
               });
             }
@@ -2024,12 +2099,13 @@ router.post('/exams', checkAdmin, (req, res, next) => {
     const questions = [];
     for (let i = 1; i <= qCount; i++) {
       const customOpen = openQMap.get(i);
+      const explicitPts = customPointsMap[i];
       if (customOpen) {
         questions.push({
           questionNumber: i,
           correctAnswer: customOpen.correctAnswer,
           questionType: customOpen.questionType,
-          maxPoints: customOpen.maxPoints,
+          maxPoints: explicitPts !== undefined ? explicitPts : customOpen.maxPoints,
           guessing: 0.0
         });
       } else {
@@ -2037,7 +2113,7 @@ router.post('/exams', checkAdmin, (req, res, next) => {
           questionNumber: i,
           correctAnswer: 'A', // default placeholder
           questionType: 'MULTIPLE_CHOICE',
-          maxPoints: 1.0,
+          maxPoints: explicitPts !== undefined ? explicitPts : defaultMcPoints,
         });
       }
     }
@@ -2056,11 +2132,27 @@ router.post('/exams', checkAdmin, (req, res, next) => {
         questions: {
           create: questions
         }
+      },
+      include: {
+        questions: { orderBy: { questionNumber: 'asc' } }
       }
+    });
+
+    const createdMaxPointsKeys = {};
+    let createdTotalMaxPoints = 0;
+    (exam.questions || []).forEach((q) => {
+      const pts = q.maxPoints ?? 1;
+      createdMaxPointsKeys[q.questionNumber] = pts;
+      createdTotalMaxPoints += pts;
     });
 
     return res.json({
       ...exam,
+      questions: undefined,
+      questionCount: (exam.questions || []).length,
+      maxPointsKeys: createdMaxPointsKeys,
+      totalMaxPoints: Math.round(createdTotalMaxPoints * 10) / 10,
+      hasWeightedPoints: (exam.questions || []).some((q) => Math.abs((Number(q.maxPoints ?? 1)) - 1) > 1e-6),
       gradingMode: normalizeGradingMode(exam.gradingMode),
       passThreshold: normalizePassThreshold(exam.passThreshold, 0.6),
       passThresholdPercent: gradingConfig.passThresholdPercent,
@@ -2111,6 +2203,21 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
       updateData.passThreshold = gradingConfig.passThreshold;
     }
 
+    const parsedPointsInput = parseQuestionPointsMap(req.body.maxPointsKeys ?? req.body.questionPoints);
+    if (parsedPointsInput.error) {
+      return res.status(400).json({ error: parsedPointsInput.error });
+    }
+    const incomingPointsMap = parsedPointsInput.map;
+
+    let defaultMcPoints = null;
+    if (req.body.defaultMcPoints !== undefined && req.body.defaultMcPoints !== null && String(req.body.defaultMcPoints).trim() !== '') {
+      const parsedDefault = parsePositiveQuestionPoints(req.body.defaultMcPoints);
+      if (Number.isNaN(parsedDefault) || parsedDefault === null) {
+        return res.status(400).json({ error: 'El puntaje base por pregunta debe ser mayor a 0 y menor o igual a 1000.' });
+      }
+      defaultMcPoints = parsedDefault;
+    }
+
     const exam = await prisma.exam.update({
       where: { id: examId },
       data: updateData
@@ -2127,7 +2234,9 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
             questionNumber: i,
             correctAnswer: 'A',
             questionType: 'MULTIPLE_CHOICE',
-            maxPoints: 1.0,
+            maxPoints: (incomingPointsMap && incomingPointsMap[i] !== undefined)
+              ? incomingPointsMap[i]
+              : (defaultMcPoints ?? 1.0),
             guessing: 0.25
           });
         }
@@ -2142,12 +2251,48 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
       }
     }
 
+    if (defaultMcPoints !== null) {
+      await prisma.question.updateMany({
+        where: { examId, questionType: 'MULTIPLE_CHOICE' },
+        data: { maxPoints: defaultMcPoints }
+      });
+    }
+
+    if (incomingPointsMap && Object.keys(incomingPointsMap).length > 0) {
+      await Promise.all(
+        Object.entries(incomingPointsMap).map(([qNumStr, pts]) =>
+          prisma.question.updateMany({
+            where: { examId, questionNumber: parseInt(qNumStr, 10) },
+            data: { maxPoints: pts }
+          })
+        )
+      );
+    }
+
+    const updatedQuestions = await prisma.question.findMany({
+      where: { examId },
+      orderBy: { questionNumber: 'asc' },
+      select: { questionNumber: true, maxPoints: true }
+    });
+    const updatedMaxPointsKeys = {};
+    let updatedTotalMaxPoints = 0;
+    let hasWeightedPoints = false;
+    updatedQuestions.forEach((q) => {
+      const pts = q.maxPoints ?? 1;
+      updatedMaxPointsKeys[q.questionNumber] = pts;
+      updatedTotalMaxPoints += pts;
+      if (Math.abs(pts - 1) > 1e-6) hasWeightedPoints = true;
+    });
+
     const finalThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
     res.json({
       ...exam,
       gradingMode: normalizeGradingMode(exam.gradingMode),
       passThreshold: finalThreshold,
       passThresholdPercent: Math.round(finalThreshold * 1000) / 10,
+      maxPointsKeys: updatedMaxPointsKeys,
+      totalMaxPoints: Math.round(updatedTotalMaxPoints * 10) / 10,
+      hasWeightedPoints,
     });
   } catch (error) {
     next(error);
@@ -2411,6 +2556,8 @@ router.post('/exams/:id/mock-grade', async (req, res, next) => {
         passThresholdPercent: Math.round(results.passThreshold * 1000) / 10
       },
       submittedAt: new Date().toISOString(),
+      questionCount: (exam.questions || []).length,
+      hasWeightedPoints: (exam.questions || []).some((q) => Math.abs((Number(q?.maxPoints ?? 1)) - 1) > 1e-6),
       correctCount: results.correctCount,
       total: results.total,
       maxPoints: results.maxPoints,
@@ -2708,6 +2855,12 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       req.body.passThresholdPercent !== undefined ||
       req.body.exigencia !== undefined;
 
+    const parsedPointsInput = parseQuestionPointsMap(maxPointsKeys);
+    if (parsedPointsInput.error) {
+      return res.status(400).json({ error: parsedPointsInput.error });
+    }
+    const validatedPointsMap = parsedPointsInput.map || {};
+
     let finalGradingMode = normalizeGradingMode(existingExam.gradingMode);
     let finalPassThreshold = normalizePassThreshold(existingExam.passThreshold, 0.6);
 
@@ -2753,7 +2906,7 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
 
       const rawAns = answerKey ? answerKey[qNumStr] : '';
       const explicitType = questionTypesKeys ? questionTypesKeys[qNumStr] : undefined;
-      const rawMaxPts = maxPointsKeys ? maxPointsKeys[qNumStr] : undefined;
+      const explicitPts = validatedPointsMap[qNum];
 
       let questionType = 'MULTIPLE_CHOICE';
       let correctAnswer = String(rawAns || '').trim().toUpperCase();
@@ -2762,20 +2915,17 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       if (explicitType === 'WRITTEN' || correctAnswer === 'DESARROLLO' || correctAnswer === 'WRITTEN') {
         questionType = 'WRITTEN';
         correctAnswer = 'DESARROLLO';
-        const mp = parseFloat(rawMaxPts);
-        maxPoints = !isNaN(mp) && mp > 0 ? mp : 5.0;
+        maxPoints = explicitPts !== undefined ? explicitPts : 5.0;
       } else if (explicitType === 'ORAL' || correctAnswer === 'ORAL') {
         questionType = 'ORAL';
         correctAnswer = 'ORAL';
-        const mp = parseFloat(rawMaxPts);
-        maxPoints = !isNaN(mp) && mp > 0 ? mp : 4.0;
+        maxPoints = explicitPts !== undefined ? explicitPts : 4.0;
       } else {
         questionType = 'MULTIPLE_CHOICE';
         if (!correctAnswer) {
           correctAnswer = 'A';
         }
-        const mp = parseFloat(rawMaxPts);
-        maxPoints = !isNaN(mp) && mp > 0 ? mp : 1.0;
+        maxPoints = explicitPts !== undefined ? explicitPts : 1.0;
       }
 
       const skill = skillsKeys ? skillsKeys[qNumStr] || null : null;
@@ -2793,12 +2943,27 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       });
     }
 
+    const updatedQuestions = await prisma.question.findMany({
+      where: { examId },
+      orderBy: { questionNumber: 'asc' },
+      select: { questionNumber: true, maxPoints: true }
+    });
+    const updatedMaxPointsKeys = {};
+    let updatedTotalMaxPoints = 0;
+    updatedQuestions.forEach((q) => {
+      const pts = q.maxPoints ?? 1;
+      updatedMaxPointsKeys[q.questionNumber] = pts;
+      updatedTotalMaxPoints += pts;
+    });
+
     res.json({
       message: 'Pauta actualizada',
       totalQuestions: !isNaN(totalQ) && totalQ > 0 ? totalQ : allQNums.size,
       gradingMode: finalGradingMode,
       passThreshold: finalPassThreshold,
       passThresholdPercent: Math.round(finalPassThreshold * 1000) / 10,
+      maxPointsKeys: updatedMaxPointsKeys,
+      totalMaxPoints: Math.round(updatedTotalMaxPoints * 10) / 10,
     });
   } catch (error) {
     next(error);
