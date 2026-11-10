@@ -84,6 +84,8 @@ export default function LogsTab({ id, apiEndpointPrefix = "/teacher" }: { id: nu
         return { label: "Docente Reasignado", color: "bg-slate-100 text-slate-800 border-slate-200", icon: User };
       case "OPEN_QUESTIONS_GRADED":
         return { label: "Desarrollo/Oral Calificado", color: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200", icon: PenTool };
+      case "GRADES_RECALCULATED":
+        return { label: "Notas Recalculadas", color: "bg-indigo-100 text-indigo-800 border-indigo-200", icon: RefreshCw };
       case "OMR_BULK_SUBMITTED":
       case "ANSWERS_IMPORTED":
         return { label: "Hojas OMR / Planilla", color: "bg-sky-100 text-sky-800 border-sky-200", icon: FileSpreadsheet };
@@ -97,7 +99,7 @@ export default function LogsTab({ id, apiEndpointPrefix = "/teacher" }: { id: nu
     REACTIVACION: ["COURSE_REACTIVATED", "STUDENT_REACTIVATED", "STUDENT_BULK_REACTIVATED"],
     TIEMPO: ["TIME_EXTENDED", "RESCHEDULED"],
     CONFIGURACION: ["ASSIGNMENT_CREATED", "MODE_CHANGED", "DYNAMIC_PASSWORD_CHANGED", "TEACHER_REASSIGNED", "STATUS_CHANGED"],
-    CALIFICACION: ["RESULTS_RELEASED", "OPEN_QUESTIONS_GRADED", "OMR_BULK_SUBMITTED", "ANSWERS_IMPORTED"]
+    CALIFICACION: ["RESULTS_RELEASED", "OPEN_QUESTIONS_GRADED", "GRADES_RECALCULATED", "OMR_BULK_SUBMITTED", "ANSWERS_IMPORTED"]
   };
 
   // Filtrado de logs
@@ -246,6 +248,19 @@ export default function LogsTab({ id, apiEndpointPrefix = "/teacher" }: { id: nu
       return (
         <span className="text-gray-800 font-medium">
           Liberó oficialmente los resultados y notas para visualización de los estudiantes.
+        </span>
+      );
+    }
+
+    if (log.action === "GRADES_RECALCULATED") {
+      return (
+        <span className="text-gray-800 font-medium">
+          Recalculó con la pauta actual <strong>{parsed?.submittedCount ?? 0}</strong> entrega(s) finalizada(s) (
+          <strong>{parsed?.updatedCount ?? 0}</strong> con cambios
+          {parsed?.previousAvgGrade != null && parsed?.newAvgGrade != null
+            ? ` · promedio ${Number(parsed.previousAvgGrade).toFixed(1)} → ${Number(parsed.newAvgGrade).toFixed(1)}`
+            : ""}
+          ).
         </span>
       );
     }

@@ -8,7 +8,8 @@ import Link from "next/link";
 import { 
   ArrowLeft, Trash2, FileText, Plus, Download, Search, 
   Filter, BookOpen, Layers, Clock, X, ChevronRight, Check, Sparkles,
-  ChevronDown, ChevronUp, Headphones, FileSpreadsheet, Eye, RefreshCw, Play
+  ChevronDown, ChevronUp, Headphones, FileSpreadsheet, Eye, RefreshCw, Play,
+  Calculator, CheckCircle2
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal from "@/components/AiPromptModal";
@@ -46,6 +47,7 @@ type Exam = {
   oralCount?: number;
   multipleChoiceCount?: number;
   totalMaxPoints?: number;
+  submittedCount?: number;
 };
 
 function getSubjectTheme(subject: string) {
@@ -111,6 +113,10 @@ export default function ExamsPage() {
   const [selectedAudioExam, setSelectedAudioExam] = useState<Exam | null>(null);
   const [selectedPdfExam, setSelectedPdfExam] = useState<Exam | null>(null);
   const [pdfModalInitialPreview, setPdfModalInitialPreview] = useState(false);
+  const [recalcExam, setRecalcExam] = useState<Exam | null>(null);
+  const [recalculating, setRecalculating] = useState(false);
+  const [recalcError, setRecalcError] = useState("");
+  const [recalcFeedback, setRecalcFeedback] = useState<any>(null);
   const isPruebas = useIsPruebas();
 
   // Tarjetas compactas por defecto (disclosure progresivo)
@@ -288,6 +294,25 @@ export default function ExamsPage() {
     }
   };
 
+  const handleConfirmRecalculate = async () => {
+    if (!recalcExam) return;
+    setRecalcError("");
+    setRecalculating(true);
+    try {
+      const result = await apiFetch<any>(`/admin/exams/${recalcExam.id}/recalculate-grades`, {
+        method: "POST",
+        body: {}
+      });
+      setRecalcFeedback(result);
+      setRecalcExam(null);
+      await loadData();
+    } catch (err: any) {
+      setRecalcError(err.message || "Error al recalcular notas");
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
   const getExamTypeBadge = (type: string) => {
     const t = (type || "ENSAYO").toUpperCase();
     if (t === "QUIZ") return <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">QUIZ</span>;
@@ -377,6 +402,38 @@ export default function ExamsPage() {
             </div>
 
             {error && <div className="bg-red-50 text-red-700 border border-red-200 p-4 rounded-xl text-xs font-semibold">{error}</div>}
+
+            {recalcFeedback && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs flex items-start justify-between gap-3 shadow-xs">
+                <div className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="font-bold text-emerald-900">
+                      {recalcFeedback.examTitle ? `${recalcFeedback.examTitle}: ` : ""}{recalcFeedback.message}
+                    </div>
+                    <div className="text-emerald-800 flex flex-wrap gap-x-4 gap-y-1">
+                      <span>Entregas evaluadas: <strong>{recalcFeedback.evaluatedCount}</strong></span>
+                      <span>Con cambios: <strong>{recalcFeedback.updatedCount}</strong></span>
+                      <span>Notas recalculadas: <strong>{recalcFeedback.updatedGradesCount}</strong></span>
+                      <span>Cursos afectados: <strong>{recalcFeedback.assignmentsAffected}</strong></span>
+                      {recalcFeedback.avgGradeBefore != null && recalcFeedback.avgGradeAfter != null && (
+                        <span>
+                          Promedio general: <strong>{Number(recalcFeedback.avgGradeBefore).toFixed(1)} → {Number(recalcFeedback.avgGradeAfter).toFixed(1)}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRecalcFeedback(null)}
+                  className="text-emerald-700 hover:text-emerald-900 p-1 rounded-md hover:bg-emerald-100 cursor-pointer"
+                  aria-label="Cerrar resumen de recálculo"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
             {/* BARRA DE FILTROS INTEGRAL */}
             <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm space-y-3.5">
@@ -844,9 +901,14 @@ export default function ExamsPage() {
 
                           {/* Cursos Asignados */}
                           <div>
-                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
-                              Cursos Programados ({e.assignedCourses?.length || 0}):
-                            </span>
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                Cursos Programados ({e.assignedCourses?.length || 0}):
+                              </span>
+                              <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                                {e.submittedCount ?? 0} entrega(s) rendida(s)
+                              </span>
+                            </div>
                             {e.assignedCourses && e.assignedCourses.length > 0 ? (
                               <div className="flex flex-wrap gap-1.5">
                                 {e.assignedCourses.map(ac => (
@@ -866,7 +928,7 @@ export default function ExamsPage() {
                           </div>
 
                           {/* Barra de Acciones del Pie */}
-                          <div className="pt-2 border-t border-gray-200 flex items-center justify-between gap-2">
+                          <div className="pt-2 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2">
                             <button 
                               type="button"
                               onClick={() => handleDelete(e.id)} 
@@ -886,6 +948,20 @@ export default function ExamsPage() {
                                 >
                                   <Headphones className="w-3.5 h-3.5 text-purple-600" />
                                   <span>Audios</span>
+                                </button>
+                              )}
+                              {user.role === "ADMIN" && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRecalcError("");
+                                    setRecalcExam(e);
+                                  }}
+                                  className="inline-flex items-center gap-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                                  title="Reevaluar entregas SUBMITTED usando la pauta actual"
+                                >
+                                  <Calculator className="w-3.5 h-3.5 text-indigo-600" />
+                                  <span>Recalcular notas con la pauta actual</span>
                                 </button>
                               )}
                               <a
@@ -969,6 +1045,69 @@ export default function ExamsPage() {
               );
             }}
           />
+
+          {/* Modal Confirmación Recalcular Notas */}
+          {recalcExam && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-indigo-50/70">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-indigo-600 text-white">
+                      <Calculator className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm">Recalcular notas con la pauta actual</h3>
+                      <p className="text-[11px] text-slate-500 line-clamp-1">{recalcExam.title}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !recalculating && setRecalcExam(null)}
+                    disabled={recalculating}
+                    className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-3 text-xs text-slate-700 leading-relaxed">
+                  <p>
+                    Se reevaluarán <strong>{recalcExam.submittedCount ?? 0} entrega(s) finalizada(s)</strong> (<code className="font-mono">SUBMITTED</code>) de esta evaluación usando la pauta actualmente guardada.
+                  </p>
+                  <ul className="space-y-1 text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <li>• Recalcula nota, porcentaje, nivel de logro, puntaje SIMCE/TRI y corrección por pregunta.</li>
+                    <li>• No altera intentos en curso (<code className="font-mono">IN_PROGRESS</code>).</li>
+                    <li>• Mantiene los puntajes ya otorgados manualmente en preguntas de desarrollo/oral.</li>
+                  </ul>
+                  {recalcError && (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 font-semibold">
+                      {recalcError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRecalcExam(null)}
+                    disabled={recalculating}
+                    className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmRecalculate}
+                    disabled={recalculating}
+                    className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${recalculating ? "animate-spin" : ""}`} />
+                    <span>{recalculating ? "Recalculando..." : "Confirmar recálculo"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </AppShell>
       )}
     </RequireRole>
