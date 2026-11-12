@@ -58,6 +58,29 @@ function normalizeExamTypeInput(rawType) {
   return { provided: true, value: normalized };
 }
 
+const ALLOWED_EXAM_LEVELS = [
+  '1B', '2B', '3B', '4B', '5B', '6B', '7B', '8B',
+  '1M', '2M', '3M', '4M'
+];
+
+function normalizeExamLevelInput(rawLevel) {
+  if (rawLevel === undefined) return { provided: false, value: null };
+  const normalized = String(rawLevel ?? '').trim().toUpperCase();
+  if (!normalized || !ALLOWED_EXAM_LEVELS.includes(normalized)) {
+    return {
+      provided: true,
+      error: `Nivel/curso inválido (${normalized || 'vacío'}). Valores permitidos: ${ALLOWED_EXAM_LEVELS.join(', ')}`
+    };
+  }
+  return { provided: true, value: normalized };
+}
+
+function formatCourseLabel(course) {
+  if (!course) return '';
+  const lvl = String(course.level || '').replace('B', '° Básico').replace('M', '° Medio');
+  return `${lvl} ${course.letter || ''}${course.year ? ` (${course.year})` : ''}`.trim();
+}
+
 function parseGradingConfigInput(body = {}, defaultMode = 'SIMCE', defaultThreshold = 0.6) {
   let gradingMode = normalizeGradingMode(defaultMode);
   if (body.gradingMode !== undefined && body.gradingMode !== null && String(body.gradingMode).trim() !== '') {
@@ -1938,6 +1961,7 @@ router.get('/exams', async (req, res, next) => {
         .filter(a => a && a.course)
         .map(a => ({
           id: a.course.id,
+          assignmentId: a.id,
           level: a.course.level || '',
           letter: a.course.letter || '',
           year: a.course.year || new Date().getFullYear(),
@@ -2368,7 +2392,15 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
     const updateData = {};
     if (title !== undefined) updateData.title = String(title).trim();
     if (subject !== undefined) updateData.subject = String(subject).trim();
-    if (level !== undefined) updateData.level = level;
+
+    const examLevelCheck = normalizeExamLevelInput(level);
+    if (examLevelCheck.error) {
+      return res.status(400).json({ error: examLevelCheck.error });
+    }
+    if (examLevelCheck.provided) {
+      updateData.level = examLevelCheck.value;
+    }
+
     if (optionsCount !== undefined && !isNaN(parseInt(optionsCount, 10))) {
       updateData.optionsCount = parseInt(optionsCount, 10);
     }
@@ -2483,7 +2515,11 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
 
     const finalThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
     const examTypeChanged = existingExam.examType !== exam.examType;
-    const tagChangeDesc = examTypeChanged ? ` (tag: ${existingExam.examType} → ${exam.examType})` : '';
+    const examLevelChanged = existingExam.level !== exam.level;
+    const changeNotes = [];
+    if (examTypeChanged) changeNotes.push(`tag: ${existingExam.examType} → ${exam.examType}`);
+    if (examLevelChanged) changeNotes.push(`nivel: ${existingExam.level} → ${exam.level}`);
+    const changeSuffix = changeNotes.length > 0 ? ` (${changeNotes.join(', ')})` : '';
     auditoria.registrarAuditoria({
       req,
       modulo: 'Evaluaciones',
@@ -2491,12 +2527,14 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
       nivel: 'info',
       entidad: 'Evaluación',
       entidad_id: exam.id,
-      descripcion: `Actualizó configuración de evaluación #${exam.id} ("${exam.title}")${tagChangeDesc}`,
+      descripcion: `Actualizó configuración de evaluación #${exam.id} ("${exam.title}")${changeSuffix}`,
       detalles: {
         examId: exam.id,
         title: exam.title,
         examType: exam.examType,
+        level: exam.level,
         ...(examTypeChanged ? { previousExamType: existingExam.examType, newExamType: exam.examType } : {}),
+        ...(examLevelChanged ? { previousLevel: existingExam.level, newLevel: exam.level } : {}),
         gradingMode: normalizeGradingMode(exam.gradingMode),
         passThresholdPercent: Math.round(finalThreshold * 1000) / 10,
         questionCount: updatedQuestions.length,
@@ -3164,6 +3202,11 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       return res.status(400).json({ error: examTypeCheck.error });
     }
 
+    const examLevelCheck = normalizeExamLevelInput(req.body.level);
+    if (examLevelCheck.error) {
+      return res.status(400).json({ error: examLevelCheck.error });
+    }
+
     const parsedPointsInput = parseQuestionPointsMap(maxPointsKeys);
     if (parsedPointsInput.error) {
       return res.status(400).json({ error: parsedPointsInput.error });
@@ -3173,6 +3216,7 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
     let finalGradingMode = normalizeGradingMode(existingExam.gradingMode);
     let finalPassThreshold = normalizePassThreshold(existingExam.passThreshold, 0.6);
     let finalExamType = existingExam.examType;
+    let finalLevel = existingExam.level;
     const examMetaUpdate = {};
 
     if (hasGradingConfigInput) {
@@ -3189,6 +3233,11 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
     if (examTypeCheck.provided) {
       finalExamType = examTypeCheck.value;
       examMetaUpdate.examType = finalExamType;
+    }
+
+    if (examLevelCheck.provided) {
+      finalLevel = examLevelCheck.value;
+      examMetaUpdate.level = finalLevel;
     }
 
     if (Object.keys(examMetaUpdate).length > 0) {
@@ -3276,6 +3325,10 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
 
     const totalResolvedQuestions = !isNaN(totalQ) && totalQ > 0 ? totalQ : allQNums.size;
     const examTypeChanged = existingExam.examType !== finalExamType;
+    const examLevelChanged = existingExam.level !== finalLevel;
+    const akChanges = [];
+    if (examTypeChanged) akChanges.push(`tag: ${existingExam.examType} → ${finalExamType}`);
+    if (examLevelChanged) akChanges.push(`nivel: ${existingExam.level} → ${finalLevel}`);
     auditoria.registrarAuditoria({
       req,
       modulo: 'Evaluaciones',
@@ -3283,12 +3336,14 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       nivel: 'warning',
       entidad: 'Evaluación',
       entidad_id: examId,
-      descripcion: `Actualizó pauta de respuestas y puntajes de evaluación #${examId} ("${existingExam.title}", ${totalResolvedQuestions} preguntas)${examTypeChanged ? ` (tag: ${existingExam.examType} → ${finalExamType})` : ''}`,
+      descripcion: `Actualizó pauta de respuestas y puntajes de evaluación #${examId} ("${existingExam.title}", ${totalResolvedQuestions} preguntas)${akChanges.length ? ` (${akChanges.join(', ')})` : ''}`,
       detalles: {
         examId,
         totalQuestions: totalResolvedQuestions,
         examType: finalExamType,
+        level: finalLevel,
         ...(examTypeChanged ? { previousExamType: existingExam.examType, newExamType: finalExamType } : {}),
+        ...(examLevelChanged ? { previousLevel: existingExam.level, newLevel: finalLevel } : {}),
         gradingMode: finalGradingMode,
         passThresholdPercent: Math.round(finalPassThreshold * 1000) / 10,
         totalMaxPoints: Math.round(updatedTotalMaxPoints * 10) / 10
@@ -3299,6 +3354,7 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       message: 'Pauta actualizada',
       totalQuestions: totalResolvedQuestions,
       examType: finalExamType,
+      level: finalLevel,
       gradingMode: finalGradingMode,
       passThreshold: finalPassThreshold,
       passThresholdPercent: Math.round(finalPassThreshold * 1000) / 10,
@@ -3594,7 +3650,8 @@ router.get('/assignments', async (req, res, next) => {
       include: {
         exam: true,
         course: true,
-        assignedTeacher: { select: { name: true, rut: true } }
+        assignedTeacher: { select: { name: true, rut: true } },
+        _count: { select: { submissions: true } }
       },
       orderBy: { opensAt: 'desc' }
     });
@@ -3611,6 +3668,7 @@ router.get('/assignments', async (req, res, next) => {
       status: a.status,
       originalOpensAt: a.originalOpensAt,
       cancelReason: a.cancelReason,
+      submissionsCount: a._count?.submissions ?? 0,
       Exam: a.exam,
       Course: a.course,
       assignedTeacher: a.assignedTeacher
@@ -3931,37 +3989,243 @@ router.patch('/assignments/:id/teacher', checkAdmin, async (req, res, next) => {
   }
 });
 
+router.patch('/assignments/:id/course', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const targetCourseId = parseInt(req.body.courseId, 10);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID de asignación inválido' });
+    }
+    if (isNaN(targetCourseId) || targetCourseId <= 0) {
+      return res.status(400).json({ error: 'Debes seleccionar un curso destino válido' });
+    }
+
+    const existing = await prisma.examAssignment.findUnique({
+      where: { id },
+      include: {
+        exam: true,
+        course: true,
+        assignedTeacher: { select: { name: true, rut: true } },
+        _count: { select: { submissions: true } }
+      }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Asignación no encontrada' });
+    }
+
+    const targetCourse = await prisma.course.findUnique({ where: { id: targetCourseId } });
+    if (!targetCourse) {
+      return res.status(404).json({ error: 'Curso destino no encontrado' });
+    }
+
+    if (existing.courseId === targetCourseId) {
+      return res.json({
+        id: existing.id,
+        examId: existing.examId,
+        courseId: existing.courseId,
+        opensAt: existing.opensAt,
+        closesAt: existing.closesAt,
+        durationMinutes: existing.exam?.durationMinutes || 90,
+        dynamicPassword: existing.dynamicPassword,
+        dynamicPasswordActive: Boolean(existing.dynamicPasswordActive),
+        applicationMode: existing.applicationMode || 'DIGITAL',
+        status: existing.status,
+        originalOpensAt: existing.originalOpensAt,
+        cancelReason: existing.cancelReason,
+        submissionsCount: existing._count?.submissions ?? 0,
+        Exam: existing.exam,
+        Course: existing.course,
+        assignedTeacher: existing.assignedTeacher
+      });
+    }
+
+    const submissionsCount = existing._count?.submissions ?? 0;
+    if (submissionsCount > 0) {
+      return res.status(409).json({
+        error: `No se puede cambiar el curso de esta asignación porque ya tiene ${submissionsCount} intento(s)/entrega(s) registrado(s) en ${formatCourseLabel(existing.course)}. Crea una nueva asignación para el otro curso.`
+      });
+    }
+
+    const duplicate = await prisma.examAssignment.findFirst({
+      where: {
+        examId: existing.examId,
+        courseId: targetCourseId,
+        id: { not: id }
+      }
+    });
+    if (duplicate) {
+      return res.status(409).json({
+        error: `La evaluación "${existing.exam?.title || ''}" ya está vinculada a ${formatCourseLabel(targetCourse)}.`
+      });
+    }
+
+    const updated = await prisma.examAssignment.update({
+      where: { id },
+      data: { courseId: targetCourseId },
+      include: {
+        exam: true,
+        course: true,
+        assignedTeacher: { select: { name: true, rut: true } },
+        _count: { select: { submissions: true } }
+      }
+    });
+
+    const prevCourseName = formatCourseLabel(existing.course);
+    const nextCourseName = formatCourseLabel(updated.course);
+
+    await logAssignmentAction({
+      assignmentId: updated.id,
+      action: 'COURSE_CHANGED',
+      actor: req.user,
+      details: {
+        previousCourseId: existing.courseId,
+        previousCourseName: prevCourseName,
+        newCourseId: updated.courseId,
+        newCourseName: nextCourseName
+      }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Cambiar Curso',
+      nivel: 'warning',
+      entidad: 'Asignación',
+      entidad_id: updated.id,
+      descripcion: `Reasignó evaluación "${updated.exam?.title || ''}" de ${prevCourseName} a ${nextCourseName}`,
+      detalles: {
+        assignmentId: updated.id,
+        examId: updated.examId,
+        previousCourseId: existing.courseId,
+        previousCourseName: prevCourseName,
+        newCourseId: updated.courseId,
+        newCourseName: nextCourseName
+      }
+    });
+
+    return res.json({
+      id: updated.id,
+      examId: updated.examId,
+      courseId: updated.courseId,
+      opensAt: updated.opensAt,
+      closesAt: updated.closesAt,
+      durationMinutes: updated.exam?.durationMinutes || 90,
+      dynamicPassword: updated.dynamicPassword,
+      dynamicPasswordActive: Boolean(updated.dynamicPasswordActive),
+      applicationMode: updated.applicationMode || 'DIGITAL',
+      status: updated.status,
+      originalOpensAt: updated.originalOpensAt,
+      cancelReason: updated.cancelReason,
+      submissionsCount: updated._count?.submissions ?? 0,
+      Exam: updated.exam,
+      Course: updated.course,
+      assignedTeacher: updated.assignedTeacher
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.put('/assignments/:id', checkAdmin, async (req, res, next) => {
   try {
-    const { opensAt, closesAt } = req.body;
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id <= 0) {
+      return res.status(400).json({ error: 'ID de asignación inválido' });
+    }
+    const existing = await prisma.examAssignment.findUnique({
+      where: { id },
+      include: { exam: true, course: true, _count: { select: { submissions: true } } }
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Asignación no encontrada' });
+    }
+
+    const { opensAt, closesAt, courseId } = req.body;
+    const updateData = {};
+    if (opensAt !== undefined) updateData.opensAt = new Date(opensAt);
+    if (closesAt !== undefined) updateData.closesAt = new Date(closesAt);
+
+    let courseChanged = false;
+    let prevCourseName = formatCourseLabel(existing.course);
+    if (courseId !== undefined && courseId !== null && String(courseId).trim() !== '') {
+      const targetCourseId = parseInt(courseId, 10);
+      if (isNaN(targetCourseId) || targetCourseId <= 0) {
+        return res.status(400).json({ error: 'Curso destino inválido' });
+      }
+      if (targetCourseId !== existing.courseId) {
+        const targetCourse = await prisma.course.findUnique({ where: { id: targetCourseId } });
+        if (!targetCourse) {
+          return res.status(404).json({ error: 'Curso destino no encontrado' });
+        }
+        const submissionsCount = existing._count?.submissions ?? 0;
+        if (submissionsCount > 0) {
+          return res.status(409).json({
+            error: `No se puede cambiar el curso de esta asignación porque ya tiene ${submissionsCount} intento(s)/entrega(s) registrado(s).`
+          });
+        }
+        const duplicate = await prisma.examAssignment.findFirst({
+          where: { examId: existing.examId, courseId: targetCourseId, id: { not: id } }
+        });
+        if (duplicate) {
+          return res.status(409).json({
+            error: `La evaluación ya está vinculada a ${formatCourseLabel(targetCourse)}.`
+          });
+        }
+        updateData.courseId = targetCourseId;
+        courseChanged = true;
+      }
+    }
+
     const assignment = await prisma.examAssignment.update({
-      where: { id: parseInt(req.params.id, 10) },
-      data: {
-        opensAt: new Date(opensAt),
-        closesAt: new Date(closesAt),
-      },
+      where: { id },
+      data: updateData,
       include: {
         exam: true,
         course: true, assignedTeacher: { select: { name: true, rut: true } }
       }
     });
 
-    await logAssignmentAction({
-      assignmentId: assignment.id,
-      action: 'RESCHEDULED',
-      actor: req.user,
-      details: { opensAt, closesAt }
-    });
+    if (opensAt !== undefined || closesAt !== undefined) {
+      await logAssignmentAction({
+        assignmentId: assignment.id,
+        action: 'RESCHEDULED',
+        actor: req.user,
+        details: { opensAt: assignment.opensAt, closesAt: assignment.closesAt }
+      });
+    }
+
+    if (courseChanged) {
+      const nextCourseName = formatCourseLabel(assignment.course);
+      await logAssignmentAction({
+        assignmentId: assignment.id,
+        action: 'COURSE_CHANGED',
+        actor: req.user,
+        details: {
+          previousCourseId: existing.courseId,
+          previousCourseName: prevCourseName,
+          newCourseId: assignment.courseId,
+          newCourseName: nextCourseName
+        }
+      });
+    }
 
     auditoria.registrarAuditoria({
       req,
       modulo: 'Asignaciones',
-      accion: 'Modificar Fechas',
-      nivel: 'info',
+      accion: courseChanged ? 'Cambiar Curso' : 'Modificar Fechas',
+      nivel: courseChanged ? 'warning' : 'info',
       entidad: 'Asignación',
       entidad_id: assignment.id,
-      descripcion: `Actualizó fechas de asignación #${assignment.id} ("${assignment.exam?.title || ''}")`,
-      detalles: { assignmentId: assignment.id, opensAt, closesAt }
+      descripcion: courseChanged
+        ? `Actualizó asignación #${assignment.id} ("${assignment.exam?.title || ''}") → ${formatCourseLabel(assignment.course)}`
+        : `Actualizó fechas de asignación #${assignment.id} ("${assignment.exam?.title || ''}")`,
+      detalles: {
+        assignmentId: assignment.id,
+        opensAt: assignment.opensAt,
+        closesAt: assignment.closesAt,
+        courseId: assignment.courseId,
+        ...(courseChanged ? { previousCourseId: existing.courseId, previousCourseName: prevCourseName } : {})
+      }
     });
 
     res.json(assignment);

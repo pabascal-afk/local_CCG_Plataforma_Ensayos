@@ -9,7 +9,7 @@ import {
   ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, 
   Sparkles, Headphones, Scissors, Plus, Trash2, ListPlus,
   FileText, Eye, RefreshCw, Play, Calculator, AlertTriangle, CheckCircle2, X,
-  SlidersHorizontal, Tag
+  SlidersHorizontal, Tag, GraduationCap
 } from "lucide-react";
 import { getToken } from "@/lib/session";
 import AiPromptModal from "@/components/AiPromptModal";
@@ -18,7 +18,7 @@ import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdf
 import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
 import PointsInput from "@/components/PointsInput";
 import { useIsPruebas } from "@/lib/useIsPruebas";
-import { getExamTypeMeta, getExamTypeOptions } from "@/lib/examTypes";
+import { EXAM_LEVEL_OPTIONS, formatLevelName, getExamTypeMeta, getExamTypeOptions } from "@/lib/examTypes";
 
 function formatPointDisplay(val: number) {
   const rounded = Math.round(val * 10) / 10;
@@ -46,6 +46,9 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const [examType, setExamType] = useState<string>("ENSAYO");
   const [savingExamType, setSavingExamType] = useState<boolean>(false);
   const [tagSavedNotice, setTagSavedNotice] = useState<string>("");
+  const [examLevel, setExamLevel] = useState<string>("4B");
+  const [savingExamLevel, setSavingExamLevel] = useState<boolean>(false);
+  const [levelSavedNotice, setLevelSavedNotice] = useState<string>("");
   const [gradingMode, setGradingMode] = useState<GradingMode>("SIMCE");
   const [passThresholdPercent, setPassThresholdPercent] = useState<number>(60);
 
@@ -102,6 +105,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     setLearningObjectivesKeys(e.learningObjectivesKeys || {});
     setDifficultiesKeys(dk);
     setExamType((e.examType || "ENSAYO").toUpperCase());
+    setExamLevel((e.level || "4B").toUpperCase());
     setGradingMode(e.gradingMode === "NORMAL" ? "NORMAL" : "SIMCE");
     const rawPct =
       e.passThresholdPercent !== undefined && e.passThresholdPercent !== null
@@ -285,6 +289,30 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     }
   };
 
+  const handleExamLevelChange = async (nextLevel: string) => {
+    const normalized = (nextLevel || "4B").toUpperCase();
+    const prevLevel = examLevel;
+    if (normalized === prevLevel) return;
+    setExamLevel(normalized);
+    setSavingExamLevel(true);
+    setLevelSavedNotice("");
+    try {
+      const updated = await apiFetch<any>(`/admin/exams/${id}`, {
+        method: "PUT",
+        body: { level: normalized }
+      });
+      const resolved = (updated?.level || normalized).toUpperCase();
+      setExamLevel(resolved);
+      setExam((prev: any) => (prev ? { ...prev, level: resolved } : prev));
+      setLevelSavedNotice(`Nivel actualizado a ${formatLevelName(resolved)}`);
+    } catch (err: any) {
+      setExamLevel(prevLevel);
+      alert(err.message || "Error al cambiar el nivel/curso de la evaluación");
+    } finally {
+      setSavingExamLevel(false);
+    }
+  };
+
   const saveAnswerKey = async (silent: boolean = false): Promise<boolean> => {
     setSaving(true);
     const safePct = Math.min(99, Math.max(1, Math.round(Number(passThresholdPercent) || 60)));
@@ -295,6 +323,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
         body: {
           totalQuestions: maxQ,
           examType,
+          level: examLevel,
           gradingMode,
           passThresholdPercent: safePct,
           passThreshold: normalizedPassThreshold,
@@ -311,6 +340,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
         ...prev,
         questionCount: maxQ,
         examType,
+        level: examLevel,
         gradingMode,
         passThreshold: normalizedPassThreshold,
         passThresholdPercent: safePct,
@@ -550,6 +580,38 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                       </span>
                     );
                   })()}
+                  {user.role === "ADMIN" ? (
+                    <div className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-full pl-2.5 pr-1.5 py-0.5">
+                      <GraduationCap className="w-3 h-3 text-indigo-600 shrink-0" />
+                      <span className="text-[11px] font-bold text-slate-500">Nivel:</span>
+                      <select
+                        value={examLevel}
+                        disabled={savingExamLevel}
+                        onChange={(e) => handleExamLevelChange(e.target.value)}
+                        aria-label="Cambiar nivel o curso base de la evaluación"
+                        className="text-xs font-extrabold rounded-full px-2 py-0.5 border border-indigo-200 bg-indigo-50 text-indigo-800 outline-none cursor-pointer disabled:opacity-60"
+                      >
+                        {EXAM_LEVEL_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      {savingExamLevel && (
+                        <span className="text-[10px] font-semibold text-blue-600 pr-1">Guardando...</span>
+                      )}
+                      {!savingExamLevel && levelSavedNotice && (
+                        <span className="text-[10px] font-bold text-emerald-700 pr-1 flex items-center gap-0.5">
+                          <Check className="w-3 h-3" /> {levelSavedNotice}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 font-extrabold text-xs px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
+                      <GraduationCap className="w-3 h-3" />
+                      {formatLevelName(examLevel)}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Agrega preguntas, edita las respuestas correctas o configura preguntas abiertas y audios.
