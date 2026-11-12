@@ -5,6 +5,7 @@ const examRoutes = require('./routes/exams');
 const studentRoutes = require('./routes/student');
 const adminRoutes = require('./routes/admin');
 const teacherRoutes = require('./routes/teacher');
+const auditoriaRoutes = require('./routes/auditoria');
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use('/api/exams', examRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/teacher', teacherRoutes);
+app.use('/api/auditoria', auditoriaRoutes);
 
 app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada' });

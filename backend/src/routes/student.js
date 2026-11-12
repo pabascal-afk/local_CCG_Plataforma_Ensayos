@@ -6,6 +6,7 @@ const { prisma } = require('../lib/prisma');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { getDeadline, finalizeSubmission } = require('../services/submissions');
 const { computeResults, normalizeGradingMode, normalizePassThreshold } = require('../services/grading');
+const auditoria = require('../services/auditoria');
 
 const router = express.Router();
 router.use(requireAuth, requireRole('STUDENT'));
@@ -108,6 +109,9 @@ router.post('/assignments/:id/start', async (req, res) => {
 
   const effectiveClosesAt = submission?.extendedDeadline ? new Date(submission.extendedDeadline) : new Date(assignment.closesAt);
 
+  let isFreshStart = false;
+  let resumedAfterReactivation = false;
+
   if (!submission) {
     if (now < assignment.opensAt) return res.status(403).json({ error: 'Este ensayo aún no está disponible' });
     if (now > effectiveClosesAt) return res.status(403).json({ error: 'Este ensayo ya cerró' });
@@ -115,6 +119,7 @@ router.post('/assignments/:id/start', async (req, res) => {
       submission = await prisma.submission.create({
         data: { studentRut: req.user.rut, assignmentId: assignment.id },
       });
+      isFreshStart = true;
     } catch {
       // Doble clic / dos pestañas: el intento ya fue creado por otra petición
       submission = await prisma.submission.findUnique({
@@ -132,13 +137,38 @@ router.post('/assignments/:id/start', async (req, res) => {
         where: { id: submission.id },
         data: { startedAt: now },
       });
+      resumedAfterReactivation = true;
     }
   }
 
   const deadline = getDeadline(submission, assignment, assignment.exam);
   if (now > deadline) {
-    const closed = await finalizeSubmission(submission.id, { auto: true });
+    const closed = await finalizeSubmission(submission.id, { auto: true, req, source: 'start_expired' });
     return res.status(409).json({ error: 'El tiempo de este ensayo terminó', submissionId: closed.id });
+  }
+
+  if (isFreshStart) {
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Rendición',
+      accion: 'Iniciar Evaluación',
+      nivel: 'info',
+      entidad: 'Entrega',
+      entidad_id: submission.id,
+      descripcion: `Inició la rendición de "${assignment.exam.title}"`,
+      detalles: { assignmentId: assignment.id, examId: assignment.examId, deadline: deadline.toISOString() },
+    });
+  } else if (resumedAfterReactivation) {
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Rendición',
+      accion: 'Retomar Evaluación Reactivada',
+      nivel: 'info',
+      entidad: 'Entrega',
+      entidad_id: submission.id,
+      descripcion: `Reingresó tras reactivación a "${assignment.exam.title}"`,
+      detalles: { assignmentId: assignment.id, examId: assignment.examId, deadline: deadline.toISOString() },
+    });
   }
 
   const [questions, answers, rawClips] = await Promise.all([
@@ -268,7 +298,7 @@ router.put('/submissions/:id/answers', async (req, res) => {
   const deadline = getDeadline(submission, assignment, exam);
   // 30 s de gracia para respuestas en vuelo justo al terminar el tiempo
   if (Date.now() > deadline.getTime() + 30 * 1000) {
-    await finalizeSubmission(submission.id, { auto: true });
+    await finalizeSubmission(submission.id, { auto: true, req, source: 'autosave_expired' });
     return res.status(409).json({ error: 'El tiempo terminó; tu ensayo fue entregado' });
   }
 
@@ -311,7 +341,18 @@ router.post('/submissions/:id/submit', async (req, res) => {
   if (!submission) return res.status(404).json({ error: 'Intento no encontrado' });
   if (submission.status === 'SUBMITTED') return res.json({ message: 'El ensayo ya estaba entregado' });
 
-  await finalizeSubmission(submission.id);
+  auditoria.registrarAuditoria({
+    req,
+    modulo: 'Rendición',
+    accion: 'Entregar Evaluación',
+    nivel: 'success',
+    entidad: 'Entrega',
+    entidad_id: submission.id,
+    descripcion: `Entregó manualmente "${submission.assignment?.exam?.title || `Evaluación #${submission.assignment?.examId}`}"`,
+    detalles: { assignmentId: submission.assignmentId, examId: submission.assignment?.examId },
+  });
+
+  await finalizeSubmission(submission.id, { auto: false, req, source: 'student_submit' });
   // No se devuelve la nota: el profesor debe liberar los resultados.
   res.json({ message: 'Ensayo entregado correctamente' });
 });
@@ -343,6 +384,17 @@ router.get('/submissions/:id/result', async (req, res) => {
   const gradingMode = normalizeGradingMode(exam.gradingMode);
   const passThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
   const passThresholdPercent = Math.round(passThreshold * 1000) / 10;
+
+  auditoria.registrarAuditoria({
+    req,
+    modulo: 'Resultados',
+    accion: 'Consultar Resultado',
+    nivel: 'info',
+    entidad: 'Entrega',
+    entidad_id: submission.id,
+    descripcion: `Consultó sus resultados de "${exam.title}" (Nota ${submission.grade})`,
+    detalles: { examId: exam.id, assignmentId: submission.assignmentId, grade: submission.grade },
+  });
 
   // No se incluye la pauta ni el detalle por pregunta (evita que circule entre cursos).
   res.json({

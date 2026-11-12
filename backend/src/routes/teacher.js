@@ -16,6 +16,7 @@ const {
   normalizePassThreshold
 } = require('../services/grading');
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
+const auditoria = require('../services/auditoria');
 
 const router = express.Router();
 const uploadMemory = multer({ storage: multer.memoryStorage() });
@@ -143,7 +144,7 @@ router.get('/assignments', async (req, res, next) => {
 
 router.get('/bell-blocks', async (req, res, next) => {
   try {
-    const blocks = await getSchoolBellBlocks();
+    const blocks = await getSchoolBellBlocks(req);
     res.json(blocks);
   } catch (error) {
     next(error);
@@ -330,6 +331,17 @@ router.post('/assignments', async (req, res, next) => {
       note: note || (presetType === 'QUICK_LAUNCH' ? 'Lanzamiento rápido en clase' : null)
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Crear',
+      nivel: 'success',
+      entidad: 'Asignación',
+      entidad_id: assignment.id,
+      descripcion: `Docente programó "${exam.title}" para ${course.level} ${course.letter}`,
+      detalles: { assignmentId: assignment.id, examId: parsedExamId, courseId: parsedCourseId, applicationMode: assignment.applicationMode, presetType: presetType || 'CUSTOM' }
+    });
+
     res.json(assignment);
   } catch (error) {
     if (error.code === 'P2002') {
@@ -395,6 +407,17 @@ router.post('/assignments/:id/dynamic-password', async (req, res, next) => {
       }
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Cambiar PIN Dinámico',
+      nivel: 'info',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `${updated.dynamicPasswordActive ? 'Activó' : 'Desactivó'} PIN dinámico en asignación #${id}`,
+      detalles: { assignmentId: id, dynamicPasswordActive: updated.dynamicPasswordActive, hasPassword: Boolean(updated.dynamicPassword) }
+    });
+
     res.json({
       dynamicPassword: updated.dynamicPassword,
       dynamicPasswordActive: updated.dynamicPasswordActive
@@ -435,6 +458,17 @@ router.post('/assignments/:id/release', async (req, res, next) => {
       details: {
         releasedAt: updated.releasedAt
       }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Liberar Resultados',
+      nivel: 'success',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Liberó resultados de asignación #${id} para visualización de estudiantes`,
+      detalles: { assignmentId: id, releasedAt: updated.releasedAt }
     });
 
     res.json({ message: 'Resultados liberados', assignment: updated });
@@ -905,6 +939,17 @@ router.post('/assignments/:id/propose-remedial', async (req, res, next) => {
       }
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Remediales',
+      accion: 'Proponer Remedial',
+      nivel: 'info',
+      entidad: 'Propuesta Remedial',
+      entidad_id: proposal.id,
+      descripcion: `Propuso acción remedial #${proposal.id} para ${assignment.course ? `${assignment.course.level} ${assignment.course.letter}` : `asignación #${assignment.id}`}`,
+      detalles: { proposalId: proposal.id, originAssignmentId: assignment.id, suggestedDate, remedialExamId: proposal.remedialExamId }
+    });
+
     res.json({
       message: 'Propuesta remedial enviada a UTP para revisión y aprobación.',
       proposal
@@ -1318,6 +1363,17 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       });
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Reportes',
+      accion: 'Exportar Resultados',
+      nivel: 'info',
+      entidad: 'Asignación',
+      entidad_id: assignment.id,
+      descripcion: `Exportó sábana Excel de resultados de "${assignment.exam.title}" (asignación #${assignment.id})`,
+      detalles: { assignmentId: assignment.id, examId: assignment.examId, courseId: assignment.courseId, submittedCount }
+    });
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="Resultados_${assignment.exam.title.replace(/\s+/g, '_')}.xlsx"`);
     
@@ -1393,6 +1449,16 @@ router.get('/assignments-export.xlsx', async (req, res, next) => {
         avgGrade: avgG,
         avgSimce: avgS
       });
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Reportes',
+      accion: 'Exportar Resumen Docente',
+      nivel: 'info',
+      entidad: 'Resumen Docente',
+      descripcion: `Exportó resumen Excel de ${assignments.length} asignación(es)`,
+      detalles: { assignmentsCount: assignments.length }
     });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -1515,6 +1581,17 @@ router.get('/students/:rut/export.xlsx', async (req, res, next) => {
         percent: pVal,
         theta: gMode === 'NORMAL' ? 'N/A' : (s.theta != null ? s.theta.toFixed(3) : '')
       });
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Reportes',
+      accion: 'Exportar Ficha Estudiante',
+      nivel: 'info',
+      entidad: 'Estudiante',
+      entidad_id: student.rut,
+      descripcion: `Exportó ficha individual Excel de ${student.name} (${student.rut})`,
+      detalles: { studentRut: student.rut, submissionsCount: submissions.length }
     });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -1866,6 +1943,7 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
     });
 
     const results = { imported: 0, updated: 0, errors: [] };
+    const autoCreatedStudents = [];
     const bulkPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
 
     for (const subItem of submissions) {
@@ -1896,6 +1974,7 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
               mustChangePassword: true
             }
           });
+          autoCreatedStudents.push({ rut, name: studentName });
         }
 
         const incomingAnswers = subItem.answers || {};
@@ -2032,6 +2111,32 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
       }
     }
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Carga Masiva OMR',
+      nivel: 'success',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Procesó carga OMR para asignación #${id} ("${assignment.exam?.title || ''}"): ${results.imported} nueva(s), ${results.updated} actualizada(s)`,
+      detalles: { assignmentId: id, imported: results.imported, updated: results.updated, errorsCount: results.errors.length }
+    });
+
+    if (autoCreatedStudents.length > 0) {
+      auditoria.registrarAuditoria({
+        req,
+        esPlataforma: true,
+        desencadenadoPor: req.user,
+        modulo: 'Usuarios',
+        accion: 'Auto-Crear Estudiantes',
+        nivel: 'warning',
+        entidad: 'Estudiantes',
+        entidad_id: assignment.courseId,
+        descripcion: `La plataforma creó automáticamente ${autoCreatedStudents.length} ficha(s) de estudiante durante carga OMR desencadenada por ${req.user?.name || req.user?.rut}`,
+        detalles: { assignmentId: id, courseId: assignment.courseId, students: autoCreatedStudents }
+      });
+    }
+
     return res.json(results);
   } catch (error) {
     next(error);
@@ -2066,6 +2171,7 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
 
     const worksheet = await parseSpreadsheet(req.file.buffer, req.file.originalname);
     const results = { imported: 0, errors: [] };
+    const autoCreatedStudents = [];
     const importPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
     const questions = assignment.exam.questions;
     const questionsByNum = {};
@@ -2106,6 +2212,7 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
               mustChangePassword: true
             }
           });
+          autoCreatedStudents.push({ rut, name: studentName });
         }
 
         // Map answers and open question scores
@@ -2242,6 +2349,32 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
       }
     }
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Importar Respuestas',
+      nivel: 'success',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Importó planilla de respuestas para asignación #${id} (${results.imported} entrega(s))`,
+      detalles: { assignmentId: id, imported: results.imported, errorsCount: results.errors.length, filename: req.file.originalname }
+    });
+
+    if (autoCreatedStudents.length > 0) {
+      auditoria.registrarAuditoria({
+        req,
+        esPlataforma: true,
+        desencadenadoPor: req.user,
+        modulo: 'Usuarios',
+        accion: 'Auto-Crear Estudiantes',
+        nivel: 'warning',
+        entidad: 'Estudiantes',
+        entidad_id: assignment.courseId,
+        descripcion: `La plataforma creó automáticamente ${autoCreatedStudents.length} ficha(s) de estudiante durante importación de respuestas desencadenada por ${req.user?.name || req.user?.rut}`,
+        detalles: { assignmentId: id, courseId: assignment.courseId, students: autoCreatedStudents }
+      });
+    }
+
     res.json(results);
   } catch (error) {
     next(error);
@@ -2369,6 +2502,37 @@ router.post('/assignments/:id/grade-open-questions', async (req, res, next) => {
       }
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Calificar Preguntas Abiertas',
+      nivel: 'info',
+      entidad: 'Entrega',
+      entidad_id: updatedSubmission.id,
+      descripcion: `Docente calificó preguntas abiertas del estudiante ${rut} en asignación #${id}`,
+      detalles: { assignmentId: id, submissionId: updatedSubmission.id, studentRut: rut, scores }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      esPlataforma: true,
+      desencadenadoPor: req.user,
+      modulo: 'Evaluaciones',
+      accion: 'Recálculo Automático de Nota',
+      nivel: 'success',
+      entidad: 'Entrega',
+      entidad_id: updatedSubmission.id,
+      descripcion: `La plataforma recalculó automáticamente la nota (${updatedSubmission.grade?.toFixed(1)}, ${updatedSubmission.percent}%) del estudiante ${rut} tras calificación de ${req.user?.name || req.user?.rut}`,
+      detalles: {
+        assignmentId: id,
+        submissionId: updatedSubmission.id,
+        studentRut: rut,
+        grade: updatedSubmission.grade,
+        percent: updatedSubmission.percent,
+        simceScore: updatedSubmission.simceScore
+      }
+    });
+
     res.json({
       message: 'Puntajes guardados y nota recalculada',
       submission: {
@@ -2420,6 +2584,17 @@ router.patch('/assignments/:id/mode', async (req, res, next) => {
         previousMode: assignment.applicationMode,
         newMode: mode
       }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Cambiar Modalidad',
+      nivel: 'info',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Docente cambió modalidad de asignación #${id} de ${assignment.applicationMode} a ${mode}`,
+      detalles: { assignmentId: id, previousMode: assignment.applicationMode, newMode: mode }
     });
 
     res.json(updated);
@@ -2537,6 +2712,17 @@ router.post('/assignments/:id/reactivate', async (req, res, next) => {
       note: req.body.note || null
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Reactivar Curso',
+      nivel: 'warning',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Docente reactivó asignación #${id} para el curso (alcance: ${scope}, afectados: ${affectedSubmissions})`,
+      detalles: { assignmentId: id, scope, resetMode, newClosesAt, affectedSubmissions }
+    });
+
     res.json({
       message: 'Evaluación reactivada con éxito para el curso',
       assignment: updatedAssignment,
@@ -2641,6 +2827,17 @@ router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) 
       note: note || null
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Reactivar Estudiante',
+      nivel: 'warning',
+      entidad: 'Entrega',
+      entidad_id: `${id}:${student.rut}`,
+      descripcion: `Docente reactivó plazo individual para ${student.name} (${student.rut}) en asignación #${id}`,
+      detalles: { assignmentId: id, studentRut: student.rut, studentName: student.name, deadline: newDeadline, resetMode }
+    });
+
     res.json({
       message: `Evaluación reactivada exitosamente para ${student.name}`,
       student: { rut: student.rut, name: student.name },
@@ -2708,6 +2905,17 @@ router.patch('/assignments/:id/quick-extend', async (req, res, next) => {
         extendedStudentsCount: activeExtendedSubs.length
       },
       note: note || `Prórroga rápida en vivo de +${mins} minutos`
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Extender Plazo',
+      nivel: 'info',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Docente extendió en +${mins} minutos el plazo de asignación #${id}`,
+      detalles: { assignmentId: id, minutesAdded: mins, newClosesAt, extendedStudentsCount: activeExtendedSubs.length }
     });
 
     res.json({
@@ -2812,6 +3020,17 @@ router.post('/assignments/:id/students/bulk-reactivate', async (req, res, next) 
         resetMode
       },
       note: note || `Reactivación masiva para ${affectedStudents.length} estudiantes`
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Reactivación Masiva',
+      nivel: 'warning',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Docente reactivó plazo masivo para ${affectedStudents.length} estudiante(s) en asignación #${id}`,
+      detalles: { assignmentId: id, affectedCount: affectedStudents.length, deadline: newDeadline, resetMode }
     });
 
     res.json({
@@ -2976,6 +3195,17 @@ router.post('/assignments/:id/audios', (req, res, next) => {
       createdClips.push({ ...created, questionNumbers: qNums });
     }
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Audios',
+      accion: 'Subir Audio',
+      nivel: 'success',
+      entidad: 'Evaluación',
+      entidad_id: examId,
+      descripcion: `Docente subió ${createdClips.length} fragmento(s) de audio desde asignación #${id}`,
+      detalles: { assignmentId: id, examId, clipsCount: createdClips.length, clipIds: createdClips.map(c => c.id), audioPath }
+    });
+
     res.json({ message: `${createdClips.length} fragmento(s) guardado(s)`, clips: createdClips });
   } catch (error) {
     next(error);
@@ -3018,6 +3248,17 @@ router.put('/assignments/:id/audios/:clipId', async (req, res, next) => {
       }
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Audios',
+      accion: 'Modificar Audio',
+      nivel: 'info',
+      entidad: 'AudioClip',
+      entidad_id: clipId,
+      descripcion: `Docente actualizó fragmento de audio #${clipId} ("${updated.title}") desde asignación #${id}`,
+      detalles: { assignmentId: id, examId: assignment.examId, clipId, title: updated.title, startSec: updated.startSec, endSec: updated.endSec, maxPlays: updated.maxPlays, questionNumbers: qNums }
+    });
+
     res.json({ ...updated, questionNumbers: qNums });
   } catch (error) {
     next(error);
@@ -3054,6 +3295,17 @@ router.delete('/assignments/:id/audios/:clipId', async (req, res, next) => {
         }
       }
     }
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Audios',
+      accion: 'Eliminar Audio',
+      nivel: 'danger',
+      entidad: 'AudioClip',
+      entidad_id: clipId,
+      descripcion: `Docente eliminó fragmento de audio #${clipId} ("${clip.title}") desde asignación #${id}`,
+      detalles: { assignmentId: id, examId: assignment.examId, clipId, title: clip.title, audioPath }
+    });
 
     res.json({ message: 'Fragmento eliminado' });
   } catch (error) {
