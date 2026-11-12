@@ -13,6 +13,7 @@ import {
   KeyRound,
   LogOut,
   Calendar,
+  ShieldCheck,
 } from "lucide-react";
 import { clearSession, ROLE_LABEL, type Role, type SessionUser } from "@/lib/session";
 import { useSchoolYear } from "@/context/SchoolYearContext";
@@ -35,11 +36,13 @@ function getNav(isPruebas: boolean): Record<Role, NavItem[]> {
       { href: "/admin/exams", label: isPruebas ? "Pruebas" : "Ensayos", icon: FileText },
       { href: "/admin/assignments", label: "Asignaciones", icon: ClipboardList },
       { href: "/teacher", label: "Reportes / En vivo", icon: BarChart3 },
+      { href: "/admin/auditoria", label: "Auditoría / Logs", icon: ShieldCheck },
     ],
     DIRECTOR: [
       { href: "/admin/dashboard", label: "Dashboard Global", icon: LayoutDashboard },
       { href: "/admin/calendar", label: isPruebas ? "Calendario Pruebas" : "Calendario SIMCE", icon: Calendar },
-      { href: "/teacher", label: "Reportes Generales", icon: BarChart3 }
+      { href: "/teacher", label: "Reportes Generales", icon: BarChart3 },
+      { href: "/admin/auditoria", label: "Auditoría / Logs", icon: ShieldCheck },
     ],
   };
 }

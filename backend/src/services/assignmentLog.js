@@ -1,4 +1,5 @@
 const { prisma } = require('../lib/prisma');
+const auditoria = require('./auditoria');
 
 /**
  * Registra una acción de auditoría sobre una asignación de prueba/ensayo.
@@ -87,7 +88,7 @@ async function getAssignmentLogs(assignmentId) {
  * Obtiene los bloques de horario de campana escolar.
  * Si no hay ninguno creado, auto-inicializa los bloques estándar del colegio.
  */
-async function getSchoolBellBlocks() {
+async function getSchoolBellBlocks(req = null) {
   const blocks = await prisma.schoolBellBlock.findMany({
     where: { isActive: true },
     orderBy: { orderIndex: 'asc' }
@@ -107,6 +108,18 @@ async function getSchoolBellBlocks() {
   for (const b of defaultBlocks) {
     await prisma.schoolBellBlock.create({ data: b });
   }
+
+  auditoria.registrarAuditoria({
+    req,
+    esPlataforma: true,
+    desencadenadoPor: req?.user || null,
+    modulo: 'Horarios',
+    accion: 'Auto-Inicializar Bloques',
+    nivel: 'info',
+    entidad: 'Bloques Horarios',
+    descripcion: 'La plataforma inicializó automáticamente los 5 bloques horarios estándar de campana escolar',
+    detalles: { cantidadBloques: defaultBlocks.length },
+  });
 
   return await prisma.schoolBellBlock.findMany({
     where: { isActive: true },

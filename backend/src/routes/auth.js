@@ -5,6 +5,7 @@ const { z } = require('zod');
 const { prisma } = require('../lib/prisma');
 const { signToken, requireAuth } = require('../middleware/auth');
 const { normalizeRut } = require('../utils/rut');
+const auditoria = require('../services/auditoria');
 
 const router = express.Router();
 
@@ -132,6 +133,18 @@ router.post('/login', loginLimiter, async (req, res) => {
         isActive: true,
       }
     });
+
+    auditoria.registrarAuditoria({
+      req,
+      esPlataforma: true,
+      desencadenadoPor: user,
+      modulo: 'Seguridad',
+      accion: 'Auto-Inicializar Admin',
+      nivel: 'warning',
+      entidad: 'Usuario',
+      entidad_id: user.rut,
+      descripcion: `La plataforma aprovisionó automáticamente la cuenta administradora inicial (${user.rut})`,
+    });
   }
 
   let passwordMatches = user && user.isActive && (
@@ -163,6 +176,20 @@ router.post('/login', loginLimiter, async (req, res) => {
 
   // Mismo mensaje para RUT inexistente o clave errónea (no revelar qué RUT existen)
   if (!user || !user.isActive || !passwordMatches) {
+    auditoria.registrarAuditoria({
+      req,
+      usuario: {
+        rut: rut || rawInput,
+        name: user?.name || `Intento (${rut || rawInput})`,
+        role: user?.role || 'DESCONOCIDO',
+      },
+      modulo: 'Seguridad',
+      accion: 'Login Fallido',
+      nivel: 'warning',
+      entidad: 'Sesión',
+      entidad_id: rut || rawInput,
+      descripcion: `Intento fallido de inicio de sesión para ${rut || rawInput}${!user ? ' (usuario inexistente)' : (!user.isActive ? ' (usuario inactivo)' : ' (contraseña incorrecta)')}`,
+    });
     return res.status(401).json({ error: 'RUT o contraseña incorrectos' });
   }
 
@@ -171,6 +198,18 @@ router.post('/login', loginLimiter, async (req, res) => {
     userPayload.mustChangePassword = false;
     userPayload.usedDynamicPassword = true;
   }
+
+  auditoria.registrarAuditoria({
+    req,
+    usuario: user,
+    modulo: 'Seguridad',
+    accion: 'Iniciar Sesión',
+    nivel: 'info',
+    entidad: 'Sesión',
+    entidad_id: user.rut,
+    descripcion: `Inició sesión en la plataforma (${user.role})${usedDynamicPassword ? ' con PIN de aula' : ''}`,
+    detalles: { role: user.role, usedDynamicPassword, courseId: user.courseId },
+  });
 
   res.json({ token: signToken(user), user: userPayload });
 });
@@ -207,6 +246,16 @@ router.post('/change-password', requireAuth, async (req, res) => {
   const updated = await prisma.user.update({
     where: { rut: user.rut },
     data: { passwordHash: await bcrypt.hash(newPassword, 10), mustChangePassword: false },
+  });
+  auditoria.registrarAuditoria({
+    req,
+    usuario: updated,
+    modulo: 'Seguridad',
+    accion: 'Cambiar Contraseña',
+    nivel: 'success',
+    entidad: 'Usuario',
+    entidad_id: updated.rut,
+    descripcion: 'Actualizó su contraseña personal de acceso',
   });
   res.json({ message: 'Contraseña actualizada', user: publicUser(updated) });
 });

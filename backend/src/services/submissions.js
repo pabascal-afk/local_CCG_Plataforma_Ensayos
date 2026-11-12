@@ -1,6 +1,7 @@
 const { prisma } = require('../lib/prisma');
 const { computeResults, isOpenQuestion, normalizeGradingMode, normalizePassThreshold } = require('./grading');
 const { logAssignmentAction } = require('./assignmentLog');
+const auditoria = require('./auditoria');
 
 /**
  * Momento límite de un intento: el menor entre (inicio + duración) y el cierre de la asignación
@@ -19,13 +20,21 @@ function getDeadline(submission, assignment, exam) {
 /**
  * Corrige y cierra un intento. Idempotente: si ya estaba entregado, lo devuelve sin cambios.
  */
-async function finalizeSubmission(submissionId, { auto = false } = {}) {
-  return prisma.$transaction(async (tx) => {
+async function finalizeSubmission(submissionId, { auto = false, req = null, actor = null, source = null } = {}) {
+  let finalizedMeta = null;
+
+  const resultSubmission = await prisma.$transaction(async (tx) => {
     const submission = await tx.submission.findUnique({
       where: { id: submissionId },
       include: {
         answers: true,
-        assignment: { include: { exam: { include: { questions: true } } } },
+        student: { select: { rut: true, name: true, role: true } },
+        assignment: {
+          include: {
+            course: true,
+            exam: { include: { questions: true } },
+          },
+        },
       },
     });
     if (!submission) throw new Error('Intento no encontrado');
@@ -51,7 +60,7 @@ async function finalizeSubmission(submissionId, { auto = false } = {}) {
       });
     }
 
-    return tx.submission.update({
+    const updated = await tx.submission.update({
       where: { id: submissionId },
       data: {
         status: 'SUBMITTED',
@@ -66,7 +75,74 @@ async function finalizeSubmission(submissionId, { auto = false } = {}) {
         seTheta: results.seTheta,
       },
     });
+
+    finalizedMeta = {
+      submissionId: updated.id,
+      assignmentId: submission.assignmentId,
+      examId: exam.id,
+      examTitle: exam.title,
+      gradingMode: normalizeGradingMode(exam.gradingMode),
+      courseName: formatCourseLabel(submission.assignment.course),
+      student: submission.student || { rut: submission.studentRut, name: submission.studentRut, role: 'STUDENT' },
+      grade: results.grade,
+      percent: results.percent,
+      correctCount: results.correctCount,
+      simceScore: results.simceScore,
+    };
+
+    return updated;
   });
+
+  if (finalizedMeta) {
+    const trigger = actor || req?.user || finalizedMeta.student;
+    if (auto) {
+      auditoria.registrarAuditoria({
+        req,
+        esPlataforma: true,
+        desencadenadoPor: trigger,
+        modulo: 'Rendición',
+        accion: 'Auto-Entrega por Tiempo',
+        nivel: 'warning',
+        entidad: 'Entrega',
+        entidad_id: finalizedMeta.submissionId,
+        descripcion: `La plataforma cerró y entregó automáticamente "${finalizedMeta.examTitle}" por vencimiento de tiempo`,
+        detalles: {
+          origen: source || 'auto_deadline',
+          assignmentId: finalizedMeta.assignmentId,
+          examId: finalizedMeta.examId,
+          curso: finalizedMeta.courseName,
+          notaCalculada: finalizedMeta.grade,
+          porcentaje: finalizedMeta.percent,
+          simceScore: finalizedMeta.simceScore,
+        },
+      });
+    } else {
+      auditoria.registrarAuditoria({
+        req,
+        esPlataforma: true,
+        desencadenadoPor: trigger,
+        modulo: 'Evaluaciones',
+        accion: 'Calificación Automática',
+        nivel: 'success',
+        entidad: 'Entrega',
+        entidad_id: finalizedMeta.submissionId,
+        descripcion: `La plataforma corrigió y calculó automáticamente la nota (${finalizedMeta.grade}) de "${finalizedMeta.examTitle}"`,
+        detalles: {
+          origen: source || 'entrega_digital',
+          assignmentId: finalizedMeta.assignmentId,
+          examId: finalizedMeta.examId,
+          curso: finalizedMeta.courseName,
+          gradingMode: finalizedMeta.gradingMode,
+          nota: finalizedMeta.grade,
+          porcentaje: finalizedMeta.percent,
+          correctas: finalizedMeta.correctCount,
+          simceScore: finalizedMeta.simceScore,
+        },
+      });
+    }
+  }
+
+  return resultSubmission;
 }
 
 /**
@@ -75,7 +151,10 @@ async function finalizeSubmission(submissionId, { auto = false } = {}) {
 async function sweepExpiredSubmissions() {
   const open = await prisma.submission.findMany({
     where: { status: 'IN_PROGRESS' },
-    include: { assignment: { include: { exam: true } } },
+    include: {
+      student: { select: { rut: true, name: true, role: true } },
+      assignment: { include: { exam: true } },
+    },
   });
   const now = Date.now();
   let count = 0;
@@ -83,7 +162,11 @@ async function sweepExpiredSubmissions() {
     const deadline = getDeadline(s, s.assignment, s.assignment.exam).getTime();
     // 30 s de gracia para el último autoguardado
     if (now > deadline + 30 * 1000) {
-      await finalizeSubmission(s.id, { auto: true });
+      await finalizeSubmission(s.id, {
+        auto: true,
+        actor: s.student || { rut: s.studentRut, name: s.studentRut, role: 'STUDENT' },
+        source: 'sweeper_cron',
+      });
       count += 1;
     }
   }
@@ -113,7 +196,7 @@ function formatCourseLabel(course) {
  * Mantiene intactos los intentos IN_PROGRESS y conserva el puntaje manual asignado a
  * preguntas abiertas (WRITTEN / ORAL).
  */
-async function recalculateExamSubmissions(examId, { assignmentId = null, actor = null, note = null } = {}) {
+async function recalculateExamSubmissions(examId, { assignmentId = null, actor = null, note = null, req = null } = {}) {
   const parsedExamId = parseInt(examId, 10);
   if (isNaN(parsedExamId)) {
     return { badRequest: true, error: 'ID de evaluación inválido' };
@@ -346,6 +429,32 @@ async function recalculateExamSubmissions(examId, { assignmentId = null, actor =
   const evaluatedCount = submissions.length;
   const avgGradeBefore = roundAvg(totalPrevGrade, totalPrevGradeCount);
   const avgGradeAfter = roundAvg(totalNextGrade, totalNextGradeCount);
+
+  auditoria.registrarAuditoria({
+    req,
+    esPlataforma: true,
+    desencadenadoPor: actor || req?.user || null,
+    modulo: 'Evaluaciones',
+    accion: 'Recálculo Automático de Notas',
+    nivel: updatedSubmissionsCount > 0 ? 'warning' : 'info',
+    entidad: 'Evaluación',
+    entidad_id: exam.id,
+    descripcion: `La plataforma recalculó ${evaluatedCount} entrega(s) de "${exam.title}" con la pauta actual (${updatedSubmissionsCount} actualizada(s))`,
+    detalles: {
+      examId: exam.id,
+      examTitle: exam.title,
+      assignmentId: parsedAssignmentId,
+      gradingMode,
+      passThresholdPercent,
+      evaluatedCount,
+      updatedCount: updatedSubmissionsCount,
+      updatedGradesCount,
+      answersUpdatedCount: answerUpdates.length,
+      avgGradeBefore,
+      avgGradeAfter,
+      nota: cleanNote,
+    },
+  });
 
   return {
     message:

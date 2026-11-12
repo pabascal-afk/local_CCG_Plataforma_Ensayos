@@ -11,6 +11,7 @@ const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet'
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
 const { computeResults, normalizeGradingMode, normalizePassThreshold } = require('../services/grading');
 const { recalculateExamSubmissions } = require('../services/submissions');
+const auditoria = require('../services/auditoria');
 
 const router = express.Router();
 const uploadMemory = multer({ storage: multer.memoryStorage() });
@@ -746,6 +747,16 @@ router.get('/dashboard/multiannual/export.xlsx', async (req, res, next) => {
       });
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Reportes',
+      accion: 'Exportar Reporte',
+      nivel: 'info',
+      entidad: 'Reporte Multianual',
+      descripcion: 'Exportó reporte de trayectoria multianual (.xlsx)',
+      detalles: { level, subject, examType, courseLetter, submissionsCount: allSubmissions.length }
+    });
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="Trayectoria_Multianual_CCG.xlsx"');
     await workbook.xlsx.write(res);
@@ -913,6 +924,16 @@ router.get('/dashboard/export.xlsx', async (req, res, next) => {
         });
       });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Reportes',
+      accion: 'Exportar Reporte',
+      nivel: 'info',
+      entidad: 'Reporte Global Dirección',
+      descripcion: 'Exportó reporte institucional global SIMCE (.xlsx)',
+      detalles: { submissionsCount: allSubmissions.length }
+    });
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="Reporte_Directivo_SIMCE.xlsx"');
     await workbook.xlsx.write(res);
@@ -970,6 +991,16 @@ router.get('/courses/export.xlsx', async (req, res, next) => {
       });
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Cursos',
+      accion: 'Exportar',
+      nivel: 'info',
+      entidad: 'Listado de Cursos',
+      descripcion: `Exportó listado de cursos (${courses.length} registros)`,
+      detalles: { count: courses.length }
+    });
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="Cursos_CCG.xlsx"');
     await workbook.xlsx.write(res);
@@ -991,6 +1022,16 @@ router.post('/courses', checkAdmin, async (req, res, next) => {
     const course = await prisma.course.create({
       data: { year: yearNum, level: level.toUpperCase(), letter: letter.toUpperCase() },
     });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Cursos',
+      accion: 'Crear',
+      nivel: 'success',
+      entidad: 'Curso',
+      entidad_id: course.id,
+      descripcion: `Creó curso ${course.level} ${course.letter} (${course.year})`,
+      detalles: course
+    });
     res.json(course);
   } catch (error) {
     if (error.code === 'P2002') return res.status(400).json({ error: 'El curso ya existe' });
@@ -1006,6 +1047,16 @@ router.put('/courses/:id', checkAdmin, async (req, res, next) => {
       where: { id: courseId },
       data: { year, level, letter },
     });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Cursos',
+      accion: 'Modificar',
+      nivel: 'info',
+      entidad: 'Curso',
+      entidad_id: course.id,
+      descripcion: `Modificó curso #${course.id} (${course.level} ${course.letter} · ${course.year})`,
+      detalles: course
+    });
     res.json(course);
   } catch (error) {
     next(error);
@@ -1016,6 +1067,15 @@ router.delete('/courses/:id', checkAdmin, async (req, res, next) => {
   try {
     const courseId = parseInt(req.params.id, 10);
     await prisma.course.delete({ where: { id: courseId } });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Cursos',
+      accion: 'Eliminar',
+      nivel: 'danger',
+      entidad: 'Curso',
+      entidad_id: courseId,
+      descripcion: `Eliminó curso #${courseId}`
+    });
     res.json({ message: 'Curso eliminado' });
   } catch (error) {
     next(error);
@@ -1075,6 +1135,16 @@ router.post('/courses/import', checkAdmin, uploadMemory.single('file'), async (r
         results.errors.push({ row: rowNumber, error: err.message });
       }
     }
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Cursos',
+      accion: 'Importar Masivo',
+      nivel: 'success',
+      entidad: 'Cursos',
+      descripcion: `Importó masivamente ${results.imported} curso(s) desde ${req.file.originalname || 'archivo'}`,
+      detalles: { imported: results.imported, errorsCount: results.errors.length, filename: req.file.originalname }
+    });
 
     return res.json(results);
   } catch (error) {
@@ -1141,6 +1211,16 @@ router.get('/users/export.xlsx', async (req, res, next) => {
       });
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Usuarios',
+      accion: 'Exportar',
+      nivel: 'info',
+      entidad: 'Listado de Usuarios',
+      descripcion: `Exportó nómina de usuarios (${users.length} registros)`,
+      detalles: { count: users.length }
+    });
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="Usuarios_CCG.xlsx"');
     await workbook.xlsx.write(res);
@@ -1171,6 +1251,16 @@ router.post('/users', checkAdmin, async (req, res, next) => {
       },
       select: { rut: true, name: true, role: true, courseId: true }
     });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Usuarios',
+      accion: 'Crear',
+      nivel: 'success',
+      entidad: 'Usuario',
+      entidad_id: user.rut,
+      descripcion: `Creó usuario ${user.name} (${user.rut}) con rol ${user.role}`,
+      detalles: { rut: user.rut, name: user.name, role: user.role, courseId: user.courseId }
+    });
     res.json(user);
   } catch (error) {
     if (error.code === 'P2002') return res.status(400).json({ error: 'El RUT ya existe' });
@@ -1196,6 +1286,16 @@ router.put('/users/:rut', checkAdmin, async (req, res, next) => {
       data,
       select: { rut: true, name: true, role: true, courseId: true }
     });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Usuarios',
+      accion: resetPassword ? 'Resetear Contraseña' : 'Modificar',
+      nivel: resetPassword ? 'warning' : 'info',
+      entidad: 'Usuario',
+      entidad_id: user.rut,
+      descripcion: `${resetPassword ? 'Modificó y reseteó contraseña de' : 'Modificó usuario'} ${user.name} (${user.rut})`,
+      detalles: { rut: user.rut, name: user.name, role: user.role, courseId: user.courseId, resetPassword: Boolean(resetPassword) }
+    });
     res.json(user);
   } catch (error) {
     next(error);
@@ -1206,6 +1306,15 @@ router.delete('/users/:rut', checkAdmin, async (req, res, next) => {
   try {
     let targetRut = normalizeRut(req.params.rut);
     await prisma.user.delete({ where: { rut: targetRut } });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Usuarios',
+      accion: 'Eliminar',
+      nivel: 'danger',
+      entidad: 'Usuario',
+      entidad_id: targetRut,
+      descripcion: `Eliminó al usuario ${targetRut}`
+    });
     res.json({ message: 'Usuario eliminado' });
   } catch (error) {
     next(error);
@@ -1475,6 +1584,16 @@ router.post('/users/import', checkAdmin, (req, res, next) => {
       });
     }
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Usuarios',
+      accion: 'Importar Masivo',
+      nivel: 'success',
+      entidad: 'Usuarios',
+      descripcion: `Importó masivamente ${results.imported} usuario(s) desde ${req.file.originalname || 'archivo'}`,
+      detalles: { imported: results.imported, errorsCount: results.errors.length, filename: req.file.originalname }
+    });
+
     return res.json(results);
   } catch (error) {
     console.error('[Error interno al procesar usuarios]:', error);
@@ -1503,6 +1622,15 @@ router.post('/users/bulk-password', checkAdmin, async (req, res, next) => {
         passwordHash: hash,
         mustChangePassword: !!mustChangePassword
       }
+    });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Usuarios',
+      accion: 'Cambio Masivo de Contraseña',
+      nivel: 'warning',
+      entidad: 'Estudiantes por Curso',
+      descripcion: `Actualizó contraseña masiva para ${updated.count} estudiante(s) en ${ids.length} curso(s)`,
+      detalles: { courseIds: ids, updatedCount: updated.count, mustChangePassword: Boolean(mustChangePassword) }
     });
     res.json({ message: `Contraseña actualizada para ${updated.count} estudiantes`, count: updated.count });
   } catch (error) {
@@ -1880,6 +2008,16 @@ router.get('/exams/export.xlsx', async (req, res, next) => {
       });
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Exportar',
+      nivel: 'info',
+      entidad: 'Catálogo de Evaluaciones',
+      descripcion: `Exportó catálogo de evaluaciones (.xlsx, ${exams.length} registros)`,
+      detalles: { count: exams.length }
+    });
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="Catalogo_Ensayos_SIMCE.xlsx"');
     await workbook.xlsx.write(res);
@@ -2146,6 +2284,27 @@ router.post('/exams', checkAdmin, (req, res, next) => {
       createdTotalMaxPoints += pts;
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Crear',
+      nivel: 'success',
+      entidad: 'Evaluación',
+      entidad_id: exam.id,
+      descripcion: `Creó evaluación "${exam.title}" (${exam.subject} · ${exam.level}, ${exam.questions?.length || qCount} preguntas)`,
+      detalles: {
+        examId: exam.id,
+        title: exam.title,
+        subject: exam.subject,
+        level: exam.level,
+        examType: exam.examType,
+        gradingMode: normalizeGradingMode(exam.gradingMode),
+        passThresholdPercent: gradingConfig.passThresholdPercent,
+        questionCount: (exam.questions || []).length,
+        totalMaxPoints: Math.round(createdTotalMaxPoints * 10) / 10
+      }
+    });
+
     return res.json({
       ...exam,
       questions: undefined,
@@ -2285,6 +2444,24 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
     });
 
     const finalThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Modificar',
+      nivel: 'info',
+      entidad: 'Evaluación',
+      entidad_id: exam.id,
+      descripcion: `Actualizó configuración de evaluación #${exam.id} ("${exam.title}")`,
+      detalles: {
+        examId: exam.id,
+        title: exam.title,
+        gradingMode: normalizeGradingMode(exam.gradingMode),
+        passThresholdPercent: Math.round(finalThreshold * 1000) / 10,
+        questionCount: updatedQuestions.length,
+        totalMaxPoints: Math.round(updatedTotalMaxPoints * 10) / 10,
+        updatedFields: Object.keys(updateData)
+      }
+    });
     res.json({
       ...exam,
       gradingMode: normalizeGradingMode(exam.gradingMode),
@@ -2359,6 +2536,17 @@ const handleReplaceExamPdf = async (req, res, next) => {
       }
     }
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Reemplazar PDF',
+      nivel: 'info',
+      entidad: 'Evaluación',
+      entidad_id: updatedExam.id,
+      descripcion: `Reemplazó archivo PDF de evaluación #${updatedExam.id} ("${updatedExam.title}")`,
+      detalles: { examId: updatedExam.id, newPdf: req.file.filename, oldPdf: oldPdfPath || null }
+    });
+
     return res.json({
       message: 'Archivo PDF asignado correctamente',
       exam: {
@@ -2420,6 +2608,19 @@ const handleStartMockSession = async (req, res, next) => {
     });
 
     const pdfInfo = getPdfFileInfo(exam.pdfPath);
+
+    if (req.method === 'POST') {
+      auditoria.registrarAuditoria({
+        req,
+        modulo: 'Evaluaciones',
+        accion: 'Iniciar Mocktest',
+        nivel: 'info',
+        entidad: 'Evaluación',
+        entidad_id: exam.id,
+        descripcion: `Inició sesión simulada (Mocktest) para evaluación #${exam.id} ("${exam.title}")`,
+        detalles: { examId: exam.id, title: exam.title }
+      });
+    }
 
     return res.json({
       submissionId: 0,
@@ -2542,6 +2743,24 @@ router.post('/exams/:id/mock-grade', async (req, res, next) => {
       };
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Simular Calificación Mocktest',
+      nivel: 'info',
+      entidad: 'Evaluación',
+      entidad_id: exam.id,
+      descripcion: `Ejecutó simulación de calificación en Mocktest para evaluación #${exam.id} ("${exam.title}")`,
+      detalles: {
+        examId: exam.id,
+        gradingMode: results.gradingMode,
+        passThresholdPercent: Math.round(results.passThreshold * 1000) / 10,
+        grade: results.grade,
+        simceScore: results.simceScore,
+        percent: results.percent
+      }
+    });
+
     return res.json({
       isMock: true,
       exam: {
@@ -2605,6 +2824,16 @@ router.delete('/exams/:id', checkAdmin, async (req, res, next) => {
       }
     }
     await prisma.exam.delete({ where: { id } });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Eliminar',
+      nivel: 'danger',
+      entidad: 'Evaluación',
+      entidad_id: id,
+      descripcion: `Eliminó evaluación #${id}${exam ? ` ("${exam.title}")` : ''}`,
+      detalles: exam ? { examId: id, title: exam.title, subject: exam.subject, level: exam.level } : { examId: id }
+    });
     res.json({ message: 'Ensayo eliminado' });
   } catch (error) {
     next(error);
@@ -2733,6 +2962,17 @@ router.post('/exams/:id/audios', checkAdmin, (req, res, next) => {
       createdClips.push({ ...created, questionNumbers: qNums });
     }
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Audios',
+      accion: 'Subir Audio',
+      nivel: 'success',
+      entidad: 'Evaluación',
+      entidad_id: examId,
+      descripcion: `Guardó ${createdClips.length} fragmento(s) de audio en evaluación #${examId} ("${exam.title}")`,
+      detalles: { examId, clipsCount: createdClips.length, clipIds: createdClips.map(c => c.id), audioPath }
+    });
+
     res.json({ message: `${createdClips.length} fragmento(s) guardado(s)`, clips: createdClips });
   } catch (error) {
     next(error);
@@ -2768,6 +3008,17 @@ router.put('/exams/:id/audios/:clipId', checkAdmin, async (req, res, next) => {
       }
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Audios',
+      accion: 'Modificar Audio',
+      nivel: 'info',
+      entidad: 'AudioClip',
+      entidad_id: clipId,
+      descripcion: `Actualizó fragmento de audio #${clipId} ("${updated.title}") de evaluación #${examId}`,
+      detalles: { examId, clipId, title: updated.title, startSec: updated.startSec, endSec: updated.endSec, maxPlays: updated.maxPlays, questionNumbers: qNums }
+    });
+
     res.json({ ...updated, questionNumbers: qNums });
   } catch (error) {
     next(error);
@@ -2800,6 +3051,17 @@ router.delete('/exams/:id/audios/:clipId', checkAdmin, async (req, res, next) =>
         }
       }
     }
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Audios',
+      accion: 'Eliminar Audio',
+      nivel: 'danger',
+      entidad: 'AudioClip',
+      entidad_id: clipId,
+      descripcion: `Eliminó fragmento de audio #${clipId} ("${clip.title}") de evaluación #${examId}`,
+      detalles: { examId, clipId, title: clip.title, audioPath }
+    });
 
     res.json({ message: 'Fragmento eliminado correctamente' });
   } catch (error) {
@@ -2956,9 +3218,27 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       updatedTotalMaxPoints += pts;
     });
 
+    const totalResolvedQuestions = !isNaN(totalQ) && totalQ > 0 ? totalQ : allQNums.size;
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Modificar Pauta',
+      nivel: 'warning',
+      entidad: 'Evaluación',
+      entidad_id: examId,
+      descripcion: `Actualizó pauta de respuestas y puntajes de evaluación #${examId} ("${existingExam.title}", ${totalResolvedQuestions} preguntas)`,
+      detalles: {
+        examId,
+        totalQuestions: totalResolvedQuestions,
+        gradingMode: finalGradingMode,
+        passThresholdPercent: Math.round(finalPassThreshold * 1000) / 10,
+        totalMaxPoints: Math.round(updatedTotalMaxPoints * 10) / 10
+      }
+    });
+
     res.json({
       message: 'Pauta actualizada',
-      totalQuestions: !isNaN(totalQ) && totalQ > 0 ? totalQ : allQNums.size,
+      totalQuestions: totalResolvedQuestions,
       gradingMode: finalGradingMode,
       passThreshold: finalPassThreshold,
       passThresholdPercent: Math.round(finalPassThreshold * 1000) / 10,
@@ -3072,6 +3352,17 @@ router.post('/exams/:id/import-questions', checkAdmin, uploadMemory.single('file
       }
     }
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Importar Pauta',
+      nivel: 'success',
+      entidad: 'Evaluación',
+      entidad_id: examId,
+      descripcion: `Importó pauta de ${results.imported} pregunta(s) para evaluación #${examId} (${exam.title})`,
+      detalles: { examId, imported: results.imported, errorsCount: results.errors.length, filename: req.file.originalname }
+    });
+
     return res.json(results);
   } catch (error) {
     console.error('[Error importando pauta]:', error);
@@ -3101,7 +3392,8 @@ router.post('/exams/:id/recalculate-grades', checkAdmin, async (req, res, next) 
     const result = await recalculateExamSubmissions(examId, {
       assignmentId,
       actor: req.user,
-      note
+      note,
+      req
     });
 
     if (result.badRequest) {
@@ -3110,6 +3402,22 @@ router.post('/exams/:id/recalculate-grades', checkAdmin, async (req, res, next) 
     if (result.notFound) {
       return res.status(404).json({ error: result.error || 'Evaluación o ensayo no encontrado' });
     }
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Recalcular Notas',
+      nivel: 'warning',
+      entidad: 'Evaluación',
+      entidad_id: examId,
+      descripcion: `Solicitó recálculo de notas con la pauta actual para evaluación #${examId} (${result.recalculatedCount || 0} entrega(s))`,
+      detalles: {
+        examId,
+        assignmentId: assignmentId || null,
+        recalculatedCount: result.recalculatedCount || 0,
+        note: note || null
+      }
+    });
 
     return res.json(result);
   } catch (error) {
@@ -3123,7 +3431,7 @@ router.post('/exams/:id/recalculate-grades', checkAdmin, async (req, res, next) 
 // =======================
 router.get('/bell-blocks', async (req, res, next) => {
   try {
-    const blocks = await getSchoolBellBlocks();
+    const blocks = await getSchoolBellBlocks(req);
     res.json(blocks);
   } catch (error) {
     next(error);
@@ -3150,6 +3458,16 @@ router.post('/bell-blocks', checkAdmin, async (req, res, next) => {
         isActive: true
       }
     });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Horarios',
+      accion: 'Crear Bloque',
+      nivel: 'success',
+      entidad: 'Bloque Horario',
+      entidad_id: block.id,
+      descripcion: `Creó bloque horario "${block.name}" (${block.startTime} - ${block.endTime})`,
+      detalles: block
+    });
     res.json(block);
   } catch (error) {
     next(error);
@@ -3170,6 +3488,16 @@ router.put('/bell-blocks/:id', checkAdmin, async (req, res, next) => {
         isActive: isActive !== undefined ? Boolean(isActive) : undefined,
       }
     });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Horarios',
+      accion: 'Modificar Bloque',
+      nivel: 'info',
+      entidad: 'Bloque Horario',
+      entidad_id: block.id,
+      descripcion: `Actualizó bloque horario #${block.id} ("${block.name}")`,
+      detalles: block
+    });
     res.json(block);
   } catch (error) {
     next(error);
@@ -3180,6 +3508,15 @@ router.delete('/bell-blocks/:id', checkAdmin, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     await prisma.schoolBellBlock.delete({ where: { id } });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Horarios',
+      accion: 'Eliminar Bloque',
+      nivel: 'danger',
+      entidad: 'Bloque Horario',
+      entidad_id: id,
+      descripcion: `Eliminó bloque horario #${id}`
+    });
     res.json({ message: 'Bloque horario eliminado' });
   } catch (error) {
     next(error);
@@ -3247,6 +3584,17 @@ router.patch('/assignments/:id/dynamic-password', checkAdmin, async (req, res, n
       }
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Cambiar PIN Dinámico',
+      nivel: 'info',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `${assignment.dynamicPasswordActive ? 'Activó' : 'Desactivó'} PIN dinámico de asignación #${id}`,
+      detalles: { assignmentId: id, dynamicPasswordActive: assignment.dynamicPasswordActive, hasPassword: Boolean(assignment.dynamicPassword) }
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -3296,6 +3644,16 @@ router.get('/assignments/export.xlsx', async (req, res, next) => {
         students: a.course?._count?.students || 0,
         released: a.released ? 'SÍ' : 'NO'
       });
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Exportar',
+      nivel: 'info',
+      entidad: 'Listado de Asignaciones',
+      descripcion: `Exportó listado de asignaciones (.xlsx, ${assignments.length} registros)`,
+      detalles: { count: assignments.length }
     });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -3401,6 +3759,24 @@ router.post('/assignments', checkAdmin, async (req, res, next) => {
       note: req.body.note || null
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Crear',
+      nivel: 'success',
+      entidad: 'Asignación',
+      entidad_id: assignment.id,
+      descripcion: `Asignó evaluación "${assignment.exam?.title || parsedExamId}" a ${assignment.course ? `${assignment.course.level} ${assignment.course.letter}` : `curso #${parsedCourseId}`}`,
+      detalles: {
+        assignmentId: assignment.id,
+        examId: parsedExamId,
+        courseId: parsedCourseId,
+        applicationMode: assignment.applicationMode,
+        opensAt: opensDate,
+        closesAt: closesDate
+      }
+    });
+
     res.json(assignment);
   } catch (error) {
     if (error.code === 'P2002') {
@@ -3440,6 +3816,17 @@ router.patch('/assignments/:id/mode', checkAdmin, async (req, res, next) => {
       details: { newMode: mode }
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Cambiar Modalidad',
+      nivel: 'info',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Cambió modalidad de aplicación a ${mode} en asignación #${id}`,
+      detalles: { assignmentId: id, applicationMode: mode }
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -3465,6 +3852,17 @@ router.patch('/assignments/:id/teacher', checkAdmin, async (req, res, next) => {
         assignedTeacherRut: assignedTeacherRut || null,
         assignedTeacherName: assignment.assignedTeacher?.name || null
       }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Reasignar Docente',
+      nivel: 'info',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Reasignó docente responsable de asignación #${id} a ${assignment.assignedTeacher?.name || assignedTeacherRut || 'Sin asignar'}`,
+      detalles: { assignmentId: id, assignedTeacherRut: assignedTeacherRut || null, assignedTeacherName: assignment.assignedTeacher?.name || null }
     });
 
     res.json(assignment);
@@ -3495,6 +3893,17 @@ router.put('/assignments/:id', checkAdmin, async (req, res, next) => {
       details: { opensAt, closesAt }
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Modificar Fechas',
+      nivel: 'info',
+      entidad: 'Asignación',
+      entidad_id: assignment.id,
+      descripcion: `Actualizó fechas de asignación #${assignment.id} ("${assignment.exam?.title || ''}")`,
+      detalles: { assignmentId: assignment.id, opensAt, closesAt }
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -3503,7 +3912,17 @@ router.put('/assignments/:id', checkAdmin, async (req, res, next) => {
 
 router.delete('/assignments/:id', checkAdmin, async (req, res, next) => {
   try {
-    await prisma.examAssignment.delete({ where: { id: parseInt(req.params.id, 10) } });
+    const id = parseInt(req.params.id, 10);
+    await prisma.examAssignment.delete({ where: { id } });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Eliminar',
+      nivel: 'danger',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Eliminó asignación #${id}`
+    });
     res.json({ message: 'Asignación eliminada' });
   } catch (error) {
     next(error);
@@ -3548,6 +3967,17 @@ router.patch('/assignments/:id/reschedule', checkAdmin, async (req, res, next) =
       note: reason || null
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Reprogramar',
+      nivel: 'warning',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Reprogramó asignación #${id} ("${assignment.exam?.title || ''}")`,
+      detalles: { assignmentId: id, previousOpensAt: current.opensAt, previousClosesAt: current.closesAt, opensAt, closesAt, reason: reason || null }
+    });
+
     res.json(assignment);
   } catch (error) {
     next(error);
@@ -3580,6 +4010,17 @@ router.patch('/assignments/:id/cancel', checkAdmin, async (req, res, next) => {
         reason: reason || 'Cancelado por administración'
       },
       note: reason || 'Cancelado por administración'
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Cancelar',
+      nivel: 'warning',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Canceló asignación #${id} ("${assignment.exam?.title || ''}")`,
+      detalles: { assignmentId: id, reason: reason || 'Cancelado por administración' }
     });
 
     res.json(assignment);
@@ -3692,6 +4133,17 @@ router.post('/assignments/:id/reactivate', checkAdmin, async (req, res, next) =>
       note: req.body.note || null
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Reactivar Curso',
+      nivel: 'warning',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Reactivó asignación #${id} para el curso (alcance: ${scope}, afectados: ${affectedSubmissions})`,
+      detalles: { assignmentId: id, scope, resetMode, newClosesAt, affectedSubmissions }
+    });
+
     res.json({
       message: 'Evaluación reactivada con éxito',
       assignment: updated,
@@ -3793,6 +4245,17 @@ router.post('/assignments/:id/students/:rut/reactivate', checkAdmin, async (req,
       note: note || null
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Reactivar Estudiante',
+      nivel: 'warning',
+      entidad: 'Entrega',
+      entidad_id: `${id}:${student.rut}`,
+      descripcion: `Reactivó plazo individual para ${student.name} (${student.rut}) en asignación #${id}`,
+      detalles: { assignmentId: id, studentRut: student.rut, studentName: student.name, deadline: newDeadline, resetMode }
+    });
+
     res.json({
       message: `Evaluación reactivada exitosamente para ${student.name}`,
       student: { rut: student.rut, name: student.name },
@@ -3861,6 +4324,17 @@ router.patch('/assignments/:id/quick-extend', checkAdmin, async (req, res, next)
         extendedStudentsCount: activeExtendedSubs.length
       },
       note: note || `Prórroga rápida de +${mins} minutos`
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Extender Plazo',
+      nivel: 'info',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Extendió en +${mins} minutos el plazo de asignación #${id}`,
+      detalles: { assignmentId: id, minutesAdded: mins, newClosesAt, extendedStudentsCount: activeExtendedSubs.length }
     });
 
     res.json({
@@ -3969,6 +4443,17 @@ router.post('/assignments/:id/students/bulk-reactivate', checkAdmin, async (req,
       note: note || `Reactivación masiva para ${affectedStudents.length} estudiantes`
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Reactivación Masiva',
+      nivel: 'warning',
+      entidad: 'Asignación',
+      entidad_id: id,
+      descripcion: `Reactivó plazo masivo para ${affectedStudents.length} estudiante(s) en asignación #${id}`,
+      detalles: { assignmentId: id, affectedCount: affectedStudents.length, deadline: newDeadline, resetMode }
+    });
+
     res.json({
       message: `Se reactivó el plazo exitosamente para ${affectedStudents.length} estudiantes`,
       affectedCount: affectedStudents.length,
@@ -4024,6 +4509,16 @@ router.post('/milestones', checkAdmin, async (req, res, next) => {
       },
       include: { course: true }
     });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Calendario e Hitos',
+      accion: 'Crear Hito',
+      nivel: 'success',
+      entidad: 'Hito SIMCE',
+      entidad_id: milestone.id,
+      descripcion: `Creó hito "${milestone.title}" (${milestone.level} · ${milestone.year})`,
+      detalles: { milestoneId: milestone.id, title: milestone.title, date: milestone.date, level: milestone.level, year: milestone.year, courseId: milestone.courseId }
+    });
     res.json(milestone);
   } catch (error) {
     next(error);
@@ -4046,6 +4541,16 @@ router.put('/milestones/:id', checkAdmin, async (req, res, next) => {
       },
       include: { course: true }
     });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Calendario e Hitos',
+      accion: 'Modificar Hito',
+      nivel: 'info',
+      entidad: 'Hito SIMCE',
+      entidad_id: milestone.id,
+      descripcion: `Modificó hito #${milestone.id} ("${milestone.title}")`,
+      detalles: { milestoneId: milestone.id, title: milestone.title, date: milestone.date, level: milestone.level, year: milestone.year }
+    });
     res.json(milestone);
   } catch (error) {
     next(error);
@@ -4056,6 +4561,15 @@ router.delete('/milestones/:id', checkAdmin, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     await prisma.simceMilestone.delete({ where: { id } });
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Calendario e Hitos',
+      accion: 'Eliminar Hito',
+      nivel: 'danger',
+      entidad: 'Hito SIMCE',
+      entidad_id: id,
+      descripcion: `Eliminó hito SIMCE #${id}`
+    });
     res.json({ message: 'Hito SIMCE eliminado' });
   } catch (error) {
     next(error);
@@ -4154,6 +4668,16 @@ router.post('/assignments/import', checkAdmin, uploadMemory.single('file'), asyn
         results.errors.push({ row: rowNumber, error: err.message });
       }
     }
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Asignaciones',
+      accion: 'Importar Masivo',
+      nivel: 'success',
+      entidad: 'Asignaciones',
+      descripcion: `Importó masivamente ${results.imported} asignación(es) desde ${req.file.originalname || 'archivo'}`,
+      detalles: { imported: results.imported, errorsCount: results.errors.length, filename: req.file.originalname }
+    });
 
     return res.json(results);
   } catch (error) {
@@ -4277,6 +4801,30 @@ router.patch('/remedial-proposals/:id/approve', checkAdmin, async (req, res, nex
       }
     });
 
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Remediales',
+      accion: 'Aprobar Remedial',
+      nivel: 'success',
+      entidad: 'Propuesta Remedial',
+      entidad_id: id,
+      descripcion: `Aprobó propuesta remedial #${id} para curso ${proposal.course ? `${proposal.course.level} ${proposal.course.letter}` : proposal.courseId}`,
+      detalles: { proposalId: id, createdAssignmentId: newAssignment.id, remedialExamId: targetExamId, reviewNotes: reviewNotes || null }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      esPlataforma: true,
+      desencadenadoPor: req.user,
+      modulo: 'Remediales',
+      accion: 'Auto-Programar Remedial',
+      nivel: 'success',
+      entidad: 'Asignación',
+      entidad_id: newAssignment.id,
+      descripcion: `La plataforma programó automáticamente la evaluación remedial #${newAssignment.id} ("${newAssignment.exam?.title || targetExamId}") tras aprobación de ${req.user?.name || req.user?.rut}`,
+      detalles: { proposalId: id, assignmentId: newAssignment.id, examId: targetExamId, courseId: proposal.courseId, opensAt: finalOpensAt, closesAt: finalClosesAt }
+    });
+
     res.json({
       message: 'Propuesta remedial aprobada con éxito. Asignación programada en el curso.',
       proposal: updatedProposal,
@@ -4300,6 +4848,17 @@ router.patch('/remedial-proposals/:id/reject', checkAdmin, async (req, res, next
         reviewedByRut: req.user.rut,
         reviewNotes: reason || 'Rechazada por UTP'
       }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Remediales',
+      accion: 'Rechazar Remedial',
+      nivel: 'danger',
+      entidad: 'Propuesta Remedial',
+      entidad_id: id,
+      descripcion: `Rechazó propuesta remedial #${id}`,
+      detalles: { proposalId: id, reason: reason || 'Rechazada por UTP' }
     });
 
     res.json({ message: 'Propuesta rechazada', proposal: updated });

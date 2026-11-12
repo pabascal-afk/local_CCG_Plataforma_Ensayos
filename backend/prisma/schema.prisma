@@ -235,4 +235,35 @@ model SchoolBellBlock {
   createdAt  DateTime @default(now())
 }
 
+model AuditLog {
+  id                     Int      @id @default(autoincrement())
+  fechaHora              DateTime @default(now()) @map("fecha_hora")
+  origenActor            String   @default("USUARIO") @map("origen_actor") // USUARIO | PLATAFORMA
+  usuarioId              String?  @map("usuario_id")
+  usuarioEmail           String   @map("usuario_email")
+  usuarioNombre          String?  @map("usuario_nombre")
+  usuarioRol             String?  @map("usuario_rol")
+  desencadenadoPorId     String?  @map("desencadenado_por_id")
+  desencadenadoPorNombre String?  @map("desencadenado_por_nombre")
+  desencadenadoPorRol    String?  @map("desencadenado_por_rol")
+  modulo                 String
+  accion                 String
+  nivel                  String   @default("info") // info | success | warning | danger
+  entidad                String?
+  entidadId              String?  @map("entidad_id")
+  descripcion            String
+  detalles               String?
+  ip                     String?
+  userAgent              String?  @map("user_agent")
+
+  @@index([fechaHora], map: "idx_audit_fecha")
+  @@index([modulo], map: "idx_audit_modulo")
+  @@index([usuarioEmail], map: "idx_audit_usuario")
+  @@index([accion], map: "idx_audit_accion")
+  @@index([nivel], map: "idx_audit_nivel")
+  @@index([origenActor], map: "idx_audit_origen")
+  @@index([desencadenadoPorId], map: "idx_audit_desencadenado")
+  @@map("logs_auditoria")
+}
+
 
