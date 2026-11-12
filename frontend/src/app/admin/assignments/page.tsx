@@ -8,7 +8,7 @@ import {
   Timer, KeyRound, RotateCcw, Sparkles, CheckCircle2, ChevronRight,
   ShieldCheck, AlertTriangle, Layers, Copy, Inbox, CheckSquare,
   XCircle, MessageSquare, AlertCircle, Bot, ChevronDown, ChevronUp,
-  Printer, ScanLine, FileText, Monitor, Laptop, Zap, History
+  Printer, ScanLine, FileText, Monitor, Laptop, Zap, History, Pencil
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -56,6 +56,7 @@ type Assignment = {
   dynamicPasswordActive?: boolean;
   status?: string;
   applicationMode?: "DIGITAL" | "PRINTED";
+  submissionsCount?: number;
   Exam: Exam; 
   Course: Course; 
   assignedTeacher?: { rut: string; name: string } | null;
@@ -229,6 +230,10 @@ export default function AssignmentsDashboard() {
     newMode: "DIGITAL" | "PRINTED";
   } | null>(null);
   const [isChangingMode, setIsChangingMode] = useState(false);
+  const [courseChangeTarget, setCourseChangeTarget] = useState<Assignment | null>(null);
+  const [editAssignmentCourseId, setEditAssignmentCourseId] = useState<string>("");
+  const [isChangingCourse, setIsChangingCourse] = useState(false);
+  const [courseChangeError, setCourseChangeError] = useState("");
 
   // Estados para Drag and Drop reactivo y robusto
   const [draggedExam, setDraggedExam] = useState<Exam | null>(null);
@@ -961,6 +966,41 @@ export default function AssignmentsDashboard() {
       loadData();
     } catch (err: any) {
       alert(err.message);
+    }
+  };
+
+  const handleOpenCourseChangeModal = (assignment: Assignment) => {
+    setCourseChangeTarget(assignment);
+    setEditAssignmentCourseId(String(assignment.courseId));
+    setCourseChangeError("");
+  };
+
+  const handleConfirmCourseChange = async () => {
+    if (!courseChangeTarget) return;
+    const parsedCourseId = parseInt(editAssignmentCourseId, 10);
+    if (isNaN(parsedCourseId) || parsedCourseId <= 0) {
+      setCourseChangeError("Debes seleccionar un curso destino válido.");
+      return;
+    }
+    setCourseChangeError("");
+    setIsChangingCourse(true);
+    try {
+      const updated = await apiFetch<Assignment>(
+        `/admin/assignments/${courseChangeTarget.id}/course`,
+        {
+          method: "PATCH",
+          body: { courseId: parsedCourseId },
+        }
+      );
+      setAssignments((prev) =>
+        prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
+      );
+      setCourseChangeTarget(null);
+      await loadData();
+    } catch (err: any) {
+      setCourseChangeError(err.message || "Error al cambiar el curso de la asignación");
+    } finally {
+      setIsChangingCourse(false);
     }
   };
 
@@ -2101,9 +2141,21 @@ export default function AssignmentsDashboard() {
                           >
                             <div className="flex justify-between items-start mb-1.5">
                               <div className="flex gap-1.5 items-center flex-wrap">
-                                <span className="bg-slate-100 text-slate-800 font-black px-2 py-0.5 rounded text-[10px] uppercase">
-                                  {formatCourseName(a.Course)}
-                                </span>
+                                {user.role === "ADMIN" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenCourseChangeModal(a)}
+                                    className="bg-slate-100 hover:bg-indigo-100 border border-slate-200 hover:border-indigo-300 text-slate-800 hover:text-indigo-900 font-black px-2 py-0.5 rounded text-[10px] uppercase inline-flex items-center gap-1 transition cursor-pointer"
+                                    title="Clic para cambiar el curso al que está vinculada esta asignación"
+                                  >
+                                    <span>{formatCourseName(a.Course)}</span>
+                                    <Pencil className="w-2.5 h-2.5 text-indigo-600 shrink-0" />
+                                  </button>
+                                ) : (
+                                  <span className="bg-slate-100 text-slate-800 font-black px-2 py-0.5 rounded text-[10px] uppercase">
+                                    {formatCourseName(a.Course)}
+                                  </span>
+                                )}
                                 {a.Exam?.examType && getExamTypeBadge(a.Exam.examType)}
                                 {a.applicationMode === "PRINTED" ? (
                                   <button
@@ -2366,9 +2418,24 @@ export default function AssignmentsDashboard() {
                             className="p-3.5 flex items-center justify-between gap-3 cursor-pointer select-none bg-white hover:bg-slate-50/70 transition-colors"
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
-                              <span className="bg-slate-900 text-white font-black text-xs px-2.5 py-1 rounded-lg shrink-0">
-                                {formatCourseName(a.Course)}
-                              </span>
+                              {user.role === "ADMIN" ? (
+                                <button
+                                  type="button"
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    handleOpenCourseChangeModal(a);
+                                  }}
+                                  className="bg-slate-900 hover:bg-indigo-700 text-white font-black text-xs px-2.5 py-1 rounded-lg shrink-0 inline-flex items-center gap-1.5 transition cursor-pointer"
+                                  title="Clic para cambiar el curso al que está vinculada esta asignación"
+                                >
+                                  <span>{formatCourseName(a.Course)}</span>
+                                  <Pencil className="w-3 h-3 opacity-80 shrink-0" />
+                                </button>
+                              ) : (
+                                <span className="bg-slate-900 text-white font-black text-xs px-2.5 py-1 rounded-lg shrink-0">
+                                  {formatCourseName(a.Course)}
+                                </span>
+                              )}
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
                                   <h3 className="font-black text-sm text-gray-900 truncate">
@@ -3312,6 +3379,101 @@ export default function AssignmentsDashboard() {
                         <span>Confirmar Cambio</span>
                       </>
                     )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Pop-up para Cambiar Curso Vinculado */}
+          {courseChangeTarget && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-indigo-100 text-indigo-700">
+                      <Layers className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-gray-900 text-base">
+                        Cambiar Curso Vinculado
+                      </h3>
+                      <p className="text-xs text-gray-500 line-clamp-1">
+                        {courseChangeTarget.Exam?.title}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !isChangingCourse && setCourseChangeTarget(null)}
+                    disabled={isChangingCourse}
+                    className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-gray-700 space-y-1">
+                  <div>
+                    Curso actual: <strong>{formatCourseName(courseChangeTarget.Course)} ({courseChangeTarget.Course?.year})</strong>
+                  </div>
+                  {(courseChangeTarget.submissionsCount ?? 0) > 0 && (
+                    <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 font-semibold">
+                      Esta asignación ya tiene {courseChangeTarget.submissionsCount} intento(s)/entrega(s) registrado(s). Por integridad académica no puede moverse a otro curso; crea una nueva asignación para el curso correcto.
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                    Nuevo Curso Destino ({selectedYear})
+                  </label>
+                  <select
+                    value={editAssignmentCourseId}
+                    onChange={(e) => setEditAssignmentCourseId(e.target.value)}
+                    disabled={isChangingCourse || (courseChangeTarget.submissionsCount ?? 0) > 0}
+                    className="w-full text-xs font-bold text-gray-800 bg-white border border-gray-300 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100"
+                  >
+                    {courses.map((c) => {
+                      const alreadyLinkedElsewhere = assignments.some(
+                        (other) =>
+                          other.id !== courseChangeTarget.id &&
+                          other.examId === courseChangeTarget.examId &&
+                          other.courseId === c.id
+                      );
+                      return (
+                        <option key={c.id} value={String(c.id)} disabled={alreadyLinkedElsewhere}>
+                          {formatCourseName(c)} ({c.year})
+                          {alreadyLinkedElsewhere ? " — Ya asignado" : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {courseChangeError && (
+                  <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+                    {courseChangeError}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setCourseChangeTarget(null)}
+                    disabled={isChangingCourse}
+                    className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmCourseChange}
+                    disabled={isChangingCourse || (courseChangeTarget.submissionsCount ?? 0) > 0}
+                    className="px-5 py-2 rounded-xl text-white text-xs font-black bg-indigo-600 hover:bg-indigo-700 shadow-sm transition disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{isChangingCourse ? "Guardando..." : "Guardar Curso"}</span>
                   </button>
                 </div>
               </div>

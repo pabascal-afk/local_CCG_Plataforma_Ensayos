@@ -9,7 +9,7 @@ import {
   ArrowLeft, Trash2, FileText, Plus, Download, Search, 
   Filter, BookOpen, Layers, Clock, X, ChevronRight, Check, Sparkles,
   ChevronDown, ChevronUp, Headphones, FileSpreadsheet, Eye, RefreshCw, Play,
-  Calculator, CheckCircle2, SlidersHorizontal, Tag, Pencil
+  Calculator, CheckCircle2, SlidersHorizontal, Tag, Pencil, GraduationCap
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal from "@/components/AiPromptModal";
@@ -18,10 +18,11 @@ import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdf
 import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
 import PointsInput from "@/components/PointsInput";
 import { useIsPruebas } from "@/lib/useIsPruebas";
-import { getExamTypeMeta, getExamTypeOptions } from "@/lib/examTypes";
+import { EXAM_LEVEL_OPTIONS, formatLevelName, getExamTypeMeta, getExamTypeOptions } from "@/lib/examTypes";
 
 type CourseItem = {
   id: number;
+  assignmentId?: number;
   level: string;
   letter: string;
   year: number;
@@ -139,6 +140,18 @@ export default function ExamsPage() {
   const [savingTag, setSavingTag] = useState<boolean>(false);
   const [tagError, setTagError] = useState<string>("");
   const [tagFeedback, setTagFeedback] = useState<string>("");
+  const [levelExam, setLevelExam] = useState<Exam | null>(null);
+  const [editExamLevel, setEditExamLevel] = useState<string>("4B");
+  const [savingLevel, setSavingLevel] = useState<boolean>(false);
+  const [levelError, setLevelError] = useState<string>("");
+  const [courseReassignTarget, setCourseReassignTarget] = useState<{
+    exam: Exam;
+    assignmentId: number;
+    currentCourse: CourseItem;
+  } | null>(null);
+  const [editCourseId, setEditCourseId] = useState<string>("");
+  const [savingCourseReassign, setSavingCourseReassign] = useState<boolean>(false);
+  const [courseReassignError, setCourseReassignError] = useState<string>("");
   const isPruebas = useIsPruebas();
   const examTypeOptions = useMemo(() => getExamTypeOptions(isPruebas), [isPruebas]);
 
@@ -476,8 +489,76 @@ export default function ExamsPage() {
     );
   };
 
-  const formatLevelName = (lvl: string) => {
-    return (lvl || "").replace("B", "° Básico").replace("M", "° Medio");
+  const handleOpenLevelModal = (examItem: Exam) => {
+    setLevelExam(examItem);
+    setEditExamLevel((examItem.level || "4B").toUpperCase());
+    setLevelError("");
+  };
+
+  const handleSaveExamLevel = async () => {
+    if (!levelExam) return;
+    setLevelError("");
+    setSavingLevel(true);
+    try {
+      const updated = await apiFetch<any>(`/admin/exams/${levelExam.id}`, {
+        method: "PUT",
+        body: { level: editExamLevel },
+      });
+      const resolvedLevel = (updated?.level || editExamLevel).toUpperCase();
+      setExams((prev) =>
+        prev.map((item) => (item.id === levelExam.id ? { ...item, level: resolvedLevel } : item))
+      );
+      setTagFeedback(`Nivel / Curso actualizado en "${levelExam.title}" → ${formatLevelName(resolvedLevel)}.`);
+      setLevelExam(null);
+    } catch (err: any) {
+      setLevelError(err.message || "Error al actualizar el nivel de la evaluación");
+    } finally {
+      setSavingLevel(false);
+    }
+  };
+
+  const handleOpenCourseReassignModal = (examItem: Exam, courseItem: CourseItem) => {
+    if (!courseItem.assignmentId) return;
+    setCourseReassignTarget({
+      exam: examItem,
+      assignmentId: courseItem.assignmentId,
+      currentCourse: courseItem,
+    });
+    setEditCourseId(String(courseItem.id));
+    setCourseReassignError("");
+  };
+
+  const handleSaveCourseReassign = async () => {
+    if (!courseReassignTarget) return;
+    const parsedCourseId = parseInt(editCourseId, 10);
+    if (isNaN(parsedCourseId) || parsedCourseId <= 0) {
+      setCourseReassignError("Debes seleccionar un curso válido.");
+      return;
+    }
+    setCourseReassignError("");
+    setSavingCourseReassign(true);
+    try {
+      const updated = await apiFetch<any>(
+        `/admin/assignments/${courseReassignTarget.assignmentId}/course`,
+        {
+          method: "PATCH",
+          body: { courseId: parsedCourseId },
+        }
+      );
+      const nextCourse = updated?.Course;
+      const nextCourseLabel = nextCourse
+        ? `${formatLevelName(nextCourse.level)} ${nextCourse.letter} (${nextCourse.year})`
+        : "nuevo curso";
+      setTagFeedback(
+        `Asignación de "${courseReassignTarget.exam.title}" movida a ${nextCourseLabel}.`
+      );
+      setCourseReassignTarget(null);
+      await loadData();
+    } catch (err: any) {
+      setCourseReassignError(err.message || "Error al cambiar el curso vinculado");
+    } finally {
+      setSavingCourseReassign(false);
+    }
   };
 
   return (
@@ -847,9 +928,24 @@ export default function ExamsPage() {
                             <span className="bg-slate-900 text-white font-black text-xs px-2 py-0.5 rounded-md">
                               #{e.orderNumber}
                             </span>
-                            <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs px-2 py-0.5 rounded-md">
-                              {formatLevelName(e.level)}
-                            </span>
+                            {user.role === "ADMIN" ? (
+                              <button
+                                type="button"
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  handleOpenLevelModal(e);
+                                }}
+                                className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 font-bold text-xs px-2 py-0.5 rounded-md inline-flex items-center gap-1 transition cursor-pointer"
+                                title={`Nivel / curso actual: ${formatLevelName(e.level)}. Clic para cambiar`}
+                              >
+                                <span>{formatLevelName(e.level)}</span>
+                                <Pencil className="w-2.5 h-2.5 opacity-75 shrink-0" />
+                              </button>
+                            ) : (
+                              <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs px-2 py-0.5 rounded-md">
+                                {formatLevelName(e.level)}
+                              </span>
+                            )}
                             {getExamTypeBadge(
                               e.examType,
                               user.role === "ADMIN"
@@ -1105,12 +1201,28 @@ export default function ExamsPage() {
                             {e.assignedCourses && e.assignedCourses.length > 0 ? (
                               <div className="flex flex-wrap gap-1.5">
                                 {e.assignedCourses.map(ac => (
-                                  <span 
-                                    key={ac.id} 
-                                    className="text-[11px] font-bold bg-white border border-slate-200 text-slate-800 px-2.5 py-0.5 rounded-md shadow-2xs"
-                                  >
-                                    {formatLevelName(ac.level)} {ac.letter} <span className="text-gray-400 font-normal">({ac.year})</span>
-                                  </span>
+                                  user.role === "ADMIN" && ac.assignmentId ? (
+                                    <button
+                                      key={`${ac.id}-${ac.assignmentId}`}
+                                      type="button"
+                                      onClick={() => handleOpenCourseReassignModal(e, ac)}
+                                      className="text-[11px] font-bold bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-slate-800 px-2.5 py-0.5 rounded-md shadow-2xs inline-flex items-center gap-1 transition cursor-pointer"
+                                      title="Clic para cambiar el curso al que está vinculada esta asignación"
+                                    >
+                                      <span>
+                                        {formatLevelName(ac.level)} {ac.letter}{" "}
+                                        <span className="text-gray-400 font-normal">({ac.year})</span>
+                                      </span>
+                                      <Pencil className="w-2.5 h-2.5 text-indigo-600 shrink-0" />
+                                    </button>
+                                  ) : (
+                                    <span 
+                                      key={ac.id} 
+                                      className="text-[11px] font-bold bg-white border border-slate-200 text-slate-800 px-2.5 py-0.5 rounded-md shadow-2xs"
+                                    >
+                                      {formatLevelName(ac.level)} {ac.letter} <span className="text-gray-400 font-normal">({ac.year})</span>
+                                    </span>
+                                  )
                                 ))}
                               </div>
                             ) : (
@@ -1647,6 +1759,174 @@ export default function ExamsPage() {
                   >
                     <Check className="w-3.5 h-3.5" />
                     <span>{savingTag ? "Guardando..." : "Guardar Tag"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Modal Cambiar Nivel / Curso del Instrumento */}
+          {levelExam && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-indigo-600 text-white">
+                      <GraduationCap className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm">Cambiar Nivel / Curso Base</h3>
+                      <p className="text-[11px] text-slate-500 line-clamp-1">{levelExam.title}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !savingLevel && setLevelExam(null)}
+                    disabled={savingLevel}
+                    className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-3">
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Define el nivel educativo principal asociado a esta evaluación en el catálogo y filtros.
+                  </p>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                      Nivel Educativo
+                    </label>
+                    <select
+                      value={editExamLevel}
+                      onChange={(e) => setEditExamLevel(e.target.value)}
+                      disabled={savingLevel}
+                      className="w-full text-xs font-bold text-slate-800 bg-white border border-slate-300 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {EXAM_LEVEL_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {levelError && (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+                      {levelError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setLevelExam(null)}
+                    disabled={savingLevel}
+                    className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveExamLevel}
+                    disabled={savingLevel}
+                    className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{savingLevel ? "Guardando..." : "Guardar Nivel"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Reasignar Curso Vinculado de una Asignación */}
+          {courseReassignTarget && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-blue-600 text-white">
+                      <Layers className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm">Cambiar Curso Vinculado</h3>
+                      <p className="text-[11px] text-slate-500 line-clamp-1">
+                        {courseReassignTarget.exam.title}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !savingCourseReassign && setCourseReassignTarget(null)}
+                    disabled={savingCourseReassign}
+                    className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-3 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">
+                    Curso actual:{" "}
+                    <strong>
+                      {formatLevelName(courseReassignTarget.currentCourse.level)}{" "}
+                      {courseReassignTarget.currentCourse.letter} (
+                      {courseReassignTarget.currentCourse.year})
+                    </strong>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                      Nuevo Curso Destino ({selectedYear})
+                    </label>
+                    <select
+                      value={editCourseId}
+                      onChange={(e) => setEditCourseId(e.target.value)}
+                      disabled={savingCourseReassign}
+                      className="w-full text-xs font-bold text-slate-800 bg-white border border-slate-300 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {courses.map((c) => {
+                        const alreadyLinkedElsewhere = (courseReassignTarget.exam.assignedCourses || []).some(
+                          (ac) => ac.id === c.id && ac.assignmentId !== courseReassignTarget.assignmentId
+                        );
+                        return (
+                          <option key={c.id} value={String(c.id)} disabled={alreadyLinkedElsewhere}>
+                            {formatLevelName(c.level)} {c.letter} ({c.year})
+                            {alreadyLinkedElsewhere ? " — Ya asignado" : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Si la asignación aún no tiene entregas ni intentos de estudiantes, se moverá conservando su fecha, horario, docente y configuración.
+                  </p>
+
+                  {courseReassignError && (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 font-semibold">
+                      {courseReassignError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCourseReassignTarget(null)}
+                    disabled={savingCourseReassign}
+                    className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveCourseReassign}
+                    disabled={savingCourseReassign}
+                    className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{savingCourseReassign ? "Guardando..." : "Cambiar Curso"}</span>
                   </button>
                 </div>
               </div>

@@ -18,15 +18,38 @@ describe('Edición de Tipo / Tag de Evaluación (examType)', () => {
   const studentToken = signToken({ rut: studentRut, role: 'STUDENT', name: 'Estudiante Tag Test' });
 
   let exam;
+  let courseA;
+  let courseB;
+  let assignment;
+  let assignmentB;
+  let studentUser;
 
   beforeAll(async () => {
     await auditoria.inicializarTablaAuditoria();
     const hash = await bcrypt.hash('tagtest1234', 10);
 
+    courseA = await prisma.course.upsert({
+      where: { level_letter_year: { level: '6B', letter: 'Y', year: 2096 } },
+      update: {},
+      create: { level: '6B', letter: 'Y', year: 2096 },
+    });
+
+    courseB = await prisma.course.upsert({
+      where: { level_letter_year: { level: '7B', letter: 'Z', year: 2096 } },
+      update: {},
+      create: { level: '7B', letter: 'Z', year: 2096 },
+    });
+
     await prisma.user.upsert({
       where: { rut: adminRut },
       update: { name: 'Admin Tag Test', role: 'ADMIN', isActive: true, passwordHash: hash },
       create: { rut: adminRut, name: 'Admin Tag Test', role: 'ADMIN', passwordHash: hash, mustChangePassword: false, isActive: true },
+    });
+
+    studentUser = await prisma.user.upsert({
+      where: { rut: studentRut },
+      update: { name: 'Estudiante Tag Test', role: 'STUDENT', courseId: courseB.id, isActive: true, passwordHash: hash },
+      create: { rut: studentRut, name: 'Estudiante Tag Test', role: 'STUDENT', courseId: courseB.id, passwordHash: hash, mustChangePassword: false, isActive: true },
     });
 
     exam = await prisma.exam.create({
@@ -49,6 +72,17 @@ describe('Edición de Tipo / Tag de Evaluación (examType)', () => {
       },
       include: { questions: true },
     });
+
+    const now = new Date();
+    assignment = await prisma.examAssignment.create({
+      data: {
+        examId: exam.id,
+        courseId: courseA.id,
+        opensAt: new Date(now.getTime() - 3600 * 1000),
+        closesAt: new Date(now.getTime() + 3600 * 1000),
+        status: 'ONGOING',
+      },
+    });
   });
 
   afterAll(async () => {
@@ -58,13 +92,17 @@ describe('Edición de Tipo / Tag de Evaluación (examType)', () => {
         OR: [
           { usuarioId: adminRut },
           { entidadId: exam ? String(exam.id) : undefined },
+          { entidadId: assignment ? String(assignment.id) : undefined },
+          { entidadId: assignmentB ? String(assignmentB.id) : undefined },
         ].filter((c) => c.usuarioId || c.entidadId),
       },
     }).catch(() => {});
     if (exam) {
       await prisma.exam.delete({ where: { id: exam.id } }).catch(() => {});
     }
-    await prisma.user.deleteMany({ where: { rut: adminRut } }).catch(() => {});
+    await prisma.user.deleteMany({ where: { rut: { in: [adminRut, studentRut] } } }).catch(() => {});
+    if (courseA) await prisma.course.delete({ where: { id: courseA.id } }).catch(() => {});
+    if (courseB) await prisma.course.delete({ where: { id: courseB.id } }).catch(() => {});
     await prisma.$disconnect();
   });
 
@@ -180,5 +218,110 @@ describe('Edición de Tipo / Tag de Evaluación (examType)', () => {
     const detalles = JSON.parse(latest.detalles);
     expect(detalles.previousExamType).toBe('DIAGNOSTICO');
     expect(detalles.newExamType).toBe('REMEDIAL');
+  });
+
+  test('7. PUT /api/admin/exams/:id y answer-key permiten cambiar level (nivel/curso base) y rechazan inválidos', async () => {
+    const badRes = await request(app)
+      .put(`/api/admin/exams/${exam.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ level: '9Z' });
+    expect(badRes.statusCode).toBe(400);
+
+    const res = await request(app)
+      .put(`/api/admin/exams/${exam.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ level: ' 2m ' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.level).toBe('2M');
+
+    const akRes = await request(app)
+      .put(`/api/admin/exams/${exam.id}/answer-key`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        totalQuestions: 2,
+        level: '8B',
+        answerKey: { '1': 'C', '2': 'DESARROLLO' },
+        questionTypesKeys: { '1': 'MULTIPLE_CHOICE', '2': 'WRITTEN' },
+        maxPointsKeys: { '1': 2, '2': 5 },
+      });
+    expect(akRes.statusCode).toBe(200);
+    expect(akRes.body.level).toBe('8B');
+  });
+
+  test('8. PATCH /api/admin/assignments/:id/course mueve una asignación sin entregas a otro curso y registra auditoría', async () => {
+    const catRes = await request(app)
+      .get('/api/admin/exams')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(catRes.statusCode).toBe(200);
+    const catalogExam = catRes.body.find((e) => e.id === exam.id);
+    expect(catalogExam.assignedCourses[0].assignmentId).toBe(assignment.id);
+
+    const moveRes = await request(app)
+      .patch(`/api/admin/assignments/${assignment.id}/course`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ courseId: courseB.id });
+
+    expect(moveRes.statusCode).toBe(200);
+    expect(moveRes.body.courseId).toBe(courseB.id);
+    expect(moveRes.body.Course.id).toBe(courseB.id);
+
+    const actionLogs = await prisma.assignmentActionLog.findMany({
+      where: { assignmentId: assignment.id, action: 'COURSE_CHANGED' },
+    });
+    expect(actionLogs.length).toBeGreaterThan(0);
+
+    await auditoria.flushAuditoria();
+    const globalLogs = await prisma.auditLog.findMany({
+      where: { entidadId: String(assignment.id), accion: 'Cambiar Curso' },
+    });
+    expect(globalLogs.length).toBeGreaterThan(0);
+  });
+
+  test('9. PATCH /api/admin/assignments/:id/course rechaza mover a un curso donde la evaluación ya está asignada (409)', async () => {
+    const now = new Date();
+    assignmentB = await prisma.examAssignment.create({
+      data: {
+        examId: exam.id,
+        courseId: courseA.id,
+        opensAt: new Date(now.getTime() - 3600 * 1000),
+        closesAt: new Date(now.getTime() + 3600 * 1000),
+        status: 'ONGOING',
+      },
+    });
+
+    const conflictRes = await request(app)
+      .patch(`/api/admin/assignments/${assignmentB.id}/course`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ courseId: courseB.id });
+
+    expect(conflictRes.statusCode).toBe(409);
+  });
+
+  test('10. PATCH /api/admin/assignments/:id/course impide cambiar curso si ya existen intentos/entregas de estudiantes (409)', async () => {
+    await prisma.submission.create({
+      data: {
+        studentRut: studentUser.rut,
+        assignmentId: assignment.id,
+        status: 'IN_PROGRESS',
+      },
+    });
+
+    const blockedRes = await request(app)
+      .patch(`/api/admin/assignments/${assignment.id}/course`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ courseId: courseA.id });
+
+    expect(blockedRes.statusCode).toBe(409);
+    expect(blockedRes.body.error).toContain('intento');
+  });
+
+  test('11. RBAC: DIRECTOR, TEACHER y STUDENT reciben 403 al cambiar curso de una asignación', async () => {
+    for (const tok of [directorToken, teacherToken, studentToken]) {
+      const res = await request(app)
+        .patch(`/api/admin/assignments/${assignment.id}/course`)
+        .set('Authorization', `Bearer ${tok}`)
+        .send({ courseId: courseA.id });
+      expect(res.statusCode).toBe(403);
+    }
   });
 });

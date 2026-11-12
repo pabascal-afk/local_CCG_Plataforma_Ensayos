@@ -105,3 +105,22 @@ export function getExamTypeOptions(isPruebas: boolean): ExamTypeOption[] {
 
   return orderedKeys.map((key) => getExamTypeMeta(key, isPruebas));
 }
+
+export const EXAM_LEVEL_OPTIONS = [
+  { value: "1B", label: "1° Básico" },
+  { value: "2B", label: "2° Básico" },
+  { value: "3B", label: "3° Básico" },
+  { value: "4B", label: "4° Básico" },
+  { value: "5B", label: "5° Básico" },
+  { value: "6B", label: "6° Básico" },
+  { value: "7B", label: "7° Básico" },
+  { value: "8B", label: "8° Básico" },
+  { value: "1M", label: "1° Medio" },
+  { value: "2M", label: "2° Medio" },
+  { value: "3M", label: "3° Medio" },
+  { value: "4M", label: "4° Medio" },
+] as const;
+
+export function formatLevelName(lvl: string | undefined | null): string {
+  return (lvl || "").replace("B", "° Básico").replace("M", "° Medio");
+}
