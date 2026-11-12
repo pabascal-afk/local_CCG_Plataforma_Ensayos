@@ -9,7 +9,7 @@ import {
   ArrowLeft, Trash2, FileText, Plus, Download, Search, 
   Filter, BookOpen, Layers, Clock, X, ChevronRight, Check, Sparkles,
   ChevronDown, ChevronUp, Headphones, FileSpreadsheet, Eye, RefreshCw, Play,
-  Calculator, CheckCircle2, SlidersHorizontal
+  Calculator, CheckCircle2, SlidersHorizontal, Tag, Pencil
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import AiPromptModal from "@/components/AiPromptModal";
@@ -18,6 +18,7 @@ import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdf
 import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
 import PointsInput from "@/components/PointsInput";
 import { useIsPruebas } from "@/lib/useIsPruebas";
+import { getExamTypeMeta, getExamTypeOptions } from "@/lib/examTypes";
 
 type CourseItem = {
   id: number;
@@ -133,7 +134,13 @@ export default function ExamsPage() {
   const [recalcAfterGradingSave, setRecalcAfterGradingSave] = useState<boolean>(true);
   const [savingGrading, setSavingGrading] = useState<boolean>(false);
   const [gradingError, setGradingError] = useState<string>("");
+  const [tagExam, setTagExam] = useState<Exam | null>(null);
+  const [editExamType, setEditExamType] = useState<string>("ENSAYO");
+  const [savingTag, setSavingTag] = useState<boolean>(false);
+  const [tagError, setTagError] = useState<string>("");
+  const [tagFeedback, setTagFeedback] = useState<string>("");
   const isPruebas = useIsPruebas();
+  const examTypeOptions = useMemo(() => getExamTypeOptions(isPruebas), [isPruebas]);
 
   const modalTotalPoints = useMemo(() => {
     if (!gradingExam) return 0;
@@ -418,13 +425,55 @@ export default function ExamsPage() {
     }
   };
 
-  const getExamTypeBadge = (type: string) => {
-    const t = (type || "ENSAYO").toUpperCase();
-    if (t === "QUIZ") return <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">QUIZ</span>;
-    if (t === "REMEDIAL") return <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">REMEDIAL</span>;
-    if (t === "DIAGNOSTICO") return <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">DIAGNÓSTICO</span>;
-    if (t === "ENSAYO_LARGO") return <span className="bg-rose-100 text-rose-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">EXTENDIDO</span>;
-    return <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider">{isPruebas ? "PRUEBA" : "ENSAYO"}</span>;
+  const handleOpenTagModal = (examItem: Exam) => {
+    setTagExam(examItem);
+    setEditExamType((examItem.examType || "ENSAYO").toUpperCase());
+    setTagError("");
+  };
+
+  const handleSaveExamType = async () => {
+    if (!tagExam) return;
+    setTagError("");
+    setSavingTag(true);
+    try {
+      const updated = await apiFetch<any>(`/admin/exams/${tagExam.id}`, {
+        method: "PUT",
+        body: { examType: editExamType },
+      });
+      const resolvedType = (updated?.examType || editExamType).toUpperCase();
+      setExams((prev) =>
+        prev.map((item) => (item.id === tagExam.id ? { ...item, examType: resolvedType } : item))
+      );
+      const nextMeta = getExamTypeMeta(resolvedType, isPruebas);
+      setTagFeedback(`Tipo actualizado en "${tagExam.title}" → ${nextMeta.label} (${nextMeta.badgeLabel}).`);
+      setTagExam(null);
+    } catch (err: any) {
+      setTagError(err.message || "Error al actualizar el tipo (tag) de la evaluación");
+    } finally {
+      setSavingTag(false);
+    }
+  };
+
+  const getExamTypeBadge = (type: string, onEditClick?: (ev: React.MouseEvent) => void) => {
+    const meta = getExamTypeMeta(type, isPruebas);
+    if (onEditClick) {
+      return (
+        <button
+          type="button"
+          onClick={onEditClick}
+          className={`${meta.badgeClassName} border px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider inline-flex items-center gap-1 hover:brightness-95 transition cursor-pointer`}
+          title={`Tipo actual: ${meta.label}. Clic para cambiar el tag`}
+        >
+          <span>{meta.badgeLabel}</span>
+          <Pencil className="w-2.5 h-2.5 opacity-75 shrink-0" />
+        </button>
+      );
+    }
+    return (
+      <span className={`${meta.badgeClassName} border px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider`}>
+        {meta.badgeLabel}
+      </span>
+    );
   };
 
   const formatLevelName = (lvl: string) => {
@@ -507,6 +556,23 @@ export default function ExamsPage() {
             </div>
 
             {error && <div className="bg-red-50 text-red-700 border border-red-200 p-4 rounded-xl text-xs font-semibold">{error}</div>}
+
+            {tagFeedback && (
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs flex items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-semibold">{tagFeedback}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTagFeedback("")}
+                  className="text-emerald-700 hover:text-emerald-900 p-1 rounded-md hover:bg-emerald-100 cursor-pointer"
+                  aria-label="Cerrar aviso de cambio de tag"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
             {recalcFeedback && (
               <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs flex items-start justify-between gap-3 shadow-xs">
@@ -597,11 +663,11 @@ export default function ExamsPage() {
                     className="w-full text-xs bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-2 font-semibold text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="TODOS">Todos los tipos</option>
-                    <option value="ENSAYO">{isPruebas ? "Prueba / Evaluación Sumativa" : "Ensayo SIMCE"}</option>
-                    <option value="QUIZ">Quiz / Evaluación Rápida</option>
-                    <option value="REMEDIAL">Remedial</option>
-                    <option value="DIAGNOSTICO">Diagnóstico</option>
-                    <option value="ENSAYO_LARGO">{isPruebas ? "Evaluación Extendida / Semestral" : "Ensayo Largo"}</option>
+                    {examTypeOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -784,7 +850,15 @@ export default function ExamsPage() {
                             <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs px-2 py-0.5 rounded-md">
                               {formatLevelName(e.level)}
                             </span>
-                            {getExamTypeBadge(e.examType)}
+                            {getExamTypeBadge(
+                              e.examType,
+                              user.role === "ADMIN"
+                                ? (ev) => {
+                                    ev.stopPropagation();
+                                    handleOpenTagModal(e);
+                                  }
+                                : undefined
+                            )}
                             <span
                               className={`px-2 py-0.5 rounded text-[10px] font-extrabold border ${
                                 e.gradingMode === "NORMAL"
@@ -1067,6 +1141,17 @@ export default function ExamsPage() {
                                 >
                                   <Headphones className="w-3.5 h-3.5 text-purple-600" />
                                   <span>Audios</span>
+                                </button>
+                              )}
+                              {user.role === "ADMIN" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenTagModal(e)}
+                                  className="inline-flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold text-xs px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                                  title="Cambiar tipo / tag de esta evaluación (Ensayo, Quiz, Diagnóstico, Remedial, Unidad...)"
+                                >
+                                  <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Tipo / Tag</span>
                                 </button>
                               )}
                               {user.role === "ADMIN" && (
@@ -1460,6 +1545,108 @@ export default function ExamsPage() {
                         ? "Guardar y recalcular notas"
                         : "Guardar configuración"}
                     </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Cambiar Tipo / Tag de Evaluación */}
+          {tagExam && (
+            <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-2xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-emerald-600 text-white">
+                      <Tag className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm">Cambiar Tipo de Evaluación (Tag)</h3>
+                      <p className="text-[11px] text-slate-500 line-clamp-1">{tagExam.title}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !savingTag && setTagExam(null)}
+                    disabled={savingTag}
+                    className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-3 overflow-y-auto">
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Selecciona el tag correcto para esta evaluación. No se modificarán sus preguntas, pauta, PDF ni entregas registradas.
+                  </p>
+
+                  <div className="space-y-2">
+                    {examTypeOptions.map((opt) => {
+                      const isSelected = editExamType === opt.value;
+                      const isCurrent = (tagExam.examType || "ENSAYO").toUpperCase() === opt.value;
+                      return (
+                        <label
+                          key={opt.value}
+                          className={`flex items-start gap-3 p-3 rounded-xl border transition cursor-pointer ${
+                            isSelected
+                              ? "border-blue-500 bg-blue-50/70 ring-2 ring-blue-100"
+                              : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/60"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="examTypeSelector"
+                            value={opt.value}
+                            checked={isSelected}
+                            onChange={() => setEditExamType(opt.value)}
+                            disabled={savingTag}
+                            className="mt-1 accent-blue-600 cursor-pointer"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={`${opt.badgeClassName} border px-2 py-0.5 rounded text-[10px] font-extrabold tracking-wider`}
+                              >
+                                {opt.badgeLabel}
+                              </span>
+                              <span className="text-xs font-bold text-slate-900">{opt.label}</span>
+                              {isCurrent && (
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                                  Actual
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-1">{opt.description}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {tagError && (
+                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+                      {tagError}
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setTagExam(null)}
+                    disabled={savingTag}
+                    className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveExamType}
+                    disabled={savingTag}
+                    className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{savingTag ? "Guardando..." : "Guardar Tag"}</span>
                   </button>
                 </div>
               </div>

@@ -9,7 +9,7 @@ import {
   ArrowLeft, Save, Upload, Check, FileSpreadsheet, Download, 
   Sparkles, Headphones, Scissors, Plus, Trash2, ListPlus,
   FileText, Eye, RefreshCw, Play, Calculator, AlertTriangle, CheckCircle2, X,
-  SlidersHorizontal
+  SlidersHorizontal, Tag
 } from "lucide-react";
 import { getToken } from "@/lib/session";
 import AiPromptModal from "@/components/AiPromptModal";
@@ -18,6 +18,7 @@ import ReplaceExamPdfModal, { formatFileSize } from "@/components/ReplaceExamPdf
 import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelector";
 import PointsInput from "@/components/PointsInput";
 import { useIsPruebas } from "@/lib/useIsPruebas";
+import { getExamTypeMeta, getExamTypeOptions } from "@/lib/examTypes";
 
 function formatPointDisplay(val: number) {
   const rounded = Math.round(val * 10) / 10;
@@ -42,6 +43,9 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
   const [axesKeys, setAxesKeys] = useState<Record<string, string>>({});
   const [learningObjectivesKeys, setLearningObjectivesKeys] = useState<Record<string, string>>({});
   const [difficultiesKeys, setDifficultiesKeys] = useState<Record<string, string>>({});
+  const [examType, setExamType] = useState<string>("ENSAYO");
+  const [savingExamType, setSavingExamType] = useState<boolean>(false);
+  const [tagSavedNotice, setTagSavedNotice] = useState<string>("");
   const [gradingMode, setGradingMode] = useState<GradingMode>("SIMCE");
   const [passThresholdPercent, setPassThresholdPercent] = useState<number>(60);
 
@@ -97,6 +101,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     setAxesKeys(e.axesKeys || {});
     setLearningObjectivesKeys(e.learningObjectivesKeys || {});
     setDifficultiesKeys(dk);
+    setExamType((e.examType || "ENSAYO").toUpperCase());
     setGradingMode(e.gradingMode === "NORMAL" ? "NORMAL" : "SIMCE");
     const rawPct =
       e.passThresholdPercent !== undefined && e.passThresholdPercent !== null
@@ -255,6 +260,31 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
     });
   };
 
+  const handleExamTypeChange = async (nextType: string) => {
+    const normalized = (nextType || "ENSAYO").toUpperCase();
+    const prevType = examType;
+    if (normalized === prevType) return;
+    setExamType(normalized);
+    setSavingExamType(true);
+    setTagSavedNotice("");
+    try {
+      const updated = await apiFetch<any>(`/admin/exams/${id}`, {
+        method: "PUT",
+        body: { examType: normalized }
+      });
+      const resolved = (updated?.examType || normalized).toUpperCase();
+      setExamType(resolved);
+      setExam((prev: any) => (prev ? { ...prev, examType: resolved } : prev));
+      const meta = getExamTypeMeta(resolved, isPruebas);
+      setTagSavedNotice(`Tag actualizado a ${meta.badgeLabel}`);
+    } catch (err: any) {
+      setExamType(prevType);
+      alert(err.message || "Error al cambiar el tipo de evaluación");
+    } finally {
+      setSavingExamType(false);
+    }
+  };
+
   const saveAnswerKey = async (silent: boolean = false): Promise<boolean> => {
     setSaving(true);
     const safePct = Math.min(99, Math.max(1, Math.round(Number(passThresholdPercent) || 60)));
@@ -264,6 +294,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
         method: "PUT",
         body: {
           totalQuestions: maxQ,
+          examType,
           gradingMode,
           passThresholdPercent: safePct,
           passThreshold: normalizedPassThreshold,
@@ -279,6 +310,7 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
       setExam((prev: any) => ({
         ...prev,
         questionCount: maxQ,
+        examType,
         gradingMode,
         passThreshold: normalizedPassThreshold,
         passThresholdPercent: safePct,
@@ -479,6 +511,45 @@ export default function AnswerKeyPage({ params }: { params: { id: string } }) {
                       ? `Prueba normal · Exig. ${passThresholdPercent}%`
                       : `Escala SIMCE TRI · ${passThresholdPercent}%`}
                   </span>
+                  {(() => {
+                    const currentTagMeta = getExamTypeMeta(examType, isPruebas);
+                    const tagOptions = getExamTypeOptions(isPruebas);
+                    if (user.role === "ADMIN") {
+                      return (
+                        <div className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-full pl-2.5 pr-1.5 py-0.5">
+                          <Tag className="w-3 h-3 text-emerald-600 shrink-0" />
+                          <span className="text-[11px] font-bold text-slate-500">Tipo / Tag:</span>
+                          <select
+                            value={examType}
+                            disabled={savingExamType}
+                            onChange={(e) => handleExamTypeChange(e.target.value)}
+                            aria-label="Cambiar tipo o tag de la evaluación"
+                            className={`text-xs font-extrabold rounded-full px-2 py-0.5 border outline-none cursor-pointer disabled:opacity-60 ${currentTagMeta.badgeClassName}`}
+                          >
+                            {tagOptions.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          {savingExamType && (
+                            <span className="text-[10px] font-semibold text-blue-600 pr-1">Guardando...</span>
+                          )}
+                          {!savingExamType && tagSavedNotice && (
+                            <span className="text-[10px] font-bold text-emerald-700 pr-1 flex items-center gap-0.5">
+                              <Check className="w-3 h-3" /> {tagSavedNotice}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    }
+                    return (
+                      <span className={`${currentTagMeta.badgeClassName} border font-extrabold text-xs px-2.5 py-0.5 rounded-full inline-flex items-center gap-1`}>
+                        <Tag className="w-3 h-3" />
+                        {currentTagMeta.badgeLabel}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Agrega preguntas, edita las respuestas correctas o configura preguntas abiertas y audios.

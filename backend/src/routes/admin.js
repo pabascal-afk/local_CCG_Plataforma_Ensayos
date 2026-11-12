@@ -36,6 +36,28 @@ function normalizeRole(val) {
   return 'STUDENT';
 }
 
+const ALLOWED_EXAM_TYPES = [
+  'ENSAYO',
+  'ENSAYO_LARGO',
+  'QUIZ',
+  'DIAGNOSTICO',
+  'REMEDIAL',
+  'PRUEBA_UNIDAD',
+  'CONOCIMIENTOS_GENERALES'
+];
+
+function normalizeExamTypeInput(rawType) {
+  if (rawType === undefined) return { provided: false, value: null };
+  const normalized = String(rawType ?? '').trim().toUpperCase();
+  if (!normalized || !ALLOWED_EXAM_TYPES.includes(normalized)) {
+    return {
+      provided: true,
+      error: `Tipo de evaluación inválido (${normalized || 'vacío'}). Valores permitidos: ${ALLOWED_EXAM_TYPES.join(', ')}`
+    };
+  }
+  return { provided: true, value: normalized };
+}
+
 function parseGradingConfigInput(body = {}, defaultMode = 'SIMCE', defaultThreshold = 0.6) {
   let gradingMode = normalizeGradingMode(defaultMode);
   if (body.gradingMode !== undefined && body.gradingMode !== null && String(body.gradingMode).trim() !== '') {
@@ -2177,7 +2199,15 @@ router.post('/exams', checkAdmin, (req, res, next) => {
     const qCount = parseInt(questionCount, 10) || 30;
     const optCount = parseInt(optionsCount, 10) || 4;
     const ordNum = parseInt(orderNumber, 10) || 1;
-    const eType = examType || 'ENSAYO';
+    let eType = 'ENSAYO';
+    if (examType !== undefined && String(examType).trim() !== '') {
+      const postTypeCheck = normalizeExamTypeInput(examType);
+      if (postTypeCheck.error) {
+        cleanupUploadedFile();
+        return res.status(400).json({ error: postTypeCheck.error });
+      }
+      eType = postTypeCheck.value;
+    }
     const lvl = level || '4B';
 
     let defaultMcPoints = 1.0;
@@ -2334,13 +2364,21 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
       return res.status(404).json({ error: 'Evaluación o ensayo no encontrado' });
     }
 
-    const { title, subject, level, optionsCount, questionCount } = req.body;
+    const { title, subject, level, optionsCount, questionCount, examType } = req.body;
     const updateData = {};
     if (title !== undefined) updateData.title = String(title).trim();
     if (subject !== undefined) updateData.subject = String(subject).trim();
     if (level !== undefined) updateData.level = level;
     if (optionsCount !== undefined && !isNaN(parseInt(optionsCount, 10))) {
       updateData.optionsCount = parseInt(optionsCount, 10);
+    }
+
+    const examTypeCheck = normalizeExamTypeInput(examType);
+    if (examTypeCheck.error) {
+      return res.status(400).json({ error: examTypeCheck.error });
+    }
+    if (examTypeCheck.provided) {
+      updateData.examType = examTypeCheck.value;
     }
 
     const hasGradingConfigInput =
@@ -2444,6 +2482,8 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
     });
 
     const finalThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
+    const examTypeChanged = existingExam.examType !== exam.examType;
+    const tagChangeDesc = examTypeChanged ? ` (tag: ${existingExam.examType} → ${exam.examType})` : '';
     auditoria.registrarAuditoria({
       req,
       modulo: 'Evaluaciones',
@@ -2451,10 +2491,12 @@ router.put('/exams/:id', checkAdmin, async (req, res, next) => {
       nivel: 'info',
       entidad: 'Evaluación',
       entidad_id: exam.id,
-      descripcion: `Actualizó configuración de evaluación #${exam.id} ("${exam.title}")`,
+      descripcion: `Actualizó configuración de evaluación #${exam.id} ("${exam.title}")${tagChangeDesc}`,
       detalles: {
         examId: exam.id,
         title: exam.title,
+        examType: exam.examType,
+        ...(examTypeChanged ? { previousExamType: existingExam.examType, newExamType: exam.examType } : {}),
         gradingMode: normalizeGradingMode(exam.gradingMode),
         passThresholdPercent: Math.round(finalThreshold * 1000) / 10,
         questionCount: updatedQuestions.length,
@@ -3117,6 +3159,11 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       req.body.passThresholdPercent !== undefined ||
       req.body.exigencia !== undefined;
 
+    const examTypeCheck = normalizeExamTypeInput(req.body.examType);
+    if (examTypeCheck.error) {
+      return res.status(400).json({ error: examTypeCheck.error });
+    }
+
     const parsedPointsInput = parseQuestionPointsMap(maxPointsKeys);
     if (parsedPointsInput.error) {
       return res.status(400).json({ error: parsedPointsInput.error });
@@ -3125,6 +3172,8 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
 
     let finalGradingMode = normalizeGradingMode(existingExam.gradingMode);
     let finalPassThreshold = normalizePassThreshold(existingExam.passThreshold, 0.6);
+    let finalExamType = existingExam.examType;
+    const examMetaUpdate = {};
 
     if (hasGradingConfigInput) {
       const gradingConfig = parseGradingConfigInput(req.body, existingExam.gradingMode, existingExam.passThreshold);
@@ -3133,12 +3182,19 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       }
       finalGradingMode = gradingConfig.gradingMode;
       finalPassThreshold = gradingConfig.passThreshold;
+      examMetaUpdate.gradingMode = finalGradingMode;
+      examMetaUpdate.passThreshold = finalPassThreshold;
+    }
+
+    if (examTypeCheck.provided) {
+      finalExamType = examTypeCheck.value;
+      examMetaUpdate.examType = finalExamType;
+    }
+
+    if (Object.keys(examMetaUpdate).length > 0) {
       await prisma.exam.update({
         where: { id: examId },
-        data: {
-          gradingMode: finalGradingMode,
-          passThreshold: finalPassThreshold,
-        }
+        data: examMetaUpdate
       });
     }
     
@@ -3219,6 +3275,7 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
     });
 
     const totalResolvedQuestions = !isNaN(totalQ) && totalQ > 0 ? totalQ : allQNums.size;
+    const examTypeChanged = existingExam.examType !== finalExamType;
     auditoria.registrarAuditoria({
       req,
       modulo: 'Evaluaciones',
@@ -3226,10 +3283,12 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
       nivel: 'warning',
       entidad: 'Evaluación',
       entidad_id: examId,
-      descripcion: `Actualizó pauta de respuestas y puntajes de evaluación #${examId} ("${existingExam.title}", ${totalResolvedQuestions} preguntas)`,
+      descripcion: `Actualizó pauta de respuestas y puntajes de evaluación #${examId} ("${existingExam.title}", ${totalResolvedQuestions} preguntas)${examTypeChanged ? ` (tag: ${existingExam.examType} → ${finalExamType})` : ''}`,
       detalles: {
         examId,
         totalQuestions: totalResolvedQuestions,
+        examType: finalExamType,
+        ...(examTypeChanged ? { previousExamType: existingExam.examType, newExamType: finalExamType } : {}),
         gradingMode: finalGradingMode,
         passThresholdPercent: Math.round(finalPassThreshold * 1000) / 10,
         totalMaxPoints: Math.round(updatedTotalMaxPoints * 10) / 10
@@ -3239,6 +3298,7 @@ router.put('/exams/:id/answer-key', checkAdmin, async (req, res, next) => {
     res.json({
       message: 'Pauta actualizada',
       totalQuestions: totalResolvedQuestions,
+      examType: finalExamType,
       gradingMode: finalGradingMode,
       passThreshold: finalPassThreshold,
       passThresholdPercent: Math.round(finalPassThreshold * 1000) / 10,
