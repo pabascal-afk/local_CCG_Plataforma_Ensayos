@@ -10,6 +10,7 @@ import GradingModeSelector, { GradingMode } from "@/components/GradingModeSelect
 import PointsInput from "@/components/PointsInput";
 import { getToken } from "@/lib/session";
 import { useIsPruebas } from "@/lib/useIsPruebas";
+import { getExamTypeOptions } from "@/lib/examTypes";
 
 interface OpenQuestionItem {
   questionNumber: number;
@@ -293,24 +294,13 @@ export default function NewExamPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Tipo de Evaluación</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Tipo de Evaluación (Tag)</label>
                   <select value={examType} onChange={e=>setExamType(e.target.value)} className="w-full border rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-                    {isPruebas ? (
-                      <>
-                        <option value="PRUEBA_UNIDAD">Prueba de Unidad</option>
-                        <option value="QUIZ">Quiz / Control Rápido</option>
-                        <option value="CONOCIMIENTOS_GENERALES">Prueba de Conocimientos Generales</option>
-                        <option value="DIAGNOSTICO">Evaluación Diagnóstica</option>
-                        <option value="ENSAYO">Evaluación Sumativa Regular</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="QUIZ">Quiz (Corto)</option>
-                        <option value="ENSAYO">Ensayo Normal</option>
-                        <option value="ENSAYO_LARGO">Ensayo Largo</option>
-                        <option value="DIAGNOSTICO">Diagnóstico</option>
-                      </>
-                    )}
+                    {getExamTypeOptions(isPruebas).map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

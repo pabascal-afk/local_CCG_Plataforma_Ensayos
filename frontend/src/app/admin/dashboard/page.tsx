@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import { useIsPruebas } from "@/lib/useIsPruebas";
+import { getExamTypeMeta } from "@/lib/examTypes";
 import AiPromptModal from "@/components/AiPromptModal";
 
 export default function AdminDashboardPage() {
@@ -619,13 +620,14 @@ export default function AdminDashboardPage() {
                                 {item.examTitle}
                               </td>
                               <td className="px-4 py-3.5">
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
-                                  item.examType === 'QUIZ' ? 'bg-emerald-100 text-emerald-800' :
-                                  item.examType === 'REMEDIAL' ? 'bg-amber-100 text-amber-800' :
-                                  'bg-blue-100 text-blue-800'
-                                }`}>
-                                  {(!item.examType || item.examType === 'ENSAYO') ? (isPruebas ? 'PRUEBA' : 'ENSAYO') : item.examType}
-                                </span>
+                                {(() => {
+                                  const meta = getExamTypeMeta(item.examType, isPruebas);
+                                  return (
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase border ${meta.badgeClassName}`}>
+                                      {meta.badgeLabel}
+                                    </span>
+                                  );
+                                })()}
                               </td>
                               <td className="px-4 py-3.5 text-gray-500 font-mono">
                                 {new Date(item.date).toLocaleDateString("es-CL", { dateStyle: "short" })}

@@ -17,6 +17,7 @@ import { getToken } from "@/lib/session";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import { useIsPruebas } from "@/lib/useIsPruebas";
+import { getExamTypeMeta, getExamTypeOptions } from "@/lib/examTypes";
 import AiPromptModal, { AiPromptMode } from "@/components/AiPromptModal";
 import OmrScannerModal from "@/components/OmrScannerModal";
 import ReactivateCourseModal from "@/components/ReactivateCourseModal";
@@ -995,12 +996,12 @@ export default function AssignmentsDashboard() {
   };
 
   const getExamTypeBadge = (type: string) => {
-    const t = (type || "ENSAYO").toUpperCase();
-    if (t === "QUIZ") return <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">QUIZ</span>;
-    if (t === "REMEDIAL") return <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">REMEDIAL</span>;
-    if (t === "DIAGNOSTICO") return <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">DIAGNÓSTICO</span>;
-    if (t === "ENSAYO_LARGO") return <span className="bg-rose-100 text-rose-800 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">EXTENDIDO</span>;
-    return <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">ENSAYO</span>;
+    const meta = getExamTypeMeta(type, isPruebas);
+    return (
+      <span className={`${meta.badgeClassName} border px-2 py-0.5 rounded text-[10px] font-bold tracking-wider`}>
+        {meta.badgeLabel}
+      </span>
+    );
   };
 
   if (loading) {
@@ -1177,11 +1178,11 @@ export default function AssignmentsDashboard() {
                   className="text-xs bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-1.5 font-semibold text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="TODOS">Todos los tipos</option>
-                  <option value="ENSAYO">{isPruebas ? "Prueba / Evaluación" : "Ensayo SIMCE"}</option>
-                  <option value="QUIZ">Quiz / Rápido</option>
-                  <option value="REMEDIAL">Remedial</option>
-                  <option value="DIAGNOSTICO">Diagnóstico</option>
-                  <option value="ENSAYO_LARGO">{isPruebas ? "Evaluación Extendida" : "Ensayo Largo"}</option>
+                  {getExamTypeOptions(isPruebas).map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 
