@@ -1215,7 +1215,16 @@ router.get('/users', async (req, res, next) => {
     }
     const users = await prisma.user.findMany({
       where: Object.keys(where).length ? where : undefined,
-      select: { rut: true, name: true, role: true, courseId: true, mustChangePassword: true, course: true },
+      select: {
+        rut: true,
+        name: true,
+        role: true,
+        courseId: true,
+        isActive: true,
+        mustChangePassword: true,
+        course: true,
+        createdAt: true
+      },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
     });
     res.json(users);
@@ -1315,34 +1324,185 @@ router.post('/users', checkAdmin, async (req, res, next) => {
 
 router.put('/users/:rut', checkAdmin, async (req, res, next) => {
   try {
-    let targetRut = normalizeRut(req.params.rut);
-    const { name, role, courseId, resetPassword } = req.body;
-    
-    const data = { name, role, courseId: courseId || null };
-    
-    if (resetPassword) {
-      const password = targetRut.split('-')[0].slice(0, 6);
-      data.passwordHash = await bcrypt.hash(password, 10);
-      data.mustChangePassword = true;
+    const targetRut = normalizeRut(req.params.rut);
+    const existingUser = await prisma.user.findUnique({
+      where: { rut: targetRut },
+      include: { course: true }
+    });
+    if (!existingUser) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    const user = await prisma.user.update({
+    const {
+      rut: rawNewRut,
+      newRut: altNewRut,
+      name,
+      role,
+      courseId,
+      isActive,
+      mustChangePassword,
+      resetPassword,
+      password
+    } = req.body;
+
+    const data = {};
+
+    // 1. Manejo y validación de cambio de RUT
+    let nextRut = targetRut;
+    const candidateRaw = altNewRut !== undefined ? altNewRut : rawNewRut;
+    if (candidateRaw !== undefined && String(candidateRaw).trim() !== '') {
+      const candidateRut = normalizeRut(candidateRaw);
+      if (!candidateRut || candidateRut.length < 2) {
+        return res.status(400).json({ error: 'El nuevo RUT proporcionado no tiene un formato válido' });
+      }
+      if (candidateRut !== targetRut) {
+        const inUse = await prisma.user.findUnique({ where: { rut: candidateRut } });
+        if (inUse) {
+          return res.status(409).json({
+            error: `El RUT ${candidateRut} ya está registrado para el usuario "${inUse.name}"`
+          });
+        }
+        nextRut = candidateRut;
+        data.rut = nextRut;
+      }
+    }
+
+    // 2. Validación de Nombre
+    if (name !== undefined) {
+      const trimmedName = String(name).trim();
+      if (!trimmedName) {
+        return res.status(400).json({ error: 'El nombre del usuario no puede estar vacío' });
+      }
+      data.name = trimmedName;
+    }
+
+    // 3. Validación y normalización de Rol
+    let nextRole = existingUser.role;
+    if (role !== undefined) {
+      nextRole = normalizeRole(role);
+      data.role = nextRole;
+    }
+
+    // Si el rol ya no es TEACHER, limpiar asignaciones de docencia directa a cursos
+    if (existingUser.role === 'TEACHER' && nextRole !== 'TEACHER') {
+      await prisma.teacherCourse.deleteMany({ where: { teacherRut: targetRut } }).catch(() => {});
+    }
+
+    // 4. Validación de Curso (solo estudiantes tienen curso directo)
+    if (nextRole === 'STUDENT') {
+      if (courseId !== undefined) {
+        if (courseId === null || courseId === '' || courseId === 0 || courseId === '0') {
+          data.courseId = null;
+        } else {
+          const parsedCid = parseInt(courseId, 10);
+          if (isNaN(parsedCid) || parsedCid <= 0) {
+            return res.status(400).json({ error: 'ID de curso inválido' });
+          }
+          const targetCourse = await prisma.course.findUnique({ where: { id: parsedCid } });
+          if (!targetCourse) {
+            return res.status(404).json({ error: 'El curso seleccionado no existe' });
+          }
+          data.courseId = parsedCid;
+        }
+      }
+    } else {
+      // Si el rol no es STUDENT, desvincular curso directo de estudiante
+      data.courseId = null;
+    }
+
+    // 5. Estado Activo
+    if (isActive !== undefined) {
+      data.isActive = Boolean(isActive);
+    }
+
+    // 6. Contraseña y Reset
+    if (resetPassword) {
+      const defaultPass = nextRut.split('-')[0].slice(0, 6);
+      data.passwordHash = await bcrypt.hash(defaultPass, 10);
+      data.mustChangePassword = true;
+    } else if (password !== undefined && String(password).trim() !== '') {
+      data.passwordHash = await bcrypt.hash(String(password).trim(), 10);
+      if (mustChangePassword !== undefined) {
+        data.mustChangePassword = Boolean(mustChangePassword);
+      } else {
+        data.mustChangePassword = false;
+      }
+    } else if (mustChangePassword !== undefined) {
+      data.mustChangePassword = Boolean(mustChangePassword);
+    }
+
+    const updatedUser = await prisma.user.update({
       where: { rut: targetRut },
       data,
-      select: { rut: true, name: true, role: true, courseId: true }
+      select: {
+        rut: true,
+        name: true,
+        role: true,
+        courseId: true,
+        isActive: true,
+        mustChangePassword: true,
+        course: true,
+        createdAt: true
+      }
     });
+
+    // 7. Si el RUT cambió, actualizar logs históricos que guardan el RUT directamente
+    if (nextRut !== targetRut) {
+      await prisma.assignmentActionLog.updateMany({
+        where: { actorRut: targetRut },
+        data: { actorRut: nextRut }
+      }).catch(() => {});
+      await prisma.assignmentActionLog.updateMany({
+        where: { targetRut: targetRut },
+        data: { targetRut: nextRut }
+      }).catch(() => {});
+    }
+
+    // 8. Registro detallado en auditoría
+    const changes = [];
+    if (nextRut !== targetRut) changes.push(`RUT: ${targetRut} → ${nextRut}`);
+    if (data.name && data.name !== existingUser.name) changes.push(`Nombre: "${existingUser.name}" → "${data.name}"`);
+    if (data.role && data.role !== existingUser.role) changes.push(`Rol: ${existingUser.role} → ${data.role}`);
+    if (data.courseId !== undefined && data.courseId !== existingUser.courseId) {
+      const prevCourseLabel = existingUser.course ? `${existingUser.course.level} ${existingUser.course.letter}` : 'Sin curso';
+      const nextCourseLabel = updatedUser.course ? `${updatedUser.course.level} ${updatedUser.course.letter}` : 'Sin curso';
+      changes.push(`Curso: ${prevCourseLabel} → ${nextCourseLabel}`);
+    }
+    if (data.isActive !== undefined && data.isActive !== existingUser.isActive) {
+      changes.push(`Estado: ${existingUser.isActive ? 'Activo' : 'Inactivo'} → ${data.isActive ? 'Activo' : 'Inactivo'}`);
+    }
+    if (resetPassword) changes.push('Contraseña reseteada a 6 primeros dígitos del RUT');
+    else if (password) changes.push('Contraseña personalizada establecida');
+    if (data.mustChangePassword !== undefined && data.mustChangePassword !== existingUser.mustChangePassword) {
+      changes.push(`Exigir cambio de clave: ${data.mustChangePassword ? 'SÍ' : 'NO'}`);
+    }
+
+    const desc = changes.length > 0
+      ? `Modificó datos de usuario ${updatedUser.name} (${updatedUser.rut}): ${changes.join(', ')}`
+      : `Modificó usuario ${updatedUser.name} (${updatedUser.rut})`;
+
     auditoria.registrarAuditoria({
       req,
       modulo: 'Usuarios',
       accion: resetPassword ? 'Resetear Contraseña' : 'Modificar',
-      nivel: resetPassword ? 'warning' : 'info',
+      nivel: (nextRut !== targetRut || resetPassword || (data.isActive !== undefined && !data.isActive)) ? 'warning' : 'info',
       entidad: 'Usuario',
-      entidad_id: user.rut,
-      descripcion: `${resetPassword ? 'Modificó y reseteó contraseña de' : 'Modificó usuario'} ${user.name} (${user.rut})`,
-      detalles: { rut: user.rut, name: user.name, role: user.role, courseId: user.courseId, resetPassword: Boolean(resetPassword) }
+      entidad_id: updatedUser.rut,
+      descripcion: desc,
+      detalles: {
+        previousRut: targetRut,
+        newRut: updatedUser.rut,
+        rutChanged: nextRut !== targetRut,
+        changes,
+        updatedFields: Object.keys(data),
+      }
     });
-    res.json(user);
+
+    res.json(updatedUser);
   } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'El RUT ya está registrado por otro usuario' });
+    }
     next(error);
   }
 });

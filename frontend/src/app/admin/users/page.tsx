@@ -16,7 +16,15 @@ import {
   Download, 
   FileSpreadsheet, 
   ShieldCheck, 
-  Calendar 
+  Calendar,
+  Pencil,
+  Search,
+  Filter,
+  CheckCircle2,
+  AlertCircle,
+  Lock,
+  UserCheck,
+  UserX
 } from "lucide-react";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 
@@ -36,6 +44,8 @@ type User = {
   role: string;
   courseId: number | null;
   mustChangePassword?: boolean;
+  isActive?: boolean;
+  createdAt?: string;
   course?: {
     id: number;
     level: string;
@@ -68,6 +78,11 @@ export default function UsersPage() {
   const [activeTab, setActiveTab] = useState<"STUDENTS" | "STAFF">("STUDENTS");
   const [showModal, setShowModal] = useState(false);
 
+  // Filtros de búsqueda en la tabla
+  const [searchQuery, setSearchQuery] = useState("");
+  const [courseFilter, setCourseFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
+
   // Modal contraseña masiva por curso
   const [showBulkPasswordModal, setShowBulkPasswordModal] = useState(false);
   const [bulkCourseId, setBulkCourseId] = useState("");
@@ -75,13 +90,27 @@ export default function UsersPage() {
   const [bulkMustChange, setBulkMustChange] = useState(false);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
-  // Modal form state
+  // Modal Crear Usuario Manual
   const [formRut, setFormRut] = useState("");
   const [formName, setFormName] = useState("");
   const [formRole, setFormRole] = useState("STUDENT");
   const [formCourseId, setFormCourseId] = useState("");
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [exportingUsers, setExportingUsers] = useState(false);
+
+  // Modal Editar Usuario
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editRut, setEditRut] = useState("");
+  const [editName, setEditName] = useState("");
+  const [editRole, setEditRole] = useState("STUDENT");
+  const [editCourseId, setEditCourseId] = useState("");
+  const [editIsActive, setEditIsActive] = useState(true);
+  const [editMustChangePassword, setEditMustChangePassword] = useState(false);
+  const [editResetPassword, setEditResetPassword] = useState(false);
+  const [editCustomPassword, setEditCustomPassword] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [successNotice, setSuccessNotice] = useState("");
 
   const handleDownloadTemplate = async () => {
     try {
@@ -208,6 +237,8 @@ export default function UsersPage() {
       setFormName("");
       setFormRole("STUDENT");
       setFormCourseId("");
+      setSuccessNotice("Usuario creado correctamente");
+      setTimeout(() => setSuccessNotice(""), 4000);
       loadData();
     } catch (err: any) {
       alert(err.message);
@@ -243,6 +274,57 @@ export default function UsersPage() {
     }
   };
 
+  const handleOpenEditModal = (u: User) => {
+    setEditingUser(u);
+    setEditRut(u.rut);
+    setEditName(u.name);
+    setEditRole(u.role);
+    setEditCourseId(u.courseId ? String(u.courseId) : "");
+    setEditIsActive(u.isActive !== false);
+    setEditMustChangePassword(!!u.mustChangePassword);
+    setEditResetPassword(false);
+    setEditCustomPassword("");
+    setEditError("");
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setSavingEdit(true);
+    setEditError("");
+
+    try {
+      const payload: any = {
+        rut: editRut.trim(),
+        name: editName.trim(),
+        role: editRole,
+        courseId: editRole === "STUDENT" ? (editCourseId ? parseInt(editCourseId, 10) : null) : null,
+        isActive: editIsActive,
+        mustChangePassword: editMustChangePassword
+      };
+
+      if (editResetPassword) {
+        payload.resetPassword = true;
+      } else if (editCustomPassword.trim()) {
+        payload.password = editCustomPassword.trim();
+      }
+
+      await apiFetch(`/admin/users/${editingUser.rut}`, {
+        method: "PUT",
+        body: payload
+      });
+
+      setEditingUser(null);
+      setSuccessNotice(`Datos del usuario ${editName.trim()} (${editRut.trim()}) actualizados con éxito.`);
+      setTimeout(() => setSuccessNotice(""), 4000);
+      await loadData();
+    } catch (err: any) {
+      setEditError(err.message || "Error al actualizar el usuario");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const handleResetPassword = async (rut: string) => {
     if (!confirm(`¿Resetear contraseña para ${rut}? Volverá a ser los primeros 6 dígitos de su RUT.`)) return;
     try {
@@ -250,7 +332,8 @@ export default function UsersPage() {
         method: "PUT",
         body: { resetPassword: true }
       });
-      alert("Contraseña reseteada con éxito.");
+      setSuccessNotice(`Contraseña para ${rut} reseteada con éxito.`);
+      setTimeout(() => setSuccessNotice(""), 4000);
       loadData();
     } catch (err: any) {
       alert(err.message);
@@ -261,15 +344,42 @@ export default function UsersPage() {
     if (!confirm(`¿Seguro que quieres eliminar al usuario ${rut}?`)) return;
     try {
       await apiFetch(`/admin/users/${rut}`, { method: "DELETE" });
+      setSuccessNotice(`Usuario ${rut} eliminado.`);
+      setTimeout(() => setSuccessNotice(""), 4000);
       loadData();
     } catch (err: any) {
       alert(err.message);
     }
   };
 
-  const filteredUsers = users.filter(u => 
-    activeTab === "STUDENTS" ? u.role === "STUDENT" : u.role !== "STUDENT"
-  );
+  const filteredUsers = users.filter((u) => {
+    // Filtro pestaña (Estudiantes vs Personal)
+    if (activeTab === "STUDENTS" && u.role !== "STUDENT") return false;
+    if (activeTab === "STAFF" && u.role === "STUDENT") return false;
+
+    // Filtro de búsqueda por texto (RUT o Nombre)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchRut = u.rut.toLowerCase().includes(q);
+      const matchName = u.name.toLowerCase().includes(q);
+      if (!matchRut && !matchName) return false;
+    }
+
+    // Filtro por curso
+    if (courseFilter !== "ALL") {
+      if (courseFilter === "NONE") {
+        if (u.courseId !== null && u.courseId !== undefined) return false;
+      } else {
+        if (String(u.courseId) !== courseFilter) return false;
+      }
+    }
+
+    // Filtro por estado activo / inactivo
+    if (statusFilter === "ACTIVE" && u.isActive === false) return false;
+    if (statusFilter === "INACTIVE" && u.isActive !== false) return false;
+
+    return true;
+  });
 
   return (
     <RequireRole roles={["ADMIN", "DIRECTOR"]}>
@@ -346,22 +456,95 @@ export default function UsersPage() {
               </div>
             </div>
 
-            {error && <div className="bg-red-50 text-red-600 p-4 rounded mb-6">{error}</div>}
+            {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-6 border border-red-200">{error}</div>}
+
+            {successNotice && (
+              <div className="bg-emerald-50 text-emerald-800 p-3.5 rounded-lg mb-6 border border-emerald-200 flex items-center gap-2 text-sm font-medium animate-fadeIn">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                {successNotice}
+              </div>
+            )}
 
             <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
               <div className="flex border-b bg-gray-50">
                 <button 
-                  onClick={() => setActiveTab("STUDENTS")}
+                  onClick={() => { setActiveTab("STUDENTS"); setCourseFilter("ALL"); }}
                   className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'STUDENTS' ? 'border-blue-600 text-blue-700 bg-white' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                 >
                   Estudiantes ({users.filter(u => u.role === "STUDENT").length})
                 </button>
                 <button 
-                  onClick={() => setActiveTab("STAFF")}
+                  onClick={() => { setActiveTab("STAFF"); setCourseFilter("ALL"); }}
                   className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'STAFF' ? 'border-blue-600 text-blue-700 bg-white' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                 >
                   Profesores y Directivos ({users.filter(u => u.role !== "STUDENT").length})
                 </button>
+              </div>
+
+              {/* Filtros de Búsqueda y Selección */}
+              <div className="p-3 border-b bg-gray-50/50 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por RUT o Nombre..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {searchQuery && (
+                    <button 
+                      onClick={() => setSearchQuery("")} 
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs bg-gray-100 rounded px-1.5 py-0.5"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {activeTab === "STUDENTS" && (
+                    <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                      <Filter className="w-3.5 h-3.5 text-gray-400" />
+                      <select
+                        value={courseFilter}
+                        onChange={(e) => setCourseFilter(e.target.value)}
+                        className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="ALL">Todos los Cursos</option>
+                        <option value="NONE">Sin Curso Asignado</option>
+                        {courses.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.level.replace("B", "° Básico").replace("M", "° Medio")} {c.letter} ({c.year})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as any)}
+                    className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ALL">Todos los Estados</option>
+                    <option value="ACTIVE">Solo Activos</option>
+                    <option value="INACTIVE">Solo Inactivos</option>
+                  </select>
+
+                  {(searchQuery || courseFilter !== "ALL" || statusFilter !== "ALL") && (
+                    <button
+                      onClick={() => {
+                        setSearchQuery("");
+                        setCourseFilter("ALL");
+                        setStatusFilter("ALL");
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800 underline px-1 py-1 font-medium"
+                    >
+                      Restablecer filtros
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Banner informativo de Formato de Importación */}
@@ -385,16 +568,17 @@ export default function UsersPage() {
                       <th className="p-4 font-semibold">Nombre</th>
                       <th className="p-4 font-semibold">Rol</th>
                       <th className="p-4 font-semibold">Curso & Año</th>
-                      <th className="p-4 font-semibold text-center w-28">Acciones</th>
+                      <th className="p-4 font-semibold text-center w-28">Estado</th>
+                      <th className="p-4 font-semibold text-center w-32">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y text-sm">
                     {loading ? (
-                      <tr><td colSpan={5} className="p-8 text-center text-gray-500">Cargando usuarios...</td></tr>
+                      <tr><td colSpan={6} className="p-8 text-center text-gray-500">Cargando usuarios...</td></tr>
                     ) : filteredUsers.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-8 text-center text-gray-500">
-                          No hay usuarios registrados en esta categoría para el año {selectedYear}.
+                        <td colSpan={6} className="p-8 text-center text-gray-500">
+                          No se encontraron usuarios coincidentes con los filtros seleccionados para el año {selectedYear}.
                         </td>
                       </tr>
                     ) : (
@@ -405,7 +589,7 @@ export default function UsersPage() {
                           : '-';
 
                         return (
-                          <tr key={u.rut} className="hover:bg-gray-50/80 transition-colors">
+                          <tr key={u.rut} className={`hover:bg-gray-50/80 transition-colors ${u.isActive === false ? 'bg-gray-50/50 opacity-75' : ''}`}>
                             <td className="p-4 font-mono font-medium text-gray-700">{u.rut}</td>
                             <td className="p-4 font-semibold text-gray-900">{u.name}</td>
                             <td className="p-4">
@@ -419,11 +603,29 @@ export default function UsersPage() {
                                   {courseLabel}
                                 </span>
                               ) : (
-                                <span className="text-gray-400">-</span>
+                                <span className="text-gray-400 text-xs italic">Sin curso</span>
+                              )}
+                            </td>
+                            <td className="p-4 text-center">
+                              {u.isActive !== false ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Activo
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span> Inactivo
+                                </span>
                               )}
                             </td>
                             <td className="p-4">
                               <div className="flex items-center justify-center gap-1.5">
+                                <button 
+                                  onClick={() => handleOpenEditModal(u)} 
+                                  title="Editar usuario (RUT, nombre, rol, curso, estado, contraseña)" 
+                                  className="text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 p-1.5 rounded transition-colors"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
                                 <button 
                                   onClick={() => handleResetPassword(u.rut)} 
                                   title="Resetear contraseña a primeros 6 dígitos del RUT" 
@@ -449,6 +651,206 @@ export default function UsersPage() {
               </div>
             </div>
           </div>
+
+          {/* Modal Editar Usuario */}
+          {editingUser && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border max-h-[92vh] flex flex-col">
+                <div className="flex justify-between items-center p-4 border-b bg-blue-50">
+                  <div>
+                    <h3 className="font-bold text-lg text-blue-900 flex items-center gap-2">
+                      <Pencil className="w-5 h-5 text-blue-600" /> Editar Usuario
+                    </h3>
+                    <p className="text-xs text-blue-700 mt-0.5">
+                      Editando: <span className="font-semibold">{editingUser.name}</span> ({editingUser.rut})
+                    </p>
+                  </div>
+                  <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-gray-600 p-1">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveEdit} className="p-5 space-y-4 overflow-y-auto flex-1">
+                  {editError && (
+                    <div className="bg-red-50 text-red-700 p-3 rounded-lg text-xs border border-red-200 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-500 mt-0.5" />
+                      <span>{editError}</span>
+                    </div>
+                  )}
+
+                  {/* RUT */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">
+                      RUT (con guion)
+                    </label>
+                    <input 
+                      required 
+                      type="text" 
+                      value={editRut} 
+                      onChange={e => setEditRut(formatRutInput(e.target.value))}
+                      className="w-full border rounded-lg p-2.5 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                    {editRut !== editingUser.rut && (
+                      <p className="text-[11px] text-amber-700 bg-amber-50 p-2 rounded mt-1.5 border border-amber-200">
+                        <strong>Aviso de actualización en cascada:</strong> Al cambiar el RUT, el sistema actualizará automáticamente todas sus respuestas, pruebas rendidas, cursos y registros de auditoría sin perder datos.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Nombre */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Nombre Completo</label>
+                    <input 
+                      required 
+                      type="text" 
+                      value={editName} 
+                      onChange={e => setEditName(e.target.value)}
+                      className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Rol y Curso */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">Rol</label>
+                      <select 
+                        value={editRole} 
+                        onChange={e => setEditRole(e.target.value)}
+                        className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      >
+                        <option value="STUDENT">Estudiante</option>
+                        <option value="TEACHER">Profesor</option>
+                        <option value="DIRECTOR">Director</option>
+                        <option value="ADMIN">Administrador</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">
+                        Curso Asignado ({selectedYear})
+                      </label>
+                      <select 
+                        value={editCourseId} 
+                        onChange={e => setEditCourseId(e.target.value)}
+                        disabled={editRole !== 'STUDENT'}
+                        className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        <option value="">-- Sin curso --</option>
+                        {courses.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.level.replace("B", "° Básico").replace("M", "° Medio")} {c.letter} ({c.year})
+                          </option>
+                        ))}
+                      </select>
+                      {editRole !== 'STUDENT' && (
+                        <p className="text-[10px] text-gray-400 mt-1">Los roles no-estudiante no usan curso fijo.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Estado de Cuenta */}
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Estado de la Cuenta</label>
+                    <div className="flex items-center gap-4">
+                      <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="editIsActive"
+                          checked={editIsActive === true}
+                          onChange={() => setEditIsActive(true)}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        <UserCheck className="w-4 h-4 text-emerald-600" />
+                        <span className="font-medium text-emerald-700">Activo</span> (Acceso permitido)
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="editIsActive"
+                          checked={editIsActive === false}
+                          onChange={() => setEditIsActive(false)}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        <UserX className="w-4 h-4 text-rose-600" />
+                        <span className="font-medium text-rose-700">Inactivo</span> (Acceso bloqueado)
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Sección de Contraseña / Acceso */}
+                  <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-3">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-gray-800">
+                      <Lock className="w-3.5 h-3.5 text-amber-600" />
+                      Gestión de Contraseña
+                    </div>
+
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editResetPassword}
+                        onChange={(e) => {
+                          setEditResetPassword(e.target.checked);
+                          if (e.target.checked) setEditCustomPassword("");
+                        }}
+                        className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-gray-700">
+                        <strong>Resetear contraseña a los 6 primeros dígitos del RUT</strong>
+                        <span className="block text-[11px] text-gray-500">
+                          Nueva clave por defecto: <span className="font-mono font-bold text-blue-700">{editRut.split('-')[0].slice(0, 6) || "123456"}</span>
+                        </span>
+                      </span>
+                    </label>
+
+                    {!editResetPassword && (
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-700 mb-1">
+                          O definir una nueva contraseña manual (opcional):
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Dejar en blanco para mantener la clave actual"
+                          value={editCustomPassword}
+                          onChange={(e) => setEditCustomPassword(e.target.value)}
+                          className="w-full border rounded-lg p-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    <label className="flex items-start gap-2 cursor-pointer pt-1 border-t border-slate-200/80">
+                      <input
+                        type="checkbox"
+                        checked={editMustChangePassword}
+                        onChange={(e) => setEditMustChangePassword(e.target.checked)}
+                        className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-gray-700">
+                        Exigir cambio de clave al próximo inicio de sesión
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="pt-2 flex justify-end gap-2 border-t">
+                    <button 
+                      type="button" 
+                      onClick={() => setEditingUser(null)} 
+                      disabled={savingEdit}
+                      className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      type="submit" 
+                      disabled={savingEdit}
+                      className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50"
+                    >
+                      {savingEdit ? "Guardando..." : "Guardar Cambios"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
 
           {/* Modal Contraseña Masiva por Curso */}
           {showBulkPasswordModal && (
