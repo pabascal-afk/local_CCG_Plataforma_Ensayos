@@ -21,7 +21,8 @@ import {
   Headphones,
   Scissors,
   Zap,
-  History
+  History,
+  FileText
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -249,6 +250,15 @@ export default function TeacherAssignmentPage() {
                 >
                   <Download className="w-4 h-4" />
                 </button>
+                <Link
+                  href={`/teacher/assignments/${id}/report`}
+                  target="_blank"
+                  className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-xs font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Generar e imprimir Informe Pedagógico de la Prueba en PDF"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Informe PDF</span>
+                </Link>
                 {!assignment.released && (
                   <button 
                     onClick={handleRelease}

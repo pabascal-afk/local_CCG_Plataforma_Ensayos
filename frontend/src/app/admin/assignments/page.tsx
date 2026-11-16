@@ -2233,6 +2233,14 @@ export default function AssignmentsDashboard() {
                                 >
                                   <Printer className="w-3.5 h-3.5" />
                                 </Link>
+                                <Link
+                                  href={`/teacher/assignments/${a.id}/report`}
+                                  target="_blank"
+                                  className="text-gray-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition"
+                                  title="Informe Pedagógico en PDF"
+                                >
+                                  <FileText className="w-3.5 h-3.5" />
+                                </Link>
                                 <button
                                   type="button"
                                   onClick={() => setOmrScanAssignmentId(a.id)}
@@ -2638,6 +2646,15 @@ export default function AssignmentsDashboard() {
                                   >
                                     <Printer className="w-3.5 h-3.5 text-indigo-600" />
                                     Imprimir Hojas (PDF)
+                                  </Link>
+                                  <Link
+                                    href={`/teacher/assignments/${a.id}/report`}
+                                    target="_blank"
+                                    className="text-[11px] font-bold text-rose-700 bg-white hover:bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm transition"
+                                    title="Generar e imprimir informe pedagógico en PDF"
+                                  >
+                                    <FileText className="w-3.5 h-3.5 text-rose-600" />
+                                    Informe PDF
                                   </Link>
                                   <button
                                     type="button"
