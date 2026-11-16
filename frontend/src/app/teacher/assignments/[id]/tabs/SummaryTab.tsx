@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useIsPruebas } from "@/lib/useIsPruebas";
+import { FileText, Printer } from "lucide-react";
 
 export default function SummaryTab({ id }: { id: number }) {
   const isPruebas = useIsPruebas();
@@ -37,6 +39,27 @@ export default function SummaryTab({ id }: { id: number }) {
 
   return (
     <div className="space-y-8">
+      {/* Banner de Acceso Rápido al Informe PDF */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-gradient-to-r from-slate-900 to-blue-950 text-white rounded-xl shadow-xs">
+        <div>
+          <h4 className="font-bold text-sm text-slate-100 flex items-center gap-2">
+            <FileText className="w-4 h-4 text-rose-400" />
+            Informe Pedagógico Oficial en PDF
+          </h4>
+          <p className="text-xs text-slate-300 mt-0.5">
+            Genera e imprime el reporte consolidado del curso con estadísticas, habilidades, ítems críticos y nómina completa.
+          </p>
+        </div>
+        <Link
+          href={`/teacher/assignments/${id}/report`}
+          target="_blank"
+          className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer self-start sm:self-center"
+        >
+          <Printer className="w-3.5 h-3.5" />
+          <span>Ver / Imprimir PDF</span>
+        </Link>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-blue-50 rounded-xl p-4 text-center">
           <p className="text-sm text-blue-600 font-medium mb-1">Participación</p>

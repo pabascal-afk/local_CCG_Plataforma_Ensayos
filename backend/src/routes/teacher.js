@@ -1826,6 +1826,323 @@ router.get('/assignments/:id/printable-sheet-data', async (req, res, next) => {
 });
 
 // ==========================================
+// Datos para Informe Pedagógico en PDF
+// ==========================================
+router.get('/assignments/:id/report-data', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+
+    // 1. Obtener examen con preguntas ordenadas
+    const exam = await prisma.exam.findUnique({
+      where: { id: assignment.examId },
+      include: {
+        questions: {
+          orderBy: { questionNumber: 'asc' }
+        }
+      }
+    });
+    if (!exam) return res.status(404).json({ error: 'Evaluación no encontrada' });
+
+    // 2. Obtener curso y todos los estudiantes activos
+    const course = await prisma.course.findUnique({
+      where: { id: assignment.courseId },
+      include: {
+        students: {
+          where: { role: 'STUDENT', isActive: true },
+          orderBy: { name: 'asc' },
+          select: { rut: true, name: true }
+        }
+      }
+    });
+    if (!course) return res.status(404).json({ error: 'Curso no encontrado' });
+
+    // 3. Obtener docente asignado
+    let teacherName = 'Docente de Asignatura';
+    let teacherRut = assignment.assignedTeacherRut || '';
+    if (assignment.assignedTeacherRut) {
+      const teacherUser = await prisma.user.findUnique({
+        where: { rut: assignment.assignedTeacherRut },
+        select: { name: true, rut: true }
+      });
+      if (teacherUser) {
+        teacherName = teacherUser.name;
+        teacherRut = teacherUser.rut;
+      }
+    } else if (req.user && req.user.role === 'TEACHER') {
+      teacherName = req.user.name;
+      teacherRut = req.user.rut;
+    }
+
+    // 4. Obtener entregas
+    const submissions = await prisma.submission.findMany({
+      where: { assignmentId: assignment.id, status: 'SUBMITTED' },
+      include: { answers: true }
+    });
+
+    const students = course.students || [];
+    const totalStudents = students.length;
+    const submittedCount = submissions.length;
+    const pendingCount = Math.max(0, totalStudents - submittedCount);
+    const participationPercent = totalStudents > 0 ? Math.round((submittedCount / totalStudents) * 1000) / 10 : 0;
+
+    const gradingMode = normalizeGradingMode(exam.gradingMode);
+    const passThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
+    const passThresholdPercent = Math.round(passThreshold * 1000) / 10;
+
+    let averageGrade = 0;
+    let averagePercent = 0;
+    let averageSimceScore = null;
+    let approvedCount = 0;
+    let failedCount = 0;
+    const levelCounts = { INSUFICIENTE: 0, ELEMENTAL: 0, ADECUADO: 0 };
+    const gradeRanges = { '1.0-3.9': 0, '4.0-4.9': 0, '5.0-5.9': 0, '6.0-7.0': 0 };
+
+    if (submittedCount > 0) {
+      averageGrade = Math.round((submissions.reduce((sum, s) => sum + (s.grade || 1.0), 0) / submittedCount) * 10) / 10;
+      averagePercent = Math.round((submissions.reduce((sum, s) => sum + (s.percent || 0), 0) / submittedCount) * 10) / 10;
+
+      if (gradingMode !== 'NORMAL') {
+        const simceSubs = submissions.filter(s => s.simceScore != null);
+        if (simceSubs.length > 0) {
+          averageSimceScore = Math.round(simceSubs.reduce((sum, s) => sum + s.simceScore, 0) / simceSubs.length);
+        }
+      }
+
+      submissions.forEach(s => {
+        const g = s.grade != null ? s.grade : 1.0;
+        if (g >= 4.0) approvedCount++;
+        else failedCount++;
+
+        if (s.achievementLevel && levelCounts[s.achievementLevel] !== undefined) {
+          levelCounts[s.achievementLevel]++;
+        }
+
+        if (g < 4.0) gradeRanges['1.0-3.9']++;
+        else if (g < 5.0) gradeRanges['4.0-4.9']++;
+        else if (g < 6.0) gradeRanges['5.0-5.9']++;
+        else gradeRanges['6.0-7.0']++;
+      });
+    }
+
+    const approvalPercent = submittedCount > 0 ? Math.round((approvedCount / submittedCount) * 1000) / 10 : 0;
+
+    // 5. Análisis de habilidades y ejes
+    const questions = exam.questions || [];
+    const maxTotalPoints = Math.round(questions.reduce((sum, q) => sum + getQuestionMaxPoints(q), 0) * 10) / 10;
+    const hasWeightedPoints = questions.some(q => Math.abs(getQuestionMaxPoints(q) - 1) > 1e-6);
+
+    const skillsMap = {};
+    const axesMap = {};
+
+    questions.forEach(q => {
+      const maxPts = getQuestionMaxPoints(q);
+      if (q.skill) {
+        if (!skillsMap[q.skill]) skillsMap[q.skill] = { correct: 0, total: 0, count: 0 };
+        skillsMap[q.skill].total += submittedCount * maxPts;
+        skillsMap[q.skill].count++;
+      }
+      if (q.axis) {
+        if (!axesMap[q.axis]) axesMap[q.axis] = { correct: 0, total: 0, count: 0 };
+        axesMap[q.axis].total += submittedCount * maxPts;
+        axesMap[q.axis].count++;
+      }
+    });
+
+    submissions.forEach(sub => {
+      (sub.answers || []).forEach(ans => {
+        const q = questions.find(qu => qu.id === ans.questionId);
+        if (!q) return;
+        const maxPts = getQuestionMaxPoints(q);
+        let earned = 0;
+        if (isOpenQuestion(q)) {
+          if (ans.awardedPoints !== null && ans.awardedPoints !== undefined) {
+            earned = Math.max(0, Math.min(maxPts, Number(ans.awardedPoints)));
+          }
+        } else if (ans.isCorrect) {
+          earned = maxPts;
+        }
+        if (earned > 0) {
+          if (q.skill && skillsMap[q.skill]) skillsMap[q.skill].correct += earned;
+          if (q.axis && axesMap[q.axis]) axesMap[q.axis].correct += earned;
+        }
+      });
+    });
+
+    const formatGrouping = (map) => Object.entries(map).map(([name, val]) => ({
+      name,
+      correct: Math.round(val.correct * 10) / 10,
+      total: Math.round(val.total * 10) / 10,
+      questionCount: val.count,
+      percent: val.total > 0 ? Math.round((val.correct / val.total) * 1000) / 10 : 0
+    })).sort((a, b) => a.percent - b.percent);
+
+    const skillsList = formatGrouping(skillsMap);
+    const axesList = formatGrouping(axesMap);
+
+    // 6. Análisis de preguntas e identificación de ítems críticos
+    const questionsAnalysis = questions.map(q => {
+      const isOpen = isOpenQuestion(q);
+      const maxPts = getQuestionMaxPoints(q);
+      let correctCount = 0;
+      let omittedCount = submittedCount;
+      let totalEarned = 0;
+
+      submissions.forEach(sub => {
+        const ans = (sub.answers || []).find(a => a.questionId === q.id);
+        if (isOpen) {
+          if (ans && (ans.awardedPoints != null || (ans.selectedAnswer && String(ans.selectedAnswer).trim()))) {
+            omittedCount--;
+          }
+          if (ans && ans.awardedPoints != null && !isNaN(Number(ans.awardedPoints))) {
+            const earned = Math.max(0, Math.min(maxPts, Number(ans.awardedPoints)));
+            totalEarned += earned;
+            if (earned + 1e-9 >= maxPts * passThreshold) correctCount++;
+          }
+        } else {
+          if (ans && ans.selectedAnswer) {
+            omittedCount--;
+            if (ans.isCorrect) {
+              correctCount++;
+              totalEarned += maxPts;
+            }
+          }
+        }
+      });
+
+      const maxPossible = submittedCount * maxPts;
+      const percent = maxPossible > 0 ? Math.round((totalEarned / maxPossible) * 1000) / 10 : 0;
+      const omittedPercent = submittedCount > 0 ? Math.round((omittedCount / submittedCount) * 1000) / 10 : 0;
+
+      return {
+        id: q.id,
+        questionNumber: q.questionNumber,
+        questionType: q.questionType || 'MULTIPLE_CHOICE',
+        maxPoints: maxPts,
+        skill: q.skill || 'General',
+        axis: q.axis || 'General',
+        correctAnswer: q.correctAnswer,
+        correctCount,
+        omittedCount,
+        percent,
+        omittedPercent,
+        isCritical: percent < 50
+      };
+    });
+
+    const criticalQuestions = submittedCount > 0
+      ? [...questionsAnalysis]
+          .filter(q => q.percent < 60)
+          .sort((a, b) => a.percent - b.percent)
+          .slice(0, 10)
+      : [];
+
+    // 7. Nómina de estudiantes ordenada
+    const subMap = Object.fromEntries(submissions.map(s => [s.studentRut, s]));
+    const roster = students.map((st, idx) => {
+      const sub = subMap[st.rut];
+      let earnedPoints = 0;
+      let correctCount = 0;
+
+      if (sub && sub.answers) {
+        sub.answers.forEach(ans => {
+          const q = questions.find(qu => qu.id === ans.questionId);
+          if (!q) return;
+          const maxPts = getQuestionMaxPoints(q);
+          if (isOpenQuestion(q)) {
+            if (ans.awardedPoints != null) {
+              const pts = Math.max(0, Math.min(maxPts, Number(ans.awardedPoints)));
+              earnedPoints += pts;
+              if (pts + 1e-9 >= maxPts * passThreshold) correctCount++;
+            }
+          } else if (ans.isCorrect) {
+            earnedPoints += maxPts;
+            correctCount++;
+          }
+        });
+      }
+
+      return {
+        index: idx + 1,
+        rut: st.rut,
+        name: st.name,
+        state: sub ? 'SUBMITTED' : 'AUSENTE',
+        grade: sub ? (sub.grade != null ? Math.round(sub.grade * 10) / 10 : 1.0) : null,
+        percent: sub ? (sub.percent != null ? Math.round(sub.percent * 10) / 10 : 0) : null,
+        simceScore: sub ? sub.simceScore : null,
+        achievementLevel: sub ? sub.achievementLevel : null,
+        correctCount: sub ? correctCount : null,
+        earnedPoints: sub ? Math.round(earnedPoints * 10) / 10 : null,
+        submittedAt: sub ? sub.submittedAt : null
+      };
+    });
+
+    const cLvl = (course.level || '').replace('B', '° Básico').replace('M', '° Medio');
+    const courseFullName = `${cLvl} ${course.letter} (${course.year})`;
+
+    return res.json({
+      institution: {
+        name: 'COLEGIO CONCEPCIÓN CHILLÁN',
+        department: 'Unidad Técnica Pedagógica · Coordinación Académica',
+        systemName: 'Plataforma Integral de Evaluaciones y Ensayos'
+      },
+      assignment: {
+        id: assignment.id,
+        opensAt: assignment.opensAt,
+        closesAt: assignment.closesAt,
+        released: Boolean(assignment.released)
+      },
+      exam: {
+        id: exam.id,
+        title: exam.title,
+        subject: exam.subject,
+        level: exam.level,
+        examType: exam.examType || 'ENSAYO',
+        gradingMode,
+        passThreshold,
+        passThresholdPercent,
+        totalQuestions: questions.length,
+        maxTotalPoints,
+        hasWeightedPoints
+      },
+      course: {
+        id: course.id,
+        level: course.level,
+        letter: course.letter,
+        year: course.year,
+        fullName: courseFullName
+      },
+      teacher: {
+        name: teacherName,
+        rut: teacherRut
+      },
+      summary: {
+        totalStudents,
+        submittedCount,
+        pendingCount,
+        participationPercent,
+        averageGrade,
+        averagePercent,
+        averageSimceScore,
+        approvedCount,
+        failedCount,
+        approvalPercent,
+        levelCounts,
+        gradeRanges
+      },
+      skills: skillsList,
+      axes: axesList,
+      criticalQuestions,
+      allQuestions: questionsAnalysis,
+      students: roster,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    handleAssignmentError(error, res, next);
+  }
+});
+
+// ==========================================
 // Plantilla de Respuestas para Escáner / Papel (.xlsx) Prellenada
 // ==========================================
 router.get('/assignments/:id/template-answers.xlsx', async (req, res, next) => {
