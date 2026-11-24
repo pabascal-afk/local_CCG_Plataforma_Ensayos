@@ -8,7 +8,7 @@ import {
   Timer, KeyRound, RotateCcw, Sparkles, CheckCircle2, ChevronRight,
   ShieldCheck, AlertTriangle, Layers, Copy, Inbox, CheckSquare,
   XCircle, MessageSquare, AlertCircle, Bot, ChevronDown, ChevronUp,
-  Printer, ScanLine, FileText, Monitor, Laptop, Zap, History, Pencil
+  Printer, ScanLine, FileText, Monitor, Laptop, Zap, History, Pencil, Archive
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
@@ -1137,6 +1137,15 @@ export default function AssignmentsDashboard() {
                   <span>Calendario</span>
                 </Link>
 
+                <Link
+                  href="/archive"
+                  className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-colors"
+                  title="Ver y consultar Evaluaciones Archivadas"
+                >
+                  <Archive className="w-3.5 h-3.5" /> 
+                  <span>Archivo</span>
+                </Link>
+
                 <div className="h-5 w-px bg-gray-200 mx-0.5" />
 
                 {/* BOTÓN: ASISTENTE DE PROMPTS IA (ICONO CON TOOLTIP) */}
@@ -2194,6 +2203,25 @@ export default function AssignmentsDashboard() {
                                 >
                                   <Zap className="w-3.5 h-3.5" />
                                 </button>
+                                {new Date() > new Date(a.closesAt) && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (confirm(`¿Deseas archivar "${a.Exam?.title}" para este curso?\n\nPasará al menú "Archivo" y podrás consultarla o desarchivarla en cualquier momento.`)) {
+                                        try {
+                                          await apiFetch(`/admin/assignments/${a.id}/archive`, { method: "POST" });
+                                          loadData();
+                                        } catch (e: any) {
+                                          alert(e?.message || "Error al archivar");
+                                        }
+                                      }
+                                    }}
+                                    className="text-gray-400 hover:text-slate-700 p-0.5 rounded transition cursor-pointer"
+                                    title="Archivar evaluación"
+                                  >
+                                    <Archive className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                                 <button 
                                   onClick={() => handleDelete(a.id)} 
                                   className="text-gray-400 hover:text-rose-600 p-0.5 rounded transition cursor-pointer"

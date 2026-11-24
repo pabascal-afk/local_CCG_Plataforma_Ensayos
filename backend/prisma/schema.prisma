@@ -102,6 +102,10 @@ model ExamAssignment {
   dynamicPassword    String?      // PIN / clave temporal de clase generada por el profesor
   dynamicPasswordActive Boolean   @default(false)
   applicationMode    String       @default("DIGITAL") // DIGITAL | PRINTED
+  isArchived         Boolean      @default(false)
+  archivedAt         DateTime?
+  archivedBy         String?      // RUT del usuario o 'SISTEMA_AUTO'
+  archivedReason     String?      // 'MANUAL' | 'AUTO_AFTER_DAYS'
   released           Boolean      @default(false) // resultados visibles al alumno
   releasedAt         DateTime?
   releasedBy         String?
@@ -265,6 +269,15 @@ model AuditLog {
   @@index([origenActor], map: "idx_audit_origen")
   @@index([desencadenadoPorId], map: "idx_audit_desencadenado")
   @@map("logs_auditoria")
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@map("system_settings")
 }
 
 
