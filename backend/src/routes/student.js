@@ -77,6 +77,8 @@ router.get('/assignments', async (req, res) => {
       isExtended: Boolean(submission?.extendedDeadline),
       released: a.released,
       applicationMode: effectiveMode,
+      isArchived: Boolean(a.isArchived),
+      archivedAt: a.archivedAt,
       exam: {
         ...a.exam,
         gradingMode: normalizeGradingMode(a.exam?.gradingMode),

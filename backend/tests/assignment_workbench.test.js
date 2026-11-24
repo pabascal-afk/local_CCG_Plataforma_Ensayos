@@ -85,8 +85,8 @@ describe('Pruebas de Asignación y Workbench (Filtros, Duración, PIN)', () => {
       .send({
         examId: testExam.id,
         courseId: testCourse.id,
-        opensAt: '2026-10-15T08:00:00.000Z',
-        closesAt: '2026-10-15T18:00:00.000Z',
+        opensAt: '2026-12-15T08:00:00.000Z',
+        closesAt: '2026-12-15T18:00:00.000Z',
         durationMinutes: 60,
         assignedTeacherRut: testTeacher.rut,
         dynamicPassword: 'simce4bz',

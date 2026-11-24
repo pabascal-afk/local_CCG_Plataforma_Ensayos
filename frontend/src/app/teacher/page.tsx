@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Users, CheckCircle2, ChevronRight, BarChart2, Download, FileText, Radio, Clock } from "lucide-react";
+import { Users, CheckCircle2, ChevronRight, BarChart2, Download, FileText, Radio, Clock, Archive } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -52,6 +52,13 @@ function TeacherReportsDashboard() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/archive"
+            className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-4 py-2 rounded-xl text-sm font-bold shadow-2xs transition-colors"
+          >
+            <Archive className="w-4 h-4 text-slate-600" />
+            <span>Ir al Archivo</span>
+          </Link>
           <Link
             href="/teacher/live"
             className="flex items-center gap-2 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 px-4 py-2 rounded-xl text-sm font-bold shadow-2xs transition-colors"
@@ -160,6 +167,25 @@ function TeacherReportsDashboard() {
                     <span>Ver Reporte</span>
                     <ChevronRight className="w-4 h-4" />
                   </Link>
+                  {isClosed && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (confirm(`¿Deseas archivar "${a.title}" (${a.courseName})?\n\nPasará al menú "Archivo" y podrás consultarla o desarchivarla en cualquier momento.`)) {
+                          try {
+                            await apiFetch(`/teacher/assignments/${a.id}/archive`, { method: "POST" });
+                            loadAssignments();
+                          } catch (e: any) {
+                            alert(e?.message || "Error al archivar");
+                          }
+                        }
+                      }}
+                      className="inline-flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-900 border border-slate-200 font-semibold px-2.5 py-2.5 rounded-lg text-xs transition cursor-pointer"
+                      title="Archivar evaluación (pasa al menú Archivo)"
+                    >
+                      <Archive className="w-4 h-4 text-slate-500" />
+                    </button>
+                  )}
                 </div>
               </div>
             );

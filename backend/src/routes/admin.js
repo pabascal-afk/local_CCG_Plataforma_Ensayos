@@ -11,6 +11,13 @@ const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet'
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
 const { computeResults, normalizeGradingMode, normalizePassThreshold } = require('../services/grading');
 const { recalculateExamSubmissions } = require('../services/submissions');
+const {
+  getArchiveSettings,
+  updateArchiveSettings,
+  runAutoArchive,
+  archiveAssignment,
+  unarchiveAssignment
+} = require('../services/archiveService');
 const auditoria = require('../services/auditoria');
 
 const router = express.Router();
@@ -3889,9 +3896,26 @@ router.delete('/bell-blocks/:id', checkAdmin, async (req, res, next) => {
 // =======================
 router.get('/assignments', async (req, res, next) => {
   try {
+    // Verificación pasiva de auto-archivado
+    await runAutoArchive(req).catch(err => console.error('[runAutoArchive passive error]:', err));
+
     const yearFilter = req.query.year ? parseInt(req.query.year, 10) : undefined;
+
+    // Filtro de archivado: por defecto solo no archivadas (false o null)
+    let isArchivedCondition = { not: true };
+    if (req.query.archived === 'true') {
+      isArchivedCondition = true;
+    } else if (req.query.archived === 'all') {
+      isArchivedCondition = undefined;
+    }
+
+    const whereClause = {
+      ...(yearFilter ? { course: { year: yearFilter } } : {}),
+      ...(isArchivedCondition !== undefined ? { isArchived: isArchivedCondition } : {})
+    };
+
     const assignments = await prisma.examAssignment.findMany({
-      where: yearFilter ? { course: { year: yearFilter } } : undefined,
+      where: whereClause,
       include: {
         exam: true,
         course: true,
@@ -3910,6 +3934,10 @@ router.get('/assignments', async (req, res, next) => {
       dynamicPassword: a.dynamicPassword,
       dynamicPasswordActive: Boolean(a.dynamicPasswordActive),
       applicationMode: a.applicationMode || 'DIGITAL',
+      isArchived: Boolean(a.isArchived),
+      archivedAt: a.archivedAt,
+      archivedBy: a.archivedBy,
+      archivedReason: a.archivedReason,
       status: a.status,
       originalOpensAt: a.originalOpensAt,
       cancelReason: a.cancelReason,
@@ -5057,6 +5085,61 @@ router.get('/assignments/:id/logs', async (req, res, next) => {
     const logs = await getAssignmentLogs(id);
     res.json(logs);
   } catch (error) {
+    next(error);
+  }
+});
+
+// =======================
+// ARCHIVADO DE ASIGNACIONES & CONFIGURACIÓN
+// =======================
+router.get('/settings/archive', async (req, res, next) => {
+  try {
+    const settings = await getArchiveSettings();
+    res.json(settings);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/settings/archive', checkAdmin, async (req, res, next) => {
+  try {
+    const { enabled, days } = req.body;
+    const updated = await updateArchiveSettings({ enabled, days, actor: req.user, req });
+    res.json({ ok: true, settings: updated, ...updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/assignments/auto-archive/run', checkAdmin, async (req, res, next) => {
+  try {
+    const result = await runAutoArchive(req);
+    res.json({ ok: true, message: 'Proceso de auto-archivado ejecutado con éxito', archivedCount: result.count, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/assignments/:id/archive', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const updated = await archiveAssignment(id, req.user, req);
+    res.json({ ok: true, message: 'Evaluación archivada con éxito', isArchived: true, archivedBy: updated.archivedBy, archivedReason: updated.archivedReason, assignment: updated });
+  } catch (error) {
+    if (error.message === 'NOT_FOUND') return res.status(404).json({ error: 'Asignación no encontrada' });
+    if (error.status === 400) return res.status(400).json({ error: error.message });
+    next(error);
+  }
+});
+
+router.post('/assignments/:id/unarchive', checkAdmin, async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const updated = await unarchiveAssignment(id, req.user, req);
+    res.json({ ok: true, message: 'Evaluación desarchivada y restaurada con éxito', isArchived: false, assignment: updated });
+  } catch (error) {
+    if (error.message === 'NOT_FOUND') return res.status(404).json({ error: 'Asignación no encontrada' });
+    if (error.status === 400) return res.status(400).json({ error: error.message });
     next(error);
   }
 });

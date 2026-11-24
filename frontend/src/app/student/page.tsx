@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Clock, CheckCircle2, PlayCircle, Lock, Award, AlertCircle, CalendarClock, FileText, Zap } from "lucide-react";
+import { Clock, CheckCircle2, PlayCircle, Lock, Award, AlertCircle, CalendarClock, FileText, Zap, Archive, ChevronDown } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -17,6 +17,8 @@ interface StudentAssignment {
   applicationMode?: "DIGITAL" | "PRINTED";
   submissionId: number | null;
   isExtended?: boolean;
+  isArchived?: boolean;
+  archivedAt?: string | null;
   exam: {
     title: string;
     subject: string;
@@ -48,8 +50,12 @@ function StudentDashboard() {
   const isPruebas = useIsPruebas();
   const [activeTab, setActiveTab] = useState<"assignments" | "trajectory">("assignments");
   const [items, setItems] = useState<StudentAssignment[] | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [trajectoryData, setTrajectoryData] = useState<any>(null);
   const [error, setError] = useState("");
+
+  const activeItems = (items || []).filter((a) => !a.isArchived);
+  const archivedItems = (items || []).filter((a) => a.isArchived);
 
   useEffect(() => {
     apiFetch<StudentAssignment[]>("/student/assignments")
@@ -117,13 +123,13 @@ function StudentDashboard() {
       {activeTab === "assignments" ? (
         <div className="space-y-4">
           {!items && !error && <p className="text-gray-500 animate-pulse">Cargando…</p>}
-          {items?.length === 0 && (
+          {items && activeItems.length === 0 && archivedItems.length === 0 && (
             <div className="bg-white border rounded-xl p-10 text-center text-gray-500">
               {isPruebas ? "Aún no tienes pruebas asignadas." : "Aún no tienes ensayos asignados."}
             </div>
           )}
 
-          {items?.map((a) => {
+          {activeItems.map((a) => {
             const badge = BADGE[a.state];
             const Icon = badge.icon;
             return (
@@ -175,6 +181,64 @@ function StudentDashboard() {
               </div>
             );
           })}
+
+          {archivedItems.length > 0 && (
+            <div className="pt-4 border-t border-gray-200 mt-6">
+              <button
+                type="button"
+                onClick={() => setShowArchived((prev) => !prev)}
+                className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 text-slate-700 font-bold text-sm transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <Archive className="w-4 h-4 text-slate-500" />
+                  <span>Evaluaciones Pasadas y Archivadas ({archivedItems.length})</span>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${showArchived ? "rotate-180" : ""}`} />
+              </button>
+
+              {showArchived && (
+                <div className="mt-3 space-y-3">
+                  {archivedItems.map((a) => {
+                    const badge = BADGE[a.state];
+                    const Icon = badge.icon;
+                    return (
+                      <div
+                        key={a.id}
+                        className="bg-white/80 border border-slate-200 rounded-xl p-4 shadow-2xs flex items-center justify-between opacity-85 hover:opacity-100 transition-opacity"
+                      >
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{a.exam.subject}</p>
+                          <h2 className="text-base font-bold text-gray-700">{a.exam.title}</h2>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {a.exam.questionCount} preguntas
+                            {a.exam.durationMinutes ? ` · ${a.exam.durationMinutes} minutos` : ""} · Cerrada el {fmt(a.closesAt)}
+                          </p>
+                          <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${badge.cls}`}>
+                              <Icon className="w-3 h-3 mr-1" /> {badge.label}
+                            </span>
+                            <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-xs font-medium">
+                              <Archive className="w-3 h-3 text-slate-400" />
+                              Archivada
+                            </span>
+                          </div>
+                        </div>
+
+                        {a.state === "RESULTS" && a.submissionId && (
+                          <Link
+                            href={`/student/results/${a.submissionId}`}
+                            className="ml-4 shrink-0 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold border border-purple-200 px-4 py-2 rounded-lg text-xs"
+                          >
+                            Ver resultados
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-6">

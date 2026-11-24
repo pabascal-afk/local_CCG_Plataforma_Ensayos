@@ -16,6 +16,12 @@ const {
   normalizePassThreshold
 } = require('../services/grading');
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
+const {
+  getArchiveSettings,
+  runAutoArchive,
+  archiveAssignment,
+  unarchiveAssignment
+} = require('../services/archiveService');
 const auditoria = require('../services/auditoria');
 
 const router = express.Router();
@@ -80,6 +86,9 @@ async function getAllowedCourseIds(user) {
 
 router.get('/assignments', async (req, res, next) => {
   try {
+    // Verificación pasiva de auto-archivado
+    await runAutoArchive(req).catch(err => console.error('[runAutoArchive teacher passive error]:', err));
+
     const allowedCourses = await getAllowedCourseIds(req.user);
     const where = req.user.role === 'ADMIN' || req.user.role === 'DIRECTOR'
       ? {}
@@ -88,6 +97,17 @@ router.get('/assignments', async (req, res, next) => {
     const yearFilter = req.query.year ? parseInt(req.query.year, 10) : undefined;
     if (yearFilter) {
       where.course = { year: yearFilter };
+    }
+
+    let isArchivedCondition = { not: true };
+    if (req.query.archived === 'true') {
+      isArchivedCondition = true;
+    } else if (req.query.archived === 'all') {
+      isArchivedCondition = undefined;
+    }
+
+    if (isArchivedCondition !== undefined) {
+      where.isArchived = isArchivedCondition;
     }
     
     const assignments = await prisma.examAssignment.findMany({
@@ -122,6 +142,10 @@ router.get('/assignments', async (req, res, next) => {
         passThreshold: pThresh,
         passThresholdPercent: Math.round(pThresh * 1000) / 10,
         applicationMode: a.applicationMode || 'DIGITAL',
+        isArchived: Boolean(a.isArchived),
+        archivedAt: a.archivedAt,
+        archivedBy: a.archivedBy,
+        archivedReason: a.archivedReason,
         opensAt: a.opensAt,
         closesAt: a.closesAt,
         released: a.released,
@@ -502,6 +526,7 @@ async function getAssignmentIfAllowed(id, user) {
 function handleAssignmentError(error, res, next) {
   if (error.message === 'NOT_FOUND') return res.status(404).json({ error: 'No encontrado' });
   if (error.message === 'FORBIDDEN') return res.status(403).json({ error: 'No autorizado' });
+  if (error.status === 400) return res.status(400).json({ error: error.message });
   next(error);
 }
 
@@ -635,6 +660,7 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         status: assignment.status,
         durationMinutes: assignment.exam?.durationMinutes || null,
         applicationMode: assignment.applicationMode || 'DIGITAL',
+        isArchived: Boolean(assignment.isArchived),
         gradingMode: liveGradingMode,
         passThreshold: livePassThreshold,
         passThresholdPercent: Math.round(livePassThreshold * 1000) / 10
@@ -2912,6 +2938,32 @@ router.patch('/assignments/:id/mode', async (req, res, next) => {
     });
 
     res.json(updated);
+  } catch (error) {
+    handleAssignmentError(error, res, next);
+  }
+});
+
+// ==========================================
+// Archivado y Desarchivado de Evaluaciones
+// ==========================================
+
+router.post('/assignments/:id/archive', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    await getAssignmentIfAllowed(id, req.user);
+    const updated = await archiveAssignment(id, req.user, req);
+    res.json({ ok: true, message: 'Evaluación archivada con éxito', isArchived: true, ...updated, assignment: updated });
+  } catch (error) {
+    handleAssignmentError(error, res, next);
+  }
+});
+
+router.post('/assignments/:id/unarchive', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    await getAssignmentIfAllowed(id, req.user);
+    const updated = await unarchiveAssignment(id, req.user, req);
+    res.json({ ok: true, message: 'Evaluación desarchivada y restaurada con éxito', isArchived: false, ...updated, assignment: updated });
   } catch (error) {
     handleAssignmentError(error, res, next);
   }
