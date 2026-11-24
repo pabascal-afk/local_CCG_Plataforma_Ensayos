@@ -2,15 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Users, Clock, CheckCircle2, ChevronRight, BarChart2, Download, Headphones, Zap, Plus } from "lucide-react";
+import { Users, CheckCircle2, ChevronRight, BarChart2, Download, FileText, Radio, Clock } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useSchoolYear } from "@/context/SchoolYearContext";
 import { useIsPruebas } from "@/lib/useIsPruebas";
-import AudioCutterModal from "@/components/AudioCutterModal";
-import ReactivateCourseModal from "@/components/ReactivateCourseModal";
-import AssignExamModal from "@/components/AssignExamModal";
 
 type Assignment = {
   id: number;
@@ -27,13 +24,10 @@ type Assignment = {
   totalStudents: number;
 };
 
-function TeacherDashboard() {
+function TeacherReportsDashboard() {
   const { selectedYear } = useSchoolYear();
   const isPruebas = useIsPruebas();
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
-  const [selectedAudioAssignment, setSelectedAudioAssignment] = useState<Assignment | null>(null);
-  const [selectedReactivateAssignment, setSelectedReactivateAssignment] = useState<Assignment | null>(null);
-  const [showAssignModal, setShowAssignModal] = useState(false);
   const [error, setError] = useState("");
 
   const loadAssignments = () => {
@@ -50,28 +44,28 @@ function TeacherDashboard() {
     <div className="p-8 max-w-6xl mx-auto">
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Portal del Profesor</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {isPruebas ? "Reportes de Evaluaciones" : "Reportes de Ensayos"}
+          </h1>
           <p className="text-gray-500">
-            {isPruebas
-              ? "Monitoreo y resultados de las evaluaciones asignadas a tus cursos."
-              : "Monitoreo y resultados de los ensayos asignados a tus cursos."}
+            Análisis de resultados, psicometría, habilidades e informes descargables por curso.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => setShowAssignModal(true)}
-            className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition cursor-pointer"
+          <Link
+            href="/teacher/live"
+            className="flex items-center gap-2 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 px-4 py-2 rounded-xl text-sm font-bold shadow-2xs transition-colors"
           >
-            <Plus className="w-4 h-4" />
-            <span>{isPruebas ? "Asignar Prueba" : "Asignar Ensayo"}</span>
-          </button>
+            <Radio className="w-4 h-4 text-emerald-600" />
+            <span>Ir a Monitor En Vivo</span>
+          </Link>
           {assignments && assignments.length > 0 && (
             <button
               onClick={() => {
                 const token = typeof window !== "undefined" ? localStorage.getItem("simce_token") || "" : "";
                 window.location.href = `/api/teacher/assignments-export.xlsx?token=${token}`;
               }}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-xs transition-colors"
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-xs transition-colors cursor-pointer"
             >
               <Download className="w-4 h-4" /> Exportar Resumen a Excel
             </button>
@@ -101,7 +95,8 @@ function TeacherDashboard() {
             const closes = new Date(a.closesAt);
             const isLive = now >= opens && now <= closes;
             const isClosed = now > closes;
-            
+            const isScheduled = now < opens;
+
             return (
               <div key={a.id} className="bg-white border rounded-xl p-6 shadow-sm flex flex-col relative overflow-hidden group hover:border-blue-300 transition-colors">
                 {isLive && (
@@ -114,26 +109,31 @@ function TeacherDashboard() {
                     Finalizado
                   </div>
                 )}
-                
-                <div className="flex items-center gap-2 mb-3">
+                {isScheduled && (
+                  <div className="absolute top-0 right-0 bg-blue-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg uppercase tracking-wider flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> Programado
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 mb-3 pr-16">
                   <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-1 rounded">
                     {a.courseName}
                   </span>
-                  <span className="text-xs text-gray-500 uppercase font-semibold">
+                  <span className="text-xs text-gray-500 uppercase font-semibold truncate">
                     {a.subject}
                   </span>
                 </div>
-                
+
                 <h3 className="font-bold text-gray-900 mb-4 line-clamp-2" title={a.title}>
                   {a.title}
                 </h3>
-                
+
                 <div className="mt-auto space-y-2 mb-6 text-sm text-gray-600">
                   <div className="flex justify-between items-center bg-gray-50 px-3 py-2 rounded">
                     <span className="flex items-center"><Users className="w-4 h-4 mr-2 text-gray-400" /> Rendición</span>
                     <span className="font-semibold text-gray-900">{a.submissionsCount} / {a.totalStudents}</span>
                   </div>
-                  
+
                   <div className="flex justify-between items-center px-3 py-2">
                     <span className="flex items-center"><CheckCircle2 className="w-4 h-4 mr-2 text-gray-400" /> Resultados</span>
                     <span className={`font-semibold ${a.released ? 'text-green-600' : 'text-amber-600'}`}>
@@ -141,31 +141,24 @@ function TeacherDashboard() {
                     </span>
                   </div>
                 </div>
-                
+
                 <div className="flex gap-2">
-                  <button 
-                    type="button"
-                    onClick={() => setSelectedAudioAssignment(a)}
-                    className="inline-flex items-center justify-center bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold px-3 py-2.5 rounded-lg text-xs gap-1.5 transition shadow-2xs"
-                    title="Gestionar y cortar audios para este examen"
+                  <Link
+                    href={`/teacher/assignments/${a.id}/report`}
+                    target="_blank"
+                    className="inline-flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3 py-2.5 rounded-lg text-xs gap-1.5 transition shadow-2xs"
+                    title="Generar e imprimir Informe Pedagógico en PDF"
                   >
-                    <Headphones className="w-4 h-4 text-purple-600" />
-                    <span>Audios</span>
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => setSelectedReactivateAssignment(a)}
-                    className="inline-flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold px-3 py-2.5 rounded-lg text-xs gap-1.5 transition shadow-2xs cursor-pointer"
-                    title="Extender plazo o reactivar evaluación para este curso"
+                    <FileText className="w-4 h-4 text-rose-600" />
+                    <span>Informe PDF</span>
+                  </Link>
+                  <Link
+                    href={`/teacher/assignments/${a.id}`}
+                    className="flex-1 inline-flex items-center justify-center bg-gray-50 hover:bg-blue-50 text-blue-600 font-semibold py-2.5 px-3 rounded-lg border border-transparent group-hover:border-blue-200 transition-colors text-sm gap-1.5"
                   >
-                    <Zap className="w-3.5 h-3.5 text-amber-600 fill-current" />
-                    <span>Reactivar</span>
-                  </button>
-                  <Link 
-                    href={`/teacher/assignments/${a.id}`} 
-                    className="flex-1 inline-flex items-center justify-center bg-gray-50 hover:bg-blue-50 text-blue-600 font-semibold py-2.5 rounded-lg border border-transparent group-hover:border-blue-200 transition-colors text-sm"
-                  >
-                    Ver Reporte <ChevronRight className="w-4 h-4 ml-1" />
+                    <BarChart2 className="w-4 h-4" />
+                    <span>Ver Reporte</span>
+                    <ChevronRight className="w-4 h-4" />
                   </Link>
                 </div>
               </div>
@@ -173,38 +166,6 @@ function TeacherDashboard() {
           })}
         </div>
       )}
-
-      {/* Modal Cortador de Audio */}
-      {selectedAudioAssignment && (
-        <AudioCutterModal
-          isOpen={Boolean(selectedAudioAssignment)}
-          onClose={() => setSelectedAudioAssignment(null)}
-          assignmentId={selectedAudioAssignment.id}
-          examId={selectedAudioAssignment.examId}
-          examTitle={selectedAudioAssignment.title}
-          questionCount={30}
-        />
-      )}
-
-      {/* Modal Reactivar Curso */}
-      {selectedReactivateAssignment && (
-        <ReactivateCourseModal
-          isOpen={Boolean(selectedReactivateAssignment)}
-          onClose={() => setSelectedReactivateAssignment(null)}
-          assignmentId={selectedReactivateAssignment.id}
-          currentClosesAt={selectedReactivateAssignment.closesAt}
-          examTitle={selectedReactivateAssignment.title}
-          courseName={selectedReactivateAssignment.courseName}
-          onSuccess={loadAssignments}
-        />
-      )}
-
-      {/* Modal Asignar Evaluación Dinámica */}
-      <AssignExamModal
-        isOpen={showAssignModal}
-        onClose={() => setShowAssignModal(false)}
-        onSuccess={loadAssignments}
-      />
     </div>
   );
 }
@@ -214,7 +175,7 @@ export default function TeacherPage() {
     <RequireRole roles={["TEACHER", "ADMIN", "DIRECTOR"]}>
       {(user) => (
         <AppShell user={user}>
-          <TeacherDashboard />
+          <TeacherReportsDashboard />
         </AppShell>
       )}
     </RequireRole>

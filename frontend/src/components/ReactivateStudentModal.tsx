@@ -15,7 +15,9 @@ interface ReactivateStudentModalProps {
     state?: string;
     grade?: number | null;
     extendedDeadline?: string | null;
+    applicationMode?: "DIGITAL" | "PRINTED" | null;
   } | null;
+  assignmentMode?: "DIGITAL" | "PRINTED";
   examDurationMinutes?: number | null;
   onSuccess: () => void;
   apiEndpointPrefix?: string; // default "/teacher"
@@ -26,6 +28,7 @@ export default function ReactivateStudentModal({
   onClose,
   assignmentId,
   student,
+  assignmentMode,
   examDurationMinutes,
   onSuccess,
   apiEndpointPrefix = "/teacher"
@@ -33,6 +36,7 @@ export default function ReactivateStudentModal({
   const isPruebas = useIsPruebas();
   const [deadlineInput, setDeadlineInput] = useState("");
   const [resetMode, setResetMode] = useState<"KEEP_ANSWERS" | "CLEAR_ANSWERS">("KEEP_ANSWERS");
+  const [applicationMode, setApplicationMode] = useState<"DIGITAL" | "PRINTED">("DIGITAL");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -53,9 +57,11 @@ export default function ReactivateStudentModal({
       const defaultDate = new Date(Date.now() + Math.max(durationMs, 2 * 60 * 60 * 1000));
       setDeadlineInput(toLocalIso(defaultDate));
       setResetMode("KEEP_ANSWERS");
+      // Si el alumno ya tiene un modo asignado, usarlo; sino, por defecto DIGITAL (ideal para pruebas atrasadas)
+      setApplicationMode(student.applicationMode || "DIGITAL");
       setError("");
     }
-  }, [isOpen, student, examDurationMinutes]);
+  }, [isOpen, student, examDurationMinutes, assignmentMode]);
 
   if (!isOpen || !student) return null;
 
@@ -97,7 +103,8 @@ export default function ReactivateStudentModal({
         method: "POST",
         body: {
           deadline: selectedDate.toISOString(),
-          resetMode
+          resetMode,
+          applicationMode
         }
       });
       onSuccess();
@@ -218,10 +225,68 @@ export default function ReactivateStudentModal({
             />
           </div>
 
+          {/* Formato de Rendición */}
+          <div>
+            <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
+              2. Formato de Rendición para este Alumno
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label 
+                className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                  applicationMode === "DIGITAL" 
+                    ? "bg-blue-50/70 border-blue-400 ring-1 ring-blue-400/40" 
+                    : "bg-white border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="studentApplicationMode"
+                  value="DIGITAL"
+                  checked={applicationMode === "DIGITAL"}
+                  onChange={() => setApplicationMode("DIGITAL")}
+                  className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <span className="text-xs font-extrabold text-slate-900 block">
+                    💻 Rendición Digital (Online)
+                  </span>
+                  <span className="text-[11px] text-slate-500 block leading-relaxed mt-0.5">
+                    El alumno ingresa desde su cuenta y rinde en pantalla. Permite tomar pruebas atrasadas por la web aunque la original haya sido en papel.
+                  </span>
+                </div>
+              </label>
+
+              <label 
+                className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition ${
+                  applicationMode === "PRINTED" 
+                    ? "bg-blue-50/70 border-blue-400 ring-1 ring-blue-400/40" 
+                    : "bg-white border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="studentApplicationMode"
+                  value="PRINTED"
+                  checked={applicationMode === "PRINTED"}
+                  onChange={() => setApplicationMode("PRINTED")}
+                  className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <span className="text-xs font-extrabold text-slate-900 block">
+                    📄 Rendición Impresa (Papel)
+                  </span>
+                  <span className="text-[11px] text-slate-500 block leading-relaxed mt-0.5">
+                    El alumno rinde físicamente con hoja de respuestas para posterior escaneo OMR o digitación rápida.
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+
           {/* Modo de Respuestas */}
           <div>
             <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
-              2. Modo de Respuestas
+              3. Modo de Respuestas
             </label>
             <div className="space-y-2">
               <label 

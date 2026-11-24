@@ -33,7 +33,8 @@ async function getOwnSubmission(req, submissionId) {
 
 function assignmentState(a, submission, now = new Date()) {
   if (submission?.status === 'SUBMITTED') return a.released ? 'RESULTS' : 'SUBMITTED';
-  if (a.applicationMode === 'PRINTED') return 'PRINTED';
+  const effectiveMode = submission?.applicationMode || a.applicationMode || 'DIGITAL';
+  if (effectiveMode === 'PRINTED') return 'PRINTED';
   if (now < a.opensAt) return 'UPCOMING';
   
   const effectiveClosesAt = submission?.extendedDeadline ? new Date(submission.extendedDeadline) : new Date(a.closesAt);
@@ -67,6 +68,7 @@ router.get('/assignments', async (req, res) => {
 
   res.json(assignments.map((a) => {
     const submission = a.submissions[0] || null;
+    const effectiveMode = submission?.applicationMode || a.applicationMode || 'DIGITAL';
     const pThresh = normalizePassThreshold(a.exam?.passThreshold, 0.6);
     return {
       id: a.id,
@@ -74,7 +76,7 @@ router.get('/assignments', async (req, res) => {
       closesAt: submission?.extendedDeadline || a.closesAt,
       isExtended: Boolean(submission?.extendedDeadline),
       released: a.released,
-      applicationMode: a.applicationMode || 'DIGITAL',
+      applicationMode: effectiveMode,
       exam: {
         ...a.exam,
         gradingMode: normalizeGradingMode(a.exam?.gradingMode),
@@ -94,14 +96,15 @@ router.post('/assignments/:id/start', async (req, res) => {
   const assignment = await getOwnAssignment(req, Number(req.params.id));
   if (!assignment) return res.status(404).json({ error: 'Ensayo no encontrado' });
 
-  if (assignment.applicationMode === 'PRINTED') {
-    return res.status(403).json({ error: 'Esta evaluación está configurada para rendición impresa en papel. Tu profesor o el colegio aplicará la hoja de respuestas física.' });
-  }
-
   const now = new Date();
   let submission = await prisma.submission.findUnique({
     where: { studentRut_assignmentId: { studentRut: req.user.rut, assignmentId: assignment.id } },
   });
+
+  const effectiveMode = submission?.applicationMode || assignment.applicationMode || 'DIGITAL';
+  if (effectiveMode === 'PRINTED') {
+    return res.status(403).json({ error: 'Esta evaluación está configurada para rendición impresa en papel. Tu profesor o el colegio aplicará la hoja de respuestas física.' });
+  }
 
   if (submission?.status === 'SUBMITTED') {
     return res.status(409).json({ error: 'Ya entregaste este ensayo', submissionId: submission.id });

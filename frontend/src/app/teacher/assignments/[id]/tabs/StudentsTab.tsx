@@ -584,12 +584,24 @@ export default function StudentsTab({ id }: { id: number }) {
                   <td className="p-4 font-mono">{st.rut}</td>
                   <td className="p-4">
                     <span className="font-bold text-gray-800 block">{st.name}</span>
-                    {st.isExtended && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md mt-0.5">
-                        <Zap className="w-3 h-3 text-indigo-600 fill-current" />
-                        Plazo individual: {new Date(st.extendedDeadline).toLocaleDateString([], { day: "2-digit", month: "short" })} {new Date(st.extendedDeadline).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                      {st.isExtended && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+                          <Zap className="w-3 h-3 text-indigo-600 fill-current" />
+                          Plazo individual: {new Date(st.extendedDeadline).toLocaleDateString([], { day: "2-digit", month: "short" })} {new Date(st.extendedDeadline).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      )}
+                      {st.applicationMode === 'DIGITAL' && data?.assignment?.applicationMode === 'PRINTED' && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md" title="Rendición atrasada digital autorizada">
+                          💻 Digital (Atrasado)
+                        </span>
+                      )}
+                      {st.applicationMode === 'PRINTED' && data?.assignment?.applicationMode === 'DIGITAL' && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md" title="Rendición atrasada en papel autorizada">
+                          📄 Papel (Atrasado)
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="p-4">
                     {st.state === "NOT_STARTED" ? (
@@ -658,6 +670,7 @@ export default function StudentsTab({ id }: { id: number }) {
         onClose={() => setShowReactivateCourseModal(false)}
         assignmentId={id}
         currentClosesAt={data?.assignment?.closesAt}
+        currentMode={data?.assignment?.applicationMode}
         examTitle={data?.exam?.title}
         courseName={data?.course?.fullName}
         onSuccess={refreshData}
@@ -669,6 +682,7 @@ export default function StudentsTab({ id }: { id: number }) {
         onClose={() => setSelectedReactivateStudent(null)}
         assignmentId={id}
         student={selectedReactivateStudent}
+        assignmentMode={data?.assignment?.applicationMode}
         examDurationMinutes={data?.assignment?.durationMinutes}
         onSuccess={refreshData}
       />
@@ -678,6 +692,7 @@ export default function StudentsTab({ id }: { id: number }) {
         isOpen={showBulkReactivateModal}
         onClose={() => setShowBulkReactivateModal(false)}
         assignmentId={id}
+        assignmentMode={data?.assignment?.applicationMode}
         selectedStudents={selectedStudentObjects}
         onSuccess={() => {
           setSelectedRuts([]);

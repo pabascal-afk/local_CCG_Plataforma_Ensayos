@@ -14,6 +14,7 @@ import {
   LogOut,
   Calendar,
   ShieldCheck,
+  Radio,
 } from "lucide-react";
 import { clearSession, ROLE_LABEL, type Role, type SessionUser } from "@/lib/session";
 import { useSchoolYear } from "@/context/SchoolYearContext";
@@ -25,7 +26,8 @@ function getNav(isPruebas: boolean): Record<Role, NavItem[]> {
   return {
     STUDENT: [{ href: "/student", label: isPruebas ? "Mis Pruebas" : "Mis ensayos", icon: ClipboardList }],
     TEACHER: [
-      { href: "/teacher", label: "Mis cursos", icon: BarChart3 },
+      { href: "/teacher", label: "Reportes", icon: BarChart3 },
+      { href: "/teacher/live", label: "En Vivo", icon: Radio },
       { href: "/admin/calendar", label: isPruebas ? "Calendario Pruebas" : "Calendario SIMCE", icon: Calendar }
     ],
     ADMIN: [
@@ -35,13 +37,15 @@ function getNav(isPruebas: boolean): Record<Role, NavItem[]> {
       { href: "/admin/users", label: "Usuarios", icon: Users },
       { href: "/admin/exams", label: isPruebas ? "Pruebas" : "Ensayos", icon: FileText },
       { href: "/admin/assignments", label: "Asignaciones", icon: ClipboardList },
-      { href: "/teacher", label: "Reportes / En vivo", icon: BarChart3 },
+      { href: "/teacher", label: "Reportes", icon: BarChart3 },
+      { href: "/teacher/live", label: "En Vivo", icon: Radio },
       { href: "/admin/auditoria", label: "Auditoría / Logs", icon: ShieldCheck },
     ],
     DIRECTOR: [
       { href: "/admin/dashboard", label: "Dashboard Global", icon: LayoutDashboard },
       { href: "/admin/calendar", label: isPruebas ? "Calendario Pruebas" : "Calendario SIMCE", icon: Calendar },
-      { href: "/teacher", label: "Reportes Generales", icon: BarChart3 },
+      { href: "/teacher", label: "Reportes", icon: BarChart3 },
+      { href: "/teacher/live", label: "En Vivo", icon: Radio },
       { href: "/admin/auditoria", label: "Auditoría / Logs", icon: ShieldCheck },
     ],
   };
@@ -92,7 +96,10 @@ export default function AppShell({ user, children }: { user: SessionUser; childr
 
         <nav className="flex-1 p-3 space-y-1">
           {navItems[user.role].map((item) => {
-            const active = item.href === pathname || (item.href !== "/admin" && pathname.startsWith(item.href + "/"));
+            const active =
+              item.href === "/teacher"
+                ? pathname === "/teacher" || (pathname.startsWith("/teacher/") && !pathname.startsWith("/teacher/live"))
+                : item.href === pathname || (item.href !== "/admin" && pathname.startsWith(item.href + "/"));
             const Icon = item.icon;
             return (
               <Link

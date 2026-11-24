@@ -12,6 +12,7 @@ interface ReactivateBulkStudentsModalProps {
   isOpen: boolean;
   onClose: () => void;
   assignmentId: number;
+  assignmentMode?: "DIGITAL" | "PRINTED";
   selectedStudents: { rut: string; name: string }[];
   onSuccess: () => void;
   apiEndpointPrefix?: string;
@@ -21,6 +22,7 @@ export default function ReactivateBulkStudentsModal({
   isOpen,
   onClose,
   assignmentId,
+  assignmentMode,
   selectedStudents,
   onSuccess,
   apiEndpointPrefix = "/teacher"
@@ -41,6 +43,7 @@ export default function ReactivateBulkStudentsModal({
   const [selectedPreset, setSelectedPreset] = useState<string>("PLUS_90M");
   const [customDeadline, setCustomDeadline] = useState<string>(plus90MinStr);
   const [resetMode, setResetMode] = useState<"KEEP_ANSWERS" | "CLEAR_ANSWERS">("KEEP_ANSWERS");
+  const [applicationMode, setApplicationMode] = useState<"DIGITAL" | "PRINTED">("DIGITAL");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -73,6 +76,7 @@ export default function ReactivateBulkStudentsModal({
           ruts: selectedStudents.map(s => s.rut),
           deadline: d.toISOString(),
           resetMode,
+          applicationMode,
           note: note.trim() || undefined
         }
       });
@@ -185,6 +189,60 @@ export default function ReactivateBulkStudentsModal({
                 className="w-full text-xs font-semibold border border-gray-200 rounded-xl p-2.5 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-hidden"
                 required
               />
+            </div>
+          </div>
+
+          {/* Formato de Rendición Masivo */}
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">
+              Formato de Rendición para los Seleccionados
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label 
+                className={`p-3 rounded-xl border cursor-pointer flex items-start gap-2.5 transition-all ${
+                  applicationMode === "DIGITAL"
+                    ? "bg-blue-50/70 border-blue-600 text-blue-950 ring-1 ring-blue-600"
+                    : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="bulkAppMode"
+                  value="DIGITAL"
+                  checked={applicationMode === "DIGITAL"}
+                  onChange={() => setApplicationMode("DIGITAL")}
+                  className="mt-0.5 w-4 h-4 text-blue-600"
+                />
+                <div>
+                  <span className="text-xs font-bold block">💻 Rendición Digital (Online)</span>
+                  <span className="text-[11px] text-gray-500 block mt-0.5">
+                    Permite a los alumnos atrasados ingresar desde su cuenta y responder en pantalla.
+                  </span>
+                </div>
+              </label>
+
+              <label 
+                className={`p-3 rounded-xl border cursor-pointer flex items-start gap-2.5 transition-all ${
+                  applicationMode === "PRINTED"
+                    ? "bg-blue-50/70 border-blue-600 text-blue-950 ring-1 ring-blue-600"
+                    : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="bulkAppMode"
+                  value="PRINTED"
+                  checked={applicationMode === "PRINTED"}
+                  onChange={() => setApplicationMode("PRINTED")}
+                  className="mt-0.5 w-4 h-4 text-blue-600"
+                />
+                <div>
+                  <span className="text-xs font-bold block">📄 Rendición Impresa (Papel)</span>
+                  <span className="text-[11px] text-gray-500 block mt-0.5">
+                    Rendición física tradicional para posterior escaneo u hoja de respuestas.
+                  </span>
+                </div>
+              </label>
             </div>
           </div>
 

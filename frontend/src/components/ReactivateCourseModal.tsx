@@ -10,6 +10,7 @@ interface ReactivateCourseModalProps {
   onClose: () => void;
   assignmentId: number;
   currentClosesAt?: string;
+  currentMode?: "DIGITAL" | "PRINTED";
   examTitle?: string;
   courseName?: string;
   onSuccess: () => void;
@@ -21,6 +22,7 @@ export default function ReactivateCourseModal({
   onClose,
   assignmentId,
   currentClosesAt,
+  currentMode,
   examTitle,
   courseName,
   onSuccess,
@@ -30,6 +32,7 @@ export default function ReactivateCourseModal({
   const [closesAtInput, setClosesAtInput] = useState("");
   const [scope, setScope] = useState<"PENDING_ONLY" | "ALL_STUDENTS">("PENDING_ONLY");
   const [resetMode, setResetMode] = useState<"KEEP_ANSWERS" | "CLEAR_ANSWERS">("KEEP_ANSWERS");
+  const [applicationMode, setApplicationMode] = useState<"DIGITAL" | "PRINTED">("DIGITAL");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -51,9 +54,10 @@ export default function ReactivateCourseModal({
       setClosesAtInput(toLocalIso(defaultDate));
       setScope("PENDING_ONLY");
       setResetMode("KEEP_ANSWERS");
+      setApplicationMode(currentMode || "DIGITAL");
       setError("");
     }
-  }, [isOpen]);
+  }, [isOpen, currentMode]);
 
   if (!isOpen) return null;
 
@@ -95,7 +99,8 @@ export default function ReactivateCourseModal({
         body: {
           closesAt: selectedDate.toISOString(),
           scope,
-          resetMode
+          resetMode,
+          applicationMode
         }
       });
       onSuccess();
@@ -220,10 +225,68 @@ export default function ReactivateCourseModal({
             </div>
           </div>
 
+          {/* Formato de la Evaluación */}
+          <div>
+            <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
+              2. Formato de Rendición para el Curso
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label 
+                className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                  applicationMode === "DIGITAL" 
+                    ? "bg-amber-50/60 border-amber-400 ring-1 ring-amber-400/40" 
+                    : "bg-white border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="courseAppMode"
+                  value="DIGITAL"
+                  checked={applicationMode === "DIGITAL"}
+                  onChange={() => setApplicationMode("DIGITAL")}
+                  className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                />
+                <div>
+                  <span className="text-xs font-extrabold text-slate-900 block">
+                    💻 Rendición Digital (Online)
+                  </span>
+                  <span className="text-[11px] text-slate-500 block leading-relaxed mt-0.5">
+                    Permite que los estudiantes ingresen desde sus cuentas a rendir la prueba en pantalla.
+                  </span>
+                </div>
+              </label>
+
+              <label 
+                className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                  applicationMode === "PRINTED" 
+                    ? "bg-amber-50/60 border-amber-400 ring-1 ring-amber-400/40" 
+                    : "bg-white border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="courseAppMode"
+                  value="PRINTED"
+                  checked={applicationMode === "PRINTED"}
+                  onChange={() => setApplicationMode("PRINTED")}
+                  className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                />
+                <div>
+                  <span className="text-xs font-extrabold text-slate-900 block">
+                    📄 Rendición Impresa (Papel)
+                  </span>
+                  <span className="text-[11px] text-slate-500 block leading-relaxed mt-0.5">
+                    Rendición física con hoja de respuestas impresa para posterior escaneo OMR.
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+
           {/* Selector de Alcance */}
           <div>
             <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
-              2. ¿A quiénes aplica la reactivación?
+              3. ¿A quiénes aplica la reactivación?
             </label>
             <div className="space-y-2.5">
               <label 

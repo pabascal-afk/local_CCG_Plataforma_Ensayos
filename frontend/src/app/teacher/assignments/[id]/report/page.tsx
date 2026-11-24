@@ -190,7 +190,7 @@ export default function AssignmentReportPdfPage() {
     );
   }
 
-  const { exam, course, teacher, summary, skills, axes, criticalQuestions, students, generatedAt } = data;
+  const { exam, course, teacher, summary, skills, axes, criticalQuestions, students } = data;
   const isNormalMode = exam.gradingMode === "NORMAL";
 
   const totalSubmittedOrMax = Math.max(summary.submittedCount, 1);
@@ -725,34 +725,6 @@ export default function AssignmentReportPdfPage() {
                     })}
                   </tbody>
                 </table>
-              </div>
-            </section>
-
-            {/* 7. Cuadro de Firmas y Validación Institucional */}
-            <section className="mt-10 pt-6 border-t-2 border-slate-300 avoid-break">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-8 text-center text-xs text-slate-700 pt-8">
-                <div>
-                  <div className="border-b border-slate-400 mb-2 w-3/4 mx-auto" />
-                  <p className="font-bold text-slate-900">{teacher.name}</p>
-                  <p className="text-[11px] text-slate-500">Docente de Asignatura</p>
-                </div>
-                <div>
-                  <div className="border-b border-slate-400 mb-2 w-3/4 mx-auto" />
-                  <p className="font-bold text-slate-900">Coordinación UTP</p>
-                  <p className="text-[11px] text-slate-500">Unidad Técnica Pedagógica</p>
-                </div>
-                <div className="col-span-2 sm:col-span-1">
-                  <div className="border-b border-slate-400 mb-2 w-3/4 mx-auto" />
-                  <p className="font-bold text-slate-900">Dirección Académica</p>
-                  <p className="text-[11px] text-slate-500">Colegio Concepción Chillán</p>
-                </div>
-              </div>
-
-              <div className="mt-8 pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between text-[10px] text-slate-400">
-                <span>Documento oficial de evaluación curricular · Válido para libro de clases y registro institucional</span>
-                <span className="font-mono mt-1 sm:mt-0">
-                  Generado el: {new Date(generatedAt).toLocaleString("es-CL")}
-                </span>
               </div>
             </section>
 
