@@ -227,7 +227,7 @@ describe('Informe Pedagógico de Evaluación en PDF (GET /api/teacher/assignment
 
     // Institución
     expect(res.body.institution).toBeDefined();
-    expect(res.body.institution.name).toMatch(/Colegio Concepción/i);
+    expect(res.body.institution.name).toMatch(/Colegio Cerro Grande/i);
 
     // Evaluación
     expect(res.body.exam).toBeDefined();

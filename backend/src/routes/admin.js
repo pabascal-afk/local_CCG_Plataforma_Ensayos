@@ -695,7 +695,7 @@ router.get('/dashboard/multiannual/export.xlsx', async (req, res, next) => {
     });
 
     const workbook = new exceljs.Workbook();
-    workbook.creator = 'Colegio Concepción de Chillán';
+    workbook.creator = 'Colegio Cerro Grande';
 
     // HOJA 1: Resumen Multianual por Año
     const sheet1 = workbook.addWorksheet('Resumen Multianual');
@@ -830,7 +830,7 @@ router.get('/dashboard/export.xlsx', async (req, res, next) => {
     });
 
     const workbook = new exceljs.Workbook();
-    workbook.creator = 'Colegio Concepción de Chillán';
+    workbook.creator = 'Colegio Cerro Grande';
 
     // HOJA 1: Resumen Institucional
     const sheet1 = workbook.addWorksheet('Resumen Institucional');
@@ -991,11 +991,46 @@ router.get('/dashboard/export.xlsx', async (req, res, next) => {
 // =======================
 // CURSOS
 // =======================
+function parseCourseLevelInput({ nivel, ensenanza, level, fallbackLevel = null }) {
+  if (nivel !== undefined && ensenanza !== undefined) {
+    const nivelNum = parseInt(String(nivel).replace(/[^0-9]/g, ''), 10);
+    const ens = String(ensenanza).toUpperCase().includes('M') ? 'M' : 'B';
+    const valid = (ens === 'M' && nivelNum >= 1 && nivelNum <= 4) || (ens === 'B' && nivelNum >= 1 && nivelNum <= 8);
+    if (!valid) {
+      return { error: 'Nivel o enseñanza inválido (1°-8° Básica o 1°-4° Media)' };
+    }
+    return { level: `${nivelNum}${ens}` };
+  }
+  if (level !== undefined) {
+    const normalized = String(level).trim().toUpperCase();
+    if (!/^([1-8]B|[1-4]M)$/.test(normalized)) {
+      return { error: 'Nivel inválido. Usa formato como 4B, 6B o 2M (1°-8° Básica o 1°-4° Media)' };
+    }
+    return { level: normalized };
+  }
+  if (fallbackLevel) {
+    return { level: fallbackLevel };
+  }
+  return { error: 'Nivel inválido (1°-8° Básica o 1°-4° Media)' };
+}
+
+function normalizeCourseLetterInput(letter) {
+  const normalized = String(letter || '').trim().toUpperCase();
+  if (!normalized) {
+    return { error: 'La letra o identificador del curso es obligatoria' };
+  }
+  if (normalized.length > 20) {
+    return { error: 'La letra o identificador no puede superar los 20 caracteres' };
+  }
+  return { letter: normalized };
+}
+
 router.get('/courses', async (req, res, next) => {
   try {
     const yearFilter = req.query.year ? parseInt(req.query.year, 10) : undefined;
     const courses = await prisma.course.findMany({
       where: yearFilter ? { year: yearFilter } : undefined,
+      include: { _count: { select: { students: true, assignments: true, teachers: true } } },
       orderBy: [{ year: 'desc' }, { level: 'asc' }, { letter: 'asc' }],
     });
     res.json(courses);
@@ -1013,7 +1048,7 @@ router.get('/courses/export.xlsx', async (req, res, next) => {
     });
 
     const workbook = new exceljs.Workbook();
-    workbook.creator = 'Colegio Concepción de Chillán';
+    workbook.creator = 'Colegio Cerro Grande';
     const sheet = workbook.addWorksheet('Cursos');
 
     sheet.columns = [
@@ -1057,15 +1092,21 @@ router.get('/courses/export.xlsx', async (req, res, next) => {
 
 router.post('/courses', checkAdmin, async (req, res, next) => {
   try {
-    let { year, level, letter, nivel, ensenanza } = req.body;
-    if (nivel !== undefined && ensenanza !== undefined) {
-      const nivelNum = String(nivel).replace(/[^0-9]/g, '');
-      const ens = String(ensenanza).toUpperCase().includes('M') ? 'M' : 'B';
-      level = `${nivelNum}${ens}`;
+    const { year, level, letter, nivel, ensenanza } = req.body;
+    const parsedLevel = parseCourseLevelInput({ nivel, ensenanza, level });
+    if (parsedLevel.error) return res.status(400).json({ error: parsedLevel.error });
+
+    const parsedLetter = normalizeCourseLetterInput(letter);
+    if (parsedLetter.error) return res.status(400).json({ error: parsedLetter.error });
+
+    const yearNum = year !== undefined ? parseInt(year, 10) : new Date().getFullYear();
+    if (!Number.isInteger(yearNum) || yearNum < 2000 || yearNum > 2100) {
+      return res.status(400).json({ error: 'Año escolar inválido' });
     }
-    const yearNum = parseInt(year, 10) || new Date().getFullYear();
+
     const course = await prisma.course.create({
-      data: { year: yearNum, level: level.toUpperCase(), letter: letter.toUpperCase() },
+      data: { year: yearNum, level: parsedLevel.level, letter: parsedLetter.letter },
+      include: { _count: { select: { students: true, assignments: true, teachers: true } } },
     });
     auditoria.registrarAuditoria({
       req,
@@ -1087,11 +1128,44 @@ router.post('/courses', checkAdmin, async (req, res, next) => {
 router.put('/courses/:id', checkAdmin, async (req, res, next) => {
   try {
     const courseId = parseInt(req.params.id, 10);
-    const { year, level, letter } = req.body;
+    if (!Number.isInteger(courseId) || courseId <= 0) {
+      return res.status(400).json({ error: 'ID de curso inválido' });
+    }
+
+    const existing = await prisma.course.findUnique({
+      where: { id: courseId },
+      include: { _count: { select: { students: true, assignments: true, teachers: true } } },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Curso no encontrado' });
+    }
+
+    const { year, level, letter, nivel, ensenanza } = req.body;
+    const parsedLevel = parseCourseLevelInput({ nivel, ensenanza, level, fallbackLevel: existing.level });
+    if (parsedLevel.error) return res.status(400).json({ error: parsedLevel.error });
+
+    let nextLetter = existing.letter;
+    if (letter !== undefined) {
+      const parsedLetter = normalizeCourseLetterInput(letter);
+      if (parsedLetter.error) return res.status(400).json({ error: parsedLetter.error });
+      nextLetter = parsedLetter.letter;
+    }
+
+    let nextYear = existing.year;
+    if (year !== undefined) {
+      const parsedYear = parseInt(year, 10);
+      if (!Number.isInteger(parsedYear) || parsedYear < 2000 || parsedYear > 2100) {
+        return res.status(400).json({ error: 'Año escolar inválido' });
+      }
+      nextYear = parsedYear;
+    }
+
     const course = await prisma.course.update({
       where: { id: courseId },
-      data: { year, level, letter },
+      data: { year: nextYear, level: parsedLevel.level, letter: nextLetter },
+      include: { _count: { select: { students: true, assignments: true, teachers: true } } },
     });
+
     auditoria.registrarAuditoria({
       req,
       modulo: 'Cursos',
@@ -1099,11 +1173,22 @@ router.put('/courses/:id', checkAdmin, async (req, res, next) => {
       nivel: 'info',
       entidad: 'Curso',
       entidad_id: course.id,
-      descripcion: `Modificó curso #${course.id} (${course.level} ${course.letter} · ${course.year})`,
-      detalles: course
+      descripcion: `Modificó curso #${course.id}: ${existing.level} ${existing.letter} (${existing.year}) → ${course.level} ${course.letter} (${course.year})`,
+      detalles: {
+        before: { level: existing.level, letter: existing.letter, year: existing.year },
+        after: { level: course.level, letter: course.letter, year: course.year },
+        affectedStudents: course._count.students,
+        affectedAssignments: course._count.assignments
+      }
     });
     res.json(course);
   } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(400).json({ error: 'Ya existe otro curso con ese nivel, letra y año escolar' });
+    }
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: 'Curso no encontrado' });
+    }
     next(error);
   }
 });
@@ -1242,7 +1327,7 @@ router.get('/users/export.xlsx', async (req, res, next) => {
     });
 
     const workbook = new exceljs.Workbook();
-    workbook.creator = 'Colegio Concepción de Chillán';
+    workbook.creator = 'Colegio Cerro Grande';
     const sheet = workbook.addWorksheet('Usuarios');
 
     sheet.columns = [
@@ -2183,7 +2268,7 @@ router.get('/exams/export.xlsx', async (req, res, next) => {
     });
 
     const workbook = new exceljs.Workbook();
-    workbook.creator = 'Colegio Concepción de Chillán';
+    workbook.creator = 'Colegio Cerro Grande';
     const sheet = workbook.addWorksheet('Catálogo de Ensayos');
 
     sheet.columns = [
@@ -3893,7 +3978,7 @@ router.get('/assignments/export.xlsx', async (req, res, next) => {
     });
 
     const workbook = new exceljs.Workbook();
-    workbook.creator = 'Colegio Concepción de Chillán';
+    workbook.creator = 'Colegio Cerro Grande';
     const sheet = workbook.addWorksheet('Asignaciones');
 
     sheet.columns = [
@@ -4517,7 +4602,7 @@ router.patch('/assignments/:id/cancel', checkAdmin, async (req, res, next) => {
 router.post('/assignments/:id/reactivate', checkAdmin, async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const { closesAt, scope = 'PENDING_ONLY', resetMode = 'KEEP_ANSWERS' } = req.body;
+    const { closesAt, scope = 'PENDING_ONLY', resetMode = 'KEEP_ANSWERS', applicationMode } = req.body;
 
     if (!closesAt) {
       return res.status(400).json({ error: 'Debes especificar la nueva fecha y hora de cierre' });
@@ -4542,6 +4627,9 @@ router.post('/assignments/:id/reactivate', checkAdmin, async (req, res, next) =>
     };
     if (new Date(current.opensAt) > now) {
       updateData.opensAt = now;
+    }
+    if (applicationMode === 'PRINTED' || applicationMode === 'DIGITAL') {
+      updateData.applicationMode = applicationMode;
     }
 
     const updated = await prisma.examAssignment.update({
@@ -4612,7 +4700,8 @@ router.post('/assignments/:id/reactivate', checkAdmin, async (req, res, next) =>
         newClosesAt,
         scope,
         resetMode,
-        affectedSubmissions
+        affectedSubmissions,
+        ...(updateData.applicationMode ? { applicationMode: updateData.applicationMode } : {})
       },
       note: req.body.note || null
     });
@@ -4624,8 +4713,8 @@ router.post('/assignments/:id/reactivate', checkAdmin, async (req, res, next) =>
       nivel: 'warning',
       entidad: 'Asignación',
       entidad_id: id,
-      descripcion: `Reactivó asignación #${id} para el curso (alcance: ${scope}, afectados: ${affectedSubmissions})`,
-      detalles: { assignmentId: id, scope, resetMode, newClosesAt, affectedSubmissions }
+      descripcion: `Reactivó asignación #${id} para el curso (alcance: ${scope}, afectados: ${affectedSubmissions}${updateData.applicationMode ? `, modalidad: ${updateData.applicationMode}` : ''})`,
+      detalles: { assignmentId: id, scope, resetMode, newClosesAt, affectedSubmissions, ...(updateData.applicationMode ? { applicationMode: updateData.applicationMode } : {}) }
     });
 
     res.json({
@@ -4643,7 +4732,8 @@ router.post('/assignments/:id/students/:rut/reactivate', checkAdmin, async (req,
   try {
     const id = parseInt(req.params.id, 10);
     const rut = req.params.rut;
-    const { deadline, resetMode = 'KEEP_ANSWERS', note } = req.body;
+    const { deadline, resetMode = 'KEEP_ANSWERS', note, applicationMode } = req.body;
+    const modeValue = applicationMode === 'PRINTED' || applicationMode === 'DIGITAL' ? applicationMode : undefined;
 
     if (!deadline) {
       return res.status(400).json({ error: 'Debes especificar el plazo para el estudiante' });
@@ -4682,7 +4772,8 @@ router.post('/assignments/:id/students/:rut/reactivate', checkAdmin, async (req,
           startedAt: new Date(0),
           reactivatedAt: now,
           extendedDeadline: newDeadline,
-          autoSubmitted: false
+          autoSubmitted: false,
+          ...(modeValue ? { applicationMode: modeValue } : {})
         }
       });
     } else {
@@ -4712,7 +4803,8 @@ router.post('/assignments/:id/students/:rut/reactivate', checkAdmin, async (req,
           simceScore: null,
           achievementLevel: null,
           theta: null,
-          seTheta: null
+          seTheta: null,
+          ...(modeValue ? { applicationMode: modeValue } : {})
         }
       });
     }
@@ -4724,7 +4816,8 @@ router.post('/assignments/:id/students/:rut/reactivate', checkAdmin, async (req,
       targetStudent: { rut: student.rut, name: student.name },
       details: {
         deadline: newDeadline,
-        resetMode
+        resetMode,
+        ...(modeValue ? { applicationMode: modeValue } : {})
       },
       note: note || null
     });
@@ -4736,14 +4829,16 @@ router.post('/assignments/:id/students/:rut/reactivate', checkAdmin, async (req,
       nivel: 'warning',
       entidad: 'Entrega',
       entidad_id: `${id}:${student.rut}`,
-      descripcion: `Reactivó plazo individual para ${student.name} (${student.rut}) en asignación #${id}`,
-      detalles: { assignmentId: id, studentRut: student.rut, studentName: student.name, deadline: newDeadline, resetMode }
+      descripcion: `Reactivó plazo individual para ${student.name} (${student.rut}) en asignación #${id}${modeValue ? ` (modalidad: ${modeValue})` : ''}`,
+      detalles: { assignmentId: id, studentRut: student.rut, studentName: student.name, deadline: newDeadline, resetMode, ...(modeValue ? { applicationMode: modeValue } : {}) }
     });
 
     res.json({
       message: `Evaluación reactivada exitosamente para ${student.name}`,
       student: { rut: student.rut, name: student.name },
-      extendedDeadline: newDeadline
+      extendedDeadline: newDeadline,
+      status: 'IN_PROGRESS',
+      applicationMode: submission.applicationMode || null
     });
   } catch (error) {
     next(error);
@@ -4842,7 +4937,8 @@ router.post('/assignments/:id/students/bulk-reactivate', checkAdmin, async (req,
     const assignment = await prisma.examAssignment.findUnique({ where: { id } });
     if (!assignment) return res.status(404).json({ error: 'Asignación no encontrada' });
 
-    const { ruts, deadline, resetMode = 'KEEP_ANSWERS', note } = req.body;
+    const { ruts, deadline, resetMode = 'KEEP_ANSWERS', note, applicationMode } = req.body;
+    const modeValue = applicationMode === 'PRINTED' || applicationMode === 'DIGITAL' ? applicationMode : undefined;
 
     if (!Array.isArray(ruts) || ruts.length === 0) {
       return res.status(400).json({ error: 'Debes seleccionar al menos un estudiante.' });
@@ -4881,7 +4977,8 @@ router.post('/assignments/:id/students/bulk-reactivate', checkAdmin, async (req,
             startedAt: new Date(0),
             extendedDeadline: newDeadline,
             reactivatedAt: now,
-            autoSubmitted: false
+            autoSubmitted: false,
+            ...(modeValue ? { applicationMode: modeValue } : {})
           }
         });
       } else {
@@ -4906,7 +5003,8 @@ router.post('/assignments/:id/students/bulk-reactivate', checkAdmin, async (req,
             simceScore: resetMode === 'CLEAR_ANSWERS' ? null : submission.simceScore,
             achievementLevel: resetMode === 'CLEAR_ANSWERS' ? null : submission.achievementLevel,
             theta: resetMode === 'CLEAR_ANSWERS' ? null : submission.theta,
-            seTheta: resetMode === 'CLEAR_ANSWERS' ? null : submission.seTheta
+            seTheta: resetMode === 'CLEAR_ANSWERS' ? null : submission.seTheta,
+            ...(modeValue ? { applicationMode: modeValue } : {})
           }
         });
       }
@@ -4922,7 +5020,8 @@ router.post('/assignments/:id/students/bulk-reactivate', checkAdmin, async (req,
         affectedCount: affectedStudents.length,
         students: affectedStudents,
         deadline: newDeadline,
-        resetMode
+        resetMode,
+        ...(modeValue ? { applicationMode: modeValue } : {})
       },
       note: note || `Reactivación masiva para ${affectedStudents.length} estudiantes`
     });
@@ -4934,8 +5033,8 @@ router.post('/assignments/:id/students/bulk-reactivate', checkAdmin, async (req,
       nivel: 'warning',
       entidad: 'Asignación',
       entidad_id: id,
-      descripcion: `Reactivó plazo masivo para ${affectedStudents.length} estudiante(s) en asignación #${id}`,
-      detalles: { assignmentId: id, affectedCount: affectedStudents.length, deadline: newDeadline, resetMode }
+      descripcion: `Reactivó plazo masivo para ${affectedStudents.length} estudiante(s) en asignación #${id}${modeValue ? ` (modalidad: ${modeValue})` : ''}`,
+      detalles: { assignmentId: id, affectedCount: affectedStudents.length, deadline: newDeadline, resetMode, ...(modeValue ? { applicationMode: modeValue } : {}) }
     });
 
     res.json({

@@ -39,6 +39,7 @@ scratch/
 .system_generated/
 *.tmp
 *.exe.old*
+ccg.exe
 
 # OS files
 Thumbs.db

@@ -2,40 +2,28 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { 
-  ArrowLeft, 
-  PlayCircle, 
-  BarChart2, 
-  Target, 
-  CheckSquare, 
-  Users, 
-  Download, 
-  LockOpen, 
-  AlertTriangle, 
+import {
+  ArrowLeft,
+  BarChart2,
+  Target,
+  CheckSquare,
+  Users,
+  Download,
+  LockOpen,
+  AlertTriangle,
   TrendingUp,
-  KeyRound,
-  Copy,
-  Check,
   Sparkles,
-  Tv,
-  Headphones,
-  Scissors,
-  Zap,
   History,
-  FileText
+  FileText,
+  Radio,
 } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch } from "@/lib/api";
-import { copyToClipboard as safeCopyToClipboard } from "@/lib/clipboard";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import AiPromptModal from "@/components/AiPromptModal";
-import AudioCutterModal from "@/components/AudioCutterModal";
-import ReactivateCourseModal from "@/components/ReactivateCourseModal";
-import { useIsPruebas } from "@/lib/useIsPruebas";
 
-// Sub-components for tabs
-import LiveTab from "./tabs/LiveTab";
+// Sub-components for report tabs
 import SummaryTab from "./tabs/SummaryTab";
 import SkillsTab from "./tabs/SkillsTab";
 import ItemsTab from "./tabs/ItemsTab";
@@ -46,60 +34,63 @@ import LogsTab from "./tabs/LogsTab";
 
 export default function TeacherAssignmentPage() {
   const { id } = useParams();
-  const isPruebas = useIsPruebas();
-  const [activeTab, setActiveTab] = useState("live");
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState("summary");
   const [assignment, setAssignment] = useState<any>(null);
   const [error, setError] = useState("");
-
-  // Estado para Contraseña Dinámica de Ensayo
-  const [dynamicPassword, setDynamicPassword] = useState("");
-  const [dynamicActive, setDynamicActive] = useState(false);
-  const [savingPin, setSavingPin] = useState(false);
-  const [copiedPin, setCopiedPin] = useState(false);
-  const [showProjectorModal, setShowProjectorModal] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
-  const [showAudioModal, setShowAudioModal] = useState(false);
-  const [showReactivateModal, setShowReactivateModal] = useState(false);
-  const [extendingMinutes, setExtendingMinutes] = useState<number | null>(null);
+  const [togglingMode, setTogglingMode] = useState(false);
 
-  const handleQuickExtend = async (minutes: number) => {
+  const loadBase = () => {
+    apiFetch(`/teacher/assignments`)
+      .then((data) => {
+        const found = (data as any[]).find((a) => a.id === Number(id));
+        if (found) {
+          setAssignment(found);
+        } else {
+          setError("Asignación no encontrada");
+        }
+      })
+      .catch((e) => setError(e.message));
+  };
+
+  const handleToggleMode = async () => {
+    if (!assignment) return;
+    const currentMode = assignment.applicationMode === "PRINTED" ? "PRINTED" : "DIGITAL";
+    const nextMode = currentMode === "PRINTED" ? "DIGITAL" : "PRINTED";
+    const msg = nextMode === "DIGITAL"
+      ? "¿Deseas cambiar el formato general a DIGITAL? Los estudiantes podrán ingresar y rendir la prueba desde sus cuentas en pantalla."
+      : "¿Deseas cambiar el formato general a PAPEL? Los estudiantes no podrán rendir en línea (quedarán en espera de hoja de respuestas impresa).";
+    if (!confirm(msg)) return;
+
+    setTogglingMode(true);
     try {
-      setExtendingMinutes(minutes);
-      await apiFetch(`/teacher/assignments/${id}/quick-extend`, {
+      await apiFetch(`/teacher/assignments/${id}/mode`, {
         method: "PATCH",
-        body: { minutes, extendStudents: true }
+        body: { applicationMode: nextMode }
       });
-      loadBase();
+      setAssignment((prev: any) => ({ ...prev, applicationMode: nextMode }));
     } catch (e: any) {
-      alert(e.message || "Error al extender tiempo");
+      alert(e.message || "Error al cambiar la modalidad");
     } finally {
-      setExtendingMinutes(null);
+      setTogglingMode(false);
     }
   };
 
-  const loadBase = () => {
-    apiFetch(`/teacher/assignments`).then(data => {
-      const found = (data as any[]).find(a => a.id === Number(id));
-      if (found) {
-        setAssignment(found);
-        setDynamicPassword(found.dynamicPassword || "");
-        setDynamicActive(Boolean(found.dynamicPasswordActive));
-      } else {
-        setError("Asignación no encontrada");
-      }
-    }).catch(e => setError(e.message));
-  };
-
   useEffect(() => {
-    loadBase();
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get("tab");
+      if (tabParam === "live") {
+        router.replace(`/teacher/live/${id}`);
+        return;
+      }
       if (tabParam) {
         setActiveTab(tabParam);
       }
     }
-  }, [id]);
+    loadBase();
+  }, [id, router]);
 
   const handleRelease = async () => {
     if (!confirm("¿Seguro que quieres liberar los resultados? Los estudiantes podrán ver su nota, pauta y nivel de logro.")) return;
@@ -112,52 +103,10 @@ export default function TeacherAssignmentPage() {
     }
   };
 
-  const handleSaveDynamicPassword = async (newActiveState?: boolean, newPinVal?: string) => {
-    setSavingPin(true);
-    const activeToSave = newActiveState !== undefined ? newActiveState : dynamicActive;
-    const pinToSave = (newPinVal !== undefined ? newPinVal : dynamicPassword).trim().toUpperCase();
-
-    try {
-      const res = await apiFetch<{ dynamicPassword: string; dynamicPasswordActive: boolean }>(
-        `/teacher/assignments/${id}/dynamic-password`,
-        {
-          method: "POST",
-          body: {
-            dynamicPassword: pinToSave,
-            dynamicPasswordActive: activeToSave
-          }
-        }
-      );
-      setDynamicPassword(res.dynamicPassword || "");
-      setDynamicActive(res.dynamicPasswordActive);
-      setAssignment((prev: any) => prev ? { ...prev, dynamicPassword: res.dynamicPassword, dynamicPasswordActive: res.dynamicPasswordActive } : prev);
-    } catch (err: any) {
-      alert(err.message || "Error al actualizar contraseña dinámica");
-    } finally {
-      setSavingPin(false);
-    }
-  };
-
-  const generateRandomPin = () => {
-    const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-    const num = Math.floor(100 + Math.random() * 900);
-    const letter = letters[Math.floor(Math.random() * letters.length)];
-    const generated = `${isPruebas ? "PRUEBA" : "SIMCE"}-${num}${letter}`;
-    setDynamicPassword(generated);
-    handleSaveDynamicPassword(true, generated);
-  };
-
-  const copyToClipboard = async (text: string) => {
-    await safeCopyToClipboard(text);
-    setCopiedPin(true);
-    setTimeout(() => setCopiedPin(false), 2000);
-  };
-
   if (error) return <div className="p-8 text-red-500">{error}</div>;
   if (!assignment) return <div className="p-8">Cargando datos...</div>;
 
   const tabs = [
-    { id: "live", label: "En vivo", icon: PlayCircle },
     { id: "summary", label: "Resumen", icon: BarChart2 },
     { id: "skills", label: "Habilidades", icon: Target },
     { id: "items", label: "Preguntas", icon: CheckSquare },
@@ -180,72 +129,78 @@ export default function TeacherAssignmentPage() {
             <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <Link href="/teacher" className="text-blue-600 hover:underline flex items-center gap-1 inline-flex mb-2">
-                  <ArrowLeft className="w-4 h-4" /> Volver a Panel
+                  <ArrowLeft className="w-4 h-4" /> Volver a Reportes
                 </Link>
-                <h1 className="text-2xl font-bold flex items-center gap-3 text-gray-800">
-                  {assignment.title || assignment.Exam?.title}
+                <h1 className="text-2xl font-bold flex flex-wrap items-center gap-2.5 text-gray-800">
+                  <span>{assignment.title || assignment.Exam?.title}</span>
+                  {assignment.applicationMode === "PRINTED" ? (
+                    <span className="bg-amber-100 text-amber-800 text-xs px-2.5 py-1 rounded-full flex items-center gap-1 border border-amber-200 font-bold">
+                      📄 Modalidad Papel
+                    </span>
+                  ) : (
+                    <span className="bg-blue-100 text-blue-800 text-xs px-2.5 py-1 rounded-full flex items-center gap-1 border border-blue-200 font-bold">
+                      💻 Modalidad Digital
+                    </span>
+                  )}
                   {assignment.released && (
-                    <span className="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full flex items-center gap-1 border border-emerald-200">
+                    <span className="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full flex items-center gap-1 border border-emerald-200 font-bold">
                       <LockOpen className="w-3.5 h-3.5" /> Resultados Liberados
                     </span>
                   )}
                 </h1>
                 <p className="text-gray-500 mt-1 text-sm">
-                  Curso: <span className="font-semibold text-gray-800">{assignment.courseName || `${assignment.Course?.level?.replace('B', '° Básico').replace('M', '° Medio')} ${assignment.Course?.letter}`}</span> · Asignatura: <span className="font-semibold text-gray-800">{assignment.subject || assignment.Exam?.subject}</span>
+                  Curso:{" "}
+                  <span className="font-semibold text-gray-800">
+                    {assignment.courseName ||
+                      `${assignment.Course?.level?.replace("B", "° Básico").replace("M", "° Medio")} ${assignment.Course?.letter}`}
+                  </span>{" "}
+                  · Asignatura:{" "}
+                  <span className="font-semibold text-gray-800">
+                    {assignment.subject || assignment.Exam?.subject}
+                  </span>
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-2 items-center">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowAiModal(true)}
-                  className="p-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-lg shadow-xs transition-all"
+                  className="p-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-lg shadow-xs transition-all cursor-pointer"
                   title="Asistente de Prompts para Agentes de IA: Generar Taller de Refuerzo o Guía de Aula"
                 >
                   <Sparkles className="w-4 h-4 text-amber-300" />
                 </button>
-                <button 
-                  type="button"
-                  onClick={() => setShowAudioModal(true)}
-                  className="px-3 py-2 bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 text-xs font-semibold"
-                  title="Gestionar y Recortar Audios por Pregunta"
+                <Link
+                  href={`/teacher/live/${id}`}
+                  className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg shadow-xs font-bold text-xs flex items-center gap-1.5 transition-colors"
+                  title="Abrir Monitor de Sala y Control En Vivo para este curso"
                 >
-                  <Headphones className="w-4 h-4 text-purple-600" />
-                  <span>Audios</span>
-                </button>
-                <button 
+                  <Radio className="w-4 h-4 text-emerald-600" />
+                  <span>Monitor En Vivo</span>
+                </Link>
+                <button
                   type="button"
-                  onClick={() => handleQuickExtend(15)}
-                  disabled={extendingMinutes !== null}
-                  className="px-2.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-lg shadow-xs transition-all flex items-center gap-1 text-xs cursor-pointer disabled:opacity-50"
-                  title="Añadir +15 minutos al plazo del curso y alumnos en curso"
+                  onClick={handleToggleMode}
+                  disabled={togglingMode}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg shadow-xs font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Cambiar formato general de la evaluación (Papel ↔ Digital)"
                 >
-                  <Zap className="w-3.5 h-3.5 text-emerald-600 fill-current" />
-                  <span>+15 min</span>
+                  {assignment.applicationMode === "PRINTED" ? (
+                    <>
+                      <span>💻</span>
+                      <span>{togglingMode ? "Cambiando..." : "Pasar a Digital"}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>📄</span>
+                      <span>{togglingMode ? "Cambiando..." : "Pasar a Papel"}</span>
+                    </>
+                  )}
                 </button>
-                <button 
-                  type="button"
-                  onClick={() => handleQuickExtend(30)}
-                  disabled={extendingMinutes !== null}
-                  className="px-2.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-lg shadow-xs transition-all flex items-center gap-1 text-xs cursor-pointer disabled:opacity-50"
-                  title="Añadir +30 minutos al plazo del curso y alumnos en curso"
-                >
-                  <Zap className="w-3.5 h-3.5 text-emerald-600 fill-current" />
-                  <span>+30 min</span>
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => setShowReactivateModal(true)}
-                  className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-lg shadow-xs transition-all flex items-center gap-1.5 text-xs cursor-pointer"
-                  title="Extender plazo de la evaluación o reactivar para el curso"
-                >
-                  <Zap className="w-3.5 h-3.5 fill-current" />
-                  <span>Reactivar</span>
-                </button>
-                <button 
+                <button
                   type="button"
                   onClick={handleExport}
-                  className="p-2 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg shadow-xs transition-colors"
+                  className="p-2 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg shadow-xs transition-colors cursor-pointer"
                   title="Exportar Resultados del Curso a Excel (.xlsx)"
                 >
                   <Download className="w-4 h-4" />
@@ -260,9 +215,9 @@ export default function TeacherAssignmentPage() {
                   <span>Informe PDF</span>
                 </Link>
                 {!assignment.released && (
-                  <button 
+                  <button
                     onClick={handleRelease}
-                    className="bg-emerald-600 text-white px-3.5 py-2 rounded-lg font-bold hover:bg-emerald-700 flex items-center gap-1.5 shadow-xs text-xs"
+                    className="bg-emerald-600 text-white px-3.5 py-2 rounded-lg font-bold hover:bg-emerald-700 flex items-center gap-1.5 shadow-xs text-xs cursor-pointer"
                   >
                     <LockOpen className="w-3.5 h-3.5" /> Liberar Resultados
                   </button>
@@ -270,120 +225,8 @@ export default function TeacherAssignmentPage() {
               </div>
             </div>
 
-            {/* Tarjeta de Contraseña Dinámica de Ensayo Compacta */}
-            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 rounded-xl p-3.5 mb-6 shadow-xs">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="bg-amber-100 text-amber-800 p-1 rounded-md border border-amber-300">
-                      <KeyRound className="w-3.5 h-3.5" />
-                    </span>
-                    <h3 className="font-bold text-gray-900 text-sm">
-                      Contraseña Dinámica de Sala (PIN Temporal)
-                    </h3>
-                    <span className={`text-[10px] px-2 py-0.2 rounded-full font-bold uppercase ${dynamicActive ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-gray-200 text-gray-700'}`}>
-                      {dynamicActive ? "Activa" : "Inactiva"}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-gray-600">
-                    Acceso para estudiantes con RUT y PIN si olvidaron su clave personal.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-amber-300 shadow-inner">
-                    <input
-                      type="text"
-                      placeholder={isPruebas ? "Ej: PRUEBA2026" : "Ej: SIMCE2026"}
-                      value={dynamicPassword}
-                      onChange={(e) => setDynamicPassword(e.target.value.toUpperCase())}
-                      className="text-sm font-mono font-bold text-gray-800 tracking-wider uppercase w-32 focus:outline-none"
-                    />
-                    {dynamicPassword && (
-                      <button
-                        onClick={() => copyToClipboard(dynamicPassword)}
-                        className="text-gray-400 hover:text-amber-600 p-1 transition-colors"
-                        title="Copiar PIN"
-                      >
-                        {copiedPin ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                      </button>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={generateRandomPin}
-                    className="flex items-center gap-1.5 bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 px-3 py-2 rounded-lg text-xs font-semibold shadow-xs transition-colors"
-                    title="Generar PIN aleatorio simple"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-600" /> Generar PIN
-                  </button>
-
-                  <button
-                    onClick={() => handleSaveDynamicPassword(!dynamicActive)}
-                    disabled={savingPin || (!dynamicActive && !dynamicPassword.trim())}
-                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition-colors ${
-                      dynamicActive 
-                        ? 'bg-red-600 hover:bg-red-700 text-white' 
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50'
-                    }`}
-                  >
-                    {savingPin ? "Guardando..." : dynamicActive ? "Desactivar PIN" : "Activar PIN"}
-                  </button>
-
-                  {dynamicActive && dynamicPassword && (
-                    <button
-                      onClick={() => setShowProjectorModal(true)}
-                      className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs font-bold shadow-sm transition-colors"
-                      title="Proyectar en pantalla gigante para la sala"
-                    >
-                      <Tv className="w-3.5 h-3.5" /> Proyectar en Sala
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Modal de Proyección en Sala de Clases */}
-            {showProjectorModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6 backdrop-blur-xs">
-                <div className="bg-white rounded-3xl p-10 max-w-2xl w-full text-center shadow-2xl border-4 border-amber-400">
-                  <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-100 text-amber-600 rounded-full mb-4">
-                    <KeyRound className="w-8 h-8" />
-                  </div>
-                  <h2 className="text-2xl font-extrabold text-gray-800 uppercase tracking-wide">
-                    {isPruebas ? "Acceso a la Evaluación" : "Acceso al Ensayo SIMCE"}
-                  </h2>
-                  <p className="text-gray-600 mt-2 text-base">
-                    Si olvidaste tu contraseña personal, ingresa con tu RUT y la siguiente clave:
-                  </p>
-
-                  <div className="my-8 bg-amber-50 border-2 border-dashed border-amber-400 rounded-2xl py-6 px-4">
-                    <span className="text-xs uppercase font-bold text-amber-700 tracking-widest block mb-1">
-                      Contraseña Temporal del Curso
-                    </span>
-                    <span className="text-5xl md:text-6xl font-black font-mono text-gray-900 tracking-widest selection:bg-amber-300">
-                      {dynamicPassword}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-gray-500 mb-6">
-                    {isPruebas
-                      ? "Esta clave es válida únicamente durante la rendición de esta evaluación."
-                      : "Esta clave es válida únicamente durante la rendición de este ensayo."}
-                  </p>
-
-                  <button
-                    onClick={() => setShowProjectorModal(false)}
-                    className="bg-gray-900 hover:bg-black text-white px-8 py-3 rounded-xl font-bold text-base transition-colors shadow-md"
-                  >
-                    Cerrar Proyección
-                  </button>
-                </div>
-              </div>
-            )}
-
             <div className="border-b border-gray-200 mb-6 flex overflow-x-auto">
-              {tabs.map(t => {
+              {tabs.map((t) => {
                 const Icon = t.icon;
                 const active = activeTab === t.id;
                 return (
@@ -391,7 +234,9 @@ export default function TeacherAssignmentPage() {
                     key={t.id}
                     onClick={() => setActiveTab(t.id)}
                     className={`flex items-center gap-2 px-6 py-3 font-medium text-sm whitespace-nowrap border-b-2 transition-colors ${
-                      active ? "border-blue-600 text-blue-600 font-bold" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                      active
+                        ? "border-blue-600 text-blue-600 font-bold"
+                        : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                     }`}
                   >
                     <Icon className="w-4 h-4" /> {t.label}
@@ -401,7 +246,6 @@ export default function TeacherAssignmentPage() {
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border p-6 min-h-[500px]">
-              {activeTab === "live" && <LiveTab id={Number(id)} />}
               {activeTab === "summary" && <SummaryTab id={Number(id)} />}
               {activeTab === "skills" && <SkillsTab id={Number(id)} />}
               {activeTab === "items" && <ItemsTab id={Number(id)} />}
@@ -419,34 +263,14 @@ export default function TeacherAssignmentPage() {
             defaultMode="CLASS_WORKSHOP"
             initialLevel={assignment?.Course?.level}
             initialSubject={assignment?.subject || assignment?.Exam?.subject}
-            initialCourseName={assignment?.courseName || (assignment?.Course ? `${assignment.Course.level?.replace('B', '° Básico').replace('M', '° Medio')} ${assignment.Course.letter}` : "Curso")}
+            initialCourseName={
+              assignment?.courseName ||
+              (assignment?.Course
+                ? `${assignment.Course.level?.replace("B", "° Básico").replace("M", "° Medio")} ${assignment.Course.letter}`
+                : "Curso")
+            }
             initialExamTitle={assignment?.title || assignment?.Exam?.title}
           />
-
-          {/* Modal Recortador y Gestor de Audios */}
-          {assignment && (
-            <AudioCutterModal
-              isOpen={showAudioModal}
-              onClose={() => setShowAudioModal(false)}
-              assignmentId={Number(id)}
-              examId={assignment.examId || assignment.Exam?.id}
-              examTitle={assignment.title || assignment.Exam?.title}
-              questionCount={assignment.Exam?.questionCount || 30}
-            />
-          )}
-
-          {/* Modal Reactivar Evaluación Curso */}
-          {assignment && (
-            <ReactivateCourseModal
-              isOpen={showReactivateModal}
-              onClose={() => setShowReactivateModal(false)}
-              assignmentId={Number(id)}
-              currentClosesAt={assignment.closesAt}
-              examTitle={assignment.title || assignment.Exam?.title}
-              courseName={assignment.courseName || (assignment?.Course ? `${assignment.Course.level?.replace('B', '° Básico').replace('M', '° Medio')} ${assignment.Course.letter}` : undefined)}
-              onSuccess={loadBase}
-            />
-          )}
         </AppShell>
       )}
     </RequireRole>

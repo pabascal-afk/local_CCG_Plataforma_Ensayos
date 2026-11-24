@@ -56,7 +56,7 @@ describe('computeResults', () => {
     expect(r.percent).toBe(50);
     expect(r.grade).toBe(3.5);
     expect(r.achievementLevel).toBe('ELEMENTAL');
-    expect(r.perQuestion.find((q) => q.questionId === 3)).toEqual({ questionId: 3, selected: null, isCorrect: false });
+    expect(r.perQuestion.find((q) => q.questionId === 3)).toMatchObject({ questionId: 3, selected: null, isCorrect: false });
   });
 
   test('desglose por habilidad y eje (con "Sin clasificar")', () => {

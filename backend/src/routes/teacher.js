@@ -121,6 +121,7 @@ router.get('/assignments', async (req, res, next) => {
         gradingMode: gMode,
         passThreshold: pThresh,
         passThresholdPercent: Math.round(pThresh * 1000) / 10,
+        applicationMode: a.applicationMode || 'DIGITAL',
         opensAt: a.opensAt,
         closesAt: a.closesAt,
         released: a.released,
@@ -606,6 +607,8 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         state,
         startedAt,
         submittedAt,
+        applicationMode: sub?.applicationMode || null,
+        effectiveMode: sub?.applicationMode || assignment.applicationMode || 'DIGITAL',
         extendedDeadline: sub?.extendedDeadline || null,
         reactivatedAt: sub?.reactivatedAt || null,
         isExtended: Boolean(sub?.extendedDeadline && new Date(sub.extendedDeadline) > new Date()),
@@ -1142,7 +1145,7 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
     const maxTotalPoints = Math.round(questions.reduce((sum, q) => sum + getQuestionMaxPoints(q), 0) * 10) / 10;
 
     const workbook = new exceljs.Workbook();
-    workbook.creator = 'Colegio Concepción de Chillán';
+    workbook.creator = 'Colegio Cerro Grande';
 
     // HOJA 1: Resultados Alumnos
     const sheet1 = workbook.addWorksheet('Resultados Alumnos');
@@ -1407,7 +1410,7 @@ router.get('/assignments-export.xlsx', async (req, res, next) => {
     });
 
     const workbook = new exceljs.Workbook();
-    workbook.creator = 'Colegio Concepción de Chillán';
+    workbook.creator = 'Colegio Cerro Grande';
     const sheet = workbook.addWorksheet('Mis Cursos y Ensayos');
 
     sheet.columns = [
@@ -1551,7 +1554,7 @@ router.get('/students/:rut/export.xlsx', async (req, res, next) => {
     });
 
     const workbook = new exceljs.Workbook();
-    workbook.creator = 'Colegio Concepción de Chillán';
+    workbook.creator = 'Colegio Cerro Grande';
     const sheet = workbook.addWorksheet('Historial Evaluativo');
 
     sheet.columns = [
@@ -2082,7 +2085,7 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
 
     return res.json({
       institution: {
-        name: 'COLEGIO CONCEPCIÓN CHILLÁN',
+        name: 'COLEGIO CERRO GRANDE',
         department: 'Unidad Técnica Pedagógica · Coordinación Académica',
         systemName: 'Plataforma Integral de Evaluaciones y Ensayos'
       },
@@ -2873,13 +2876,7 @@ router.post('/assignments/:id/grade-open-questions', async (req, res, next) => {
 router.patch('/assignments/:id/mode', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const assignment = await prisma.examAssignment.findUnique({ where: { id } });
-    if (!assignment) return res.status(404).json({ error: 'Asignación no encontrada' });
-
-    const allowedCourses = await getAllowedCourseIds(req.user);
-    if (allowedCourses && !allowedCourses.includes(assignment.courseId)) {
-      return res.status(403).json({ error: 'No tienes permisos para modificar este curso' });
-    }
+    const assignment = await getAssignmentIfAllowed(id, req.user);
 
     const { applicationMode } = req.body;
     const mode = applicationMode === 'PRINTED' ? 'PRINTED' : 'DIGITAL';
@@ -2916,7 +2913,7 @@ router.patch('/assignments/:id/mode', async (req, res, next) => {
 
     res.json(updated);
   } catch (error) {
-    next(error);
+    handleAssignmentError(error, res, next);
   }
 });
 
@@ -2932,7 +2929,7 @@ router.post('/assignments/:id/reactivate', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const assignment = await getAssignmentIfAllowed(id, req.user);
-    const { closesAt, scope = 'PENDING_ONLY', resetMode = 'KEEP_ANSWERS' } = req.body;
+    const { closesAt, scope = 'PENDING_ONLY', resetMode = 'KEEP_ANSWERS', applicationMode } = req.body;
 
     if (!closesAt) {
       return res.status(400).json({ error: 'Debes especificar la nueva fecha y hora de cierre' });
@@ -2955,6 +2952,9 @@ router.post('/assignments/:id/reactivate', async (req, res, next) => {
     };
     if (new Date(assignment.opensAt) > now) {
       updateData.opensAt = now;
+    }
+    if (applicationMode === 'PRINTED' || applicationMode === 'DIGITAL') {
+      updateData.applicationMode = applicationMode;
     }
 
     const updatedAssignment = await prisma.examAssignment.update({
@@ -3024,7 +3024,8 @@ router.post('/assignments/:id/reactivate', async (req, res, next) => {
         newClosesAt,
         scope,
         resetMode,
-        affectedSubmissions
+        affectedSubmissions,
+        ...(updateData.applicationMode ? { applicationMode: updateData.applicationMode } : {})
       },
       note: req.body.note || null
     });
@@ -3036,8 +3037,8 @@ router.post('/assignments/:id/reactivate', async (req, res, next) => {
       nivel: 'warning',
       entidad: 'Asignación',
       entidad_id: id,
-      descripcion: `Docente reactivó asignación #${id} para el curso (alcance: ${scope}, afectados: ${affectedSubmissions})`,
-      detalles: { assignmentId: id, scope, resetMode, newClosesAt, affectedSubmissions }
+      descripcion: `Docente reactivó asignación #${id} para el curso (alcance: ${scope}, afectados: ${affectedSubmissions}${updateData.applicationMode ? `, modalidad: ${updateData.applicationMode}` : ''})`,
+      detalles: { assignmentId: id, scope, resetMode, newClosesAt, affectedSubmissions, ...(updateData.applicationMode ? { applicationMode: updateData.applicationMode } : {}) }
     });
 
     res.json({
@@ -3046,7 +3047,7 @@ router.post('/assignments/:id/reactivate', async (req, res, next) => {
       affectedSubmissions
     });
   } catch (error) {
-    next(error);
+    handleAssignmentError(error, res, next);
   }
 });
 
@@ -3059,7 +3060,8 @@ router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) 
     const id = parseInt(req.params.id, 10);
     const rut = req.params.rut;
     const assignment = await getAssignmentIfAllowed(id, req.user);
-    const { deadline, resetMode = 'KEEP_ANSWERS', note } = req.body;
+    const { deadline, resetMode = 'KEEP_ANSWERS', note, applicationMode } = req.body;
+    const modeValue = applicationMode === 'PRINTED' || applicationMode === 'DIGITAL' ? applicationMode : undefined;
 
     if (!deadline) {
       return res.status(400).json({ error: 'Debes especificar el plazo para el estudiante' });
@@ -3096,7 +3098,8 @@ router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) 
           startedAt: new Date(0),
           reactivatedAt: now,
           extendedDeadline: newDeadline,
-          autoSubmitted: false
+          autoSubmitted: false,
+          ...(modeValue ? { applicationMode: modeValue } : {})
         }
       });
     } else {
@@ -3127,7 +3130,8 @@ router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) 
           simceScore: null,
           achievementLevel: null,
           theta: null,
-          seTheta: null
+          seTheta: null,
+          ...(modeValue ? { applicationMode: modeValue } : {})
         }
       });
     }
@@ -3139,7 +3143,8 @@ router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) 
       targetStudent: { rut: student.rut, name: student.name },
       details: {
         deadline: newDeadline,
-        resetMode
+        resetMode,
+        ...(modeValue ? { applicationMode: modeValue } : {})
       },
       note: note || null
     });
@@ -3151,17 +3156,19 @@ router.post('/assignments/:id/students/:rut/reactivate', async (req, res, next) 
       nivel: 'warning',
       entidad: 'Entrega',
       entidad_id: `${id}:${student.rut}`,
-      descripcion: `Docente reactivó plazo individual para ${student.name} (${student.rut}) en asignación #${id}`,
-      detalles: { assignmentId: id, studentRut: student.rut, studentName: student.name, deadline: newDeadline, resetMode }
+      descripcion: `Docente reactivó plazo individual para ${student.name} (${student.rut}) en asignación #${id}${modeValue ? ` (modalidad: ${modeValue})` : ''}`,
+      detalles: { assignmentId: id, studentRut: student.rut, studentName: student.name, deadline: newDeadline, resetMode, ...(modeValue ? { applicationMode: modeValue } : {}) }
     });
 
     res.json({
       message: `Evaluación reactivada exitosamente para ${student.name}`,
       student: { rut: student.rut, name: student.name },
-      extendedDeadline: newDeadline
+      extendedDeadline: newDeadline,
+      status: 'IN_PROGRESS',
+      applicationMode: submission.applicationMode || null
     });
   } catch (error) {
-    next(error);
+    handleAssignmentError(error, res, next);
   }
 });
 
@@ -3254,7 +3261,8 @@ router.post('/assignments/:id/students/bulk-reactivate', async (req, res, next) 
   try {
     const id = parseInt(req.params.id, 10);
     const assignment = await getAssignmentIfAllowed(id, req.user);
-    const { ruts, deadline, resetMode = 'KEEP_ANSWERS', note } = req.body;
+    const { ruts, deadline, resetMode = 'KEEP_ANSWERS', note, applicationMode } = req.body;
+    const modeValue = applicationMode === 'PRINTED' || applicationMode === 'DIGITAL' ? applicationMode : undefined;
 
     if (!Array.isArray(ruts) || ruts.length === 0) {
       return res.status(400).json({ error: 'Debes seleccionar al menos un estudiante.' });
@@ -3293,7 +3301,8 @@ router.post('/assignments/:id/students/bulk-reactivate', async (req, res, next) 
             startedAt: new Date(0),
             extendedDeadline: newDeadline,
             reactivatedAt: now,
-            autoSubmitted: false
+            autoSubmitted: false,
+            ...(modeValue ? { applicationMode: modeValue } : {})
           }
         });
       } else {
@@ -3318,7 +3327,8 @@ router.post('/assignments/:id/students/bulk-reactivate', async (req, res, next) 
             simceScore: resetMode === 'CLEAR_ANSWERS' ? null : submission.simceScore,
             achievementLevel: resetMode === 'CLEAR_ANSWERS' ? null : submission.achievementLevel,
             theta: resetMode === 'CLEAR_ANSWERS' ? null : submission.theta,
-            seTheta: resetMode === 'CLEAR_ANSWERS' ? null : submission.seTheta
+            seTheta: resetMode === 'CLEAR_ANSWERS' ? null : submission.seTheta,
+            ...(modeValue ? { applicationMode: modeValue } : {})
           }
         });
       }
@@ -3334,7 +3344,8 @@ router.post('/assignments/:id/students/bulk-reactivate', async (req, res, next) 
         affectedCount: affectedStudents.length,
         students: affectedStudents,
         deadline: newDeadline,
-        resetMode
+        resetMode,
+        ...(modeValue ? { applicationMode: modeValue } : {})
       },
       note: note || `Reactivación masiva para ${affectedStudents.length} estudiantes`
     });
@@ -3346,8 +3357,8 @@ router.post('/assignments/:id/students/bulk-reactivate', async (req, res, next) 
       nivel: 'warning',
       entidad: 'Asignación',
       entidad_id: id,
-      descripcion: `Docente reactivó plazo masivo para ${affectedStudents.length} estudiante(s) en asignación #${id}`,
-      detalles: { assignmentId: id, affectedCount: affectedStudents.length, deadline: newDeadline, resetMode }
+      descripcion: `Docente reactivó plazo masivo para ${affectedStudents.length} estudiante(s) en asignación #${id}${modeValue ? ` (modalidad: ${modeValue})` : ''}`,
+      detalles: { assignmentId: id, affectedCount: affectedStudents.length, deadline: newDeadline, resetMode, ...(modeValue ? { applicationMode: modeValue } : {}) }
     });
 
     res.json({

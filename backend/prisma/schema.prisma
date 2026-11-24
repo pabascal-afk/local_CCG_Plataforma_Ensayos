@@ -127,6 +127,7 @@ model Submission {
   autoSubmitted    Boolean            @default(false)
   extendedDeadline DateTime?          // Plazo individual de extensión o reactivación
   reactivatedAt    DateTime?          // Marca temporal de reactivación para reiniciar timer al reingreso
+  applicationMode  String?            // DIGITAL | PRINTED (anulación individual para pruebas atrasadas o híbridas)
   correctCount     Int?
   percent          Float?
   grade            Float?

@@ -82,6 +82,8 @@ describe('Fase 6 Features: Año Global, Cursos Desglosados, Contraseñas Masivas
       update: {
         opensAt,
         closesAt,
+        status: 'ONGOING',
+        cancelReason: null,
         dynamicPassword: 'SIMCE2027',
         dynamicPasswordActive: true
       },
@@ -90,6 +92,7 @@ describe('Fase 6 Features: Año Global, Cursos Desglosados, Contraseñas Masivas
         courseId: testCourseId,
         opensAt,
         closesAt,
+        status: 'ONGOING',
         dynamicPassword: 'SIMCE2027',
         dynamicPasswordActive: true
       }
