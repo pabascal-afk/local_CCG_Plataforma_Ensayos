@@ -62,6 +62,8 @@ type ReportData = {
   };
   summary: {
     totalStudents: number;
+    excludedCount?: number;
+    validEnrolled?: number;
     submittedCount: number;
     pendingCount: number;
     participationPercent: number;
@@ -83,6 +85,14 @@ type ReportData = {
       "6.0-7.0": number;
     };
   };
+  excludedStudents?: Array<{
+    rut: string;
+    name: string;
+    reason: string;
+    details: string | null;
+    excludedAt: string;
+  }>;
+  exclusionsCount?: number;
   skills: Array<{
     name: string;
     correct: number;
@@ -129,6 +139,9 @@ type ReportData = {
     rut: string;
     name: string;
     state: string;
+    isExcluded?: boolean;
+    exclusionReason?: string | null;
+    exclusionDetails?: string | null;
     grade: number | null;
     percent: number | null;
     simceScore: number | null;
@@ -327,11 +340,16 @@ export default function AssignmentReportPdfPage() {
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
                   <span className="text-[10px] font-bold text-slate-500 uppercase block">Participación</span>
                   <div className="text-2xl font-black text-slate-900 mt-0.5">
-                    {summary.submittedCount} <span className="text-xs font-semibold text-slate-500">/ {summary.totalStudents}</span>
+                    {summary.submittedCount} <span className="text-xs font-semibold text-slate-500">/ {summary.validEnrolled ?? (summary.totalStudents - (summary.excludedCount || 0))}</span>
                   </div>
                   <span className="text-[11px] font-bold text-blue-700 block mt-0.5">
                     {summary.participationPercent}% Asistencia
                   </span>
+                  {summary.excludedCount && summary.excludedCount > 0 ? (
+                    <span className="text-[10px] font-semibold text-amber-700 block mt-0.5">
+                      ({summary.excludedCount} justificado{summary.excludedCount > 1 ? "s" : ""})
+                    </span>
+                  ) : null}
                 </div>
 
                 {/* Nota Promedio */}
@@ -659,10 +677,20 @@ export default function AssignmentReportPdfPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {students.map((st) => {
-                      const isSubmitted = st.state === "SUBMITTED";
+                      const isExcluded = Boolean(st.isExcluded || st.state === "EXCLUIDO");
+                      const isSubmitted = st.state === "SUBMITTED" && !isExcluded;
                       const isPassed = (st.grade ?? 0) >= 4.0;
                       return (
-                        <tr key={st.rut} className={`hover:bg-slate-50/60 ${!isSubmitted ? "bg-slate-50/30 text-slate-400" : ""}`}>
+                        <tr
+                          key={st.rut}
+                          className={`hover:bg-slate-50/60 ${
+                            isExcluded
+                              ? "bg-slate-50/50 text-slate-500"
+                              : !isSubmitted
+                              ? "bg-slate-50/30 text-slate-400"
+                              : ""
+                          }`}
+                        >
                           <td className="py-1.5 px-2.5 text-center font-mono text-[11px] text-slate-500">
                             {st.index}
                           </td>
@@ -673,7 +701,11 @@ export default function AssignmentReportPdfPage() {
                             {st.name}
                           </td>
                           <td className="py-1.5 px-3 text-center">
-                            {isSubmitted ? (
+                            {isExcluded ? (
+                              <span className="text-[10px] font-bold text-slate-700 bg-slate-100 border border-slate-300 px-2 py-0.5 rounded-full inline-block" title={st.exclusionReason || undefined}>
+                                Excluido
+                              </span>
+                            ) : isSubmitted ? (
                               <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full inline-block">
                                 Rendido
                               </span>
@@ -704,7 +736,14 @@ export default function AssignmentReportPdfPage() {
                             </td>
                           )}
                           <td className="py-1.5 px-3 text-center">
-                            {isSubmitted && st.achievementLevel ? (
+                            {isExcluded ? (
+                              <span
+                                className="text-[9px] font-medium text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded block truncate max-w-[120px] mx-auto"
+                                title={st.exclusionReason || undefined}
+                              >
+                                {st.exclusionReason || "Excluido"}
+                              </span>
+                            ) : isSubmitted && st.achievementLevel ? (
                               <span
                                 className={`text-[10px] font-bold px-2 py-0.5 rounded border inline-block ${
                                   st.achievementLevel === "ADECUADO"
@@ -726,6 +765,32 @@ export default function AssignmentReportPdfPage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Registro de Estudiantes Excluidos / Justificados */}
+              {data.excludedStudents && data.excludedStudents.length > 0 && (
+                <div className="mt-4 p-3.5 bg-slate-50 border border-slate-200 rounded-lg text-xs avoid-break">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-800 mb-1.5">
+                    <span className="text-amber-600">ℹ️</span>
+                    <span>Estudiantes Justificados / Excluidos de Informes ({data.excludedStudents.length})</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mb-2 leading-relaxed">
+                    Los siguientes estudiantes cuentan con justificación formal registrada y fueron omitidos del cómputo de promedios, porcentajes de logro y estadísticas del curso:
+                  </p>
+                  <div className="divide-y divide-slate-200/60 bg-white rounded border border-slate-200/80">
+                    {data.excludedStudents.map((ex) => (
+                      <div key={ex.rut} className="p-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]">
+                        <div>
+                          <strong className="text-slate-900">{ex.name}</strong> <span className="font-mono text-slate-500">({ex.rut})</span>
+                        </div>
+                        <div className="text-slate-600 italic">
+                          Motivo: <span className="font-medium text-slate-800">{ex.reason}</span>
+                          {ex.details && <span className="text-slate-500 ml-1">· {ex.details}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
 
           </main>

@@ -555,6 +555,16 @@ router.get('/assignments/:id/live', async (req, res, next) => {
     const liveGradingMode = normalizeGradingMode(assignment.exam?.gradingMode);
     const livePassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
 
+    const exclusions = await prisma.assignmentExclusion.findMany({
+      where: { assignmentId: assignment.id }
+    });
+    const exclusionMap = Object.fromEntries(exclusions.map(e => [e.studentRut, e]));
+
+    const audioClips = await prisma.examAudioClip.findMany({
+      where: { examId: assignment.examId }
+    });
+    const limitedAudioClips = audioClips.filter(c => c.maxPlays !== null && c.maxPlays !== undefined && c.maxPlays > 0);
+
     const submissions = await prisma.submission.findMany({
       where: { assignmentId: assignment.id },
       include: { answers: true, _count: { select: { answers: true } } }
@@ -563,6 +573,25 @@ router.get('/assignments/:id/live', async (req, res, next) => {
 
     const result = students.map(st => {
       const sub = subMap[st.rut];
+      const excl = exclusionMap[st.rut];
+      const isExcluded = Boolean(excl);
+
+      let audioPlaysObj = {};
+      let extraAudioPlaysObj = {};
+      try { audioPlaysObj = JSON.parse(sub?.audioPlays || '{}'); } catch {}
+      try { extraAudioPlaysObj = JSON.parse(sub?.extraAudioPlays || '{}'); } catch {}
+
+      let hasExhaustedAudios = false;
+      let exhaustedAudiosCount = 0;
+      for (const clip of limitedAudioClips) {
+        const plays = Number(audioPlaysObj[clip.id] || 0);
+        const extra = Number(extraAudioPlaysObj[clip.id] || 0);
+        if (plays >= clip.maxPlays + extra) {
+          hasExhaustedAudios = true;
+          exhaustedAudiosCount++;
+        }
+      }
+
       let state = 'NOT_STARTED';
       let submittedAt = null;
       let startedAt = null;
@@ -629,7 +658,15 @@ router.get('/assignments/:id/live', async (req, res, next) => {
       return {
         rut: st.rut,
         name: st.name,
-        state,
+        state: isExcluded ? 'EXCLUIDO' : state,
+        isExcluded,
+        exclusionReason: excl ? excl.reason : null,
+        exclusionDetails: excl ? excl.details : null,
+        excludedAt: excl ? excl.excludedAt : null,
+        audioPlays: audioPlaysObj,
+        extraAudioPlays: extraAudioPlaysObj,
+        hasExhaustedAudios,
+        exhaustedAudiosCount,
         startedAt,
         submittedAt,
         applicationMode: sub?.applicationMode || null,
@@ -638,14 +675,14 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         reactivatedAt: sub?.reactivatedAt || null,
         isExtended: Boolean(sub?.extendedDeadline && new Date(sub.extendedDeadline) > new Date()),
         answersCount: sub ? sub._count.answers : 0,
-        grade: sub?.grade || null,
-        percent: sub?.percent ?? null,
-        correctCount: sub?.correctCount ?? null,
-        earnedPoints,
-        correctQuestionsCount,
+        grade: isExcluded ? null : (sub?.grade || null),
+        percent: isExcluded ? null : (sub?.percent ?? null),
+        correctCount: isExcluded ? null : (sub?.correctCount ?? null),
+        earnedPoints: isExcluded ? null : earnedPoints,
+        correctQuestionsCount: isExcluded ? null : correctQuestionsCount,
         maxTotalPoints,
-        simceScore: liveGradingMode === 'NORMAL' ? null : (sub?.simceScore ?? null),
-        achievementLevel: sub?.achievementLevel || null,
+        simceScore: (isExcluded || liveGradingMode === 'NORMAL') ? null : (sub?.simceScore ?? null),
+        achievementLevel: isExcluded ? null : (sub?.achievementLevel || null),
         openGradedCount,
         openTotalCount: openQuestions.length,
         openAnswers
@@ -665,6 +702,10 @@ router.get('/assignments/:id/live', async (req, res, next) => {
         passThreshold: livePassThreshold,
         passThresholdPercent: Math.round(livePassThreshold * 1000) / 10
       },
+      hasAudios: audioClips.length > 0,
+      audioClipsCount: audioClips.length,
+      limitedAudioClipsCount: limitedAudioClips.length,
+      exclusionsCount: exclusions.length,
       gradingMode: liveGradingMode,
       passThreshold: livePassThreshold,
       passThresholdPercent: Math.round(livePassThreshold * 1000) / 10,
@@ -694,9 +735,17 @@ router.get('/assignments/:id/summary', async (req, res, next) => {
   try {
     const assignment = await getAssignmentIfAllowed(parseInt(req.params.id, 10), req.user);
     
-    const submissions = await prisma.submission.findMany({
-      where: { assignmentId: assignment.id, status: 'SUBMITTED' }
-    });
+    const [rawSubmissions, exclusions] = await Promise.all([
+      prisma.submission.findMany({
+        where: { assignmentId: assignment.id, status: 'SUBMITTED' }
+      }),
+      prisma.assignmentExclusion.findMany({
+        where: { assignmentId: assignment.id }
+      })
+    ]);
+
+    const excludedRuts = new Set(exclusions.map(e => e.studentRut));
+    const submissions = rawSubmissions.filter(s => !excludedRuts.has(s.studentRut));
 
     const totalStudents = await prisma.user.count({ where: { courseId: assignment.courseId, role: 'STUDENT' } });
     
@@ -737,6 +786,8 @@ router.get('/assignments/:id/summary', async (req, res, next) => {
       passThresholdPercent: Math.round(summaryPassThreshold * 1000) / 10,
       totalStudents,
       submittedCount: submissions.length,
+      excludedCount: excludedRuts.size,
+      rawSubmittedCount: rawSubmissions.length,
       averageGrade,
       averagePercent,
       averageSimceScore,
@@ -753,11 +804,19 @@ router.get('/assignments/:id/skills', async (req, res, next) => {
   try {
     const assignment = await getAssignmentIfAllowed(parseInt(req.params.id, 10), req.user);
     
-    const questions = await prisma.question.findMany({ where: { examId: assignment.examId } });
-    const submissions = await prisma.submission.findMany({
-      where: { assignmentId: assignment.id, status: 'SUBMITTED' },
-      include: { answers: true }
-    });
+    const [questions, rawSubmissions, exclusions] = await Promise.all([
+      prisma.question.findMany({ where: { examId: assignment.examId } }),
+      prisma.submission.findMany({
+        where: { assignmentId: assignment.id, status: 'SUBMITTED' },
+        include: { answers: true }
+      }),
+      prisma.assignmentExclusion.findMany({
+        where: { assignmentId: assignment.id }
+      })
+    ]);
+
+    const excludedRuts = new Set(exclusions.map(e => e.studentRut));
+    const submissions = rawSubmissions.filter(s => !excludedRuts.has(s.studentRut));
 
     const skills = {};
     const axes = {};
@@ -815,11 +874,19 @@ router.get('/assignments/:id/remedial', async (req, res, next) => {
   try {
     const assignment = await getAssignmentIfAllowed(parseInt(req.params.id, 10), req.user);
     
-    const questions = await prisma.question.findMany({ where: { examId: assignment.examId } });
-    const submissions = await prisma.submission.findMany({
-      where: { assignmentId: assignment.id, status: 'SUBMITTED' },
-      include: { answers: true }
-    });
+    const [questions, rawSubmissions, exclusions] = await Promise.all([
+      prisma.question.findMany({ where: { examId: assignment.examId } }),
+      prisma.submission.findMany({
+        where: { assignmentId: assignment.id, status: 'SUBMITTED' },
+        include: { answers: true }
+      }),
+      prisma.assignmentExclusion.findMany({
+        where: { assignmentId: assignment.id }
+      })
+    ]);
+
+    const excludedRuts = new Set(exclusions.map(e => e.studentRut));
+    const submissions = rawSubmissions.filter(s => !excludedRuts.has(s.studentRut));
 
     const clusters = {}; // Key: "EJE|OA|HABILIDAD"
     
@@ -1073,14 +1140,22 @@ router.get('/assignments/:id/items', async (req, res, next) => {
   try {
     const assignment = await getAssignmentIfAllowed(parseInt(req.params.id, 10), req.user);
     
-    const questions = await prisma.question.findMany({ 
-      where: { examId: assignment.examId },
-      orderBy: { questionNumber: 'asc' }
-    });
-    const submissions = await prisma.submission.findMany({
-      where: { assignmentId: assignment.id, status: 'SUBMITTED' },
-      include: { answers: true }
-    });
+    const [questions, rawSubmissions, exclusions] = await Promise.all([
+      prisma.question.findMany({ 
+        where: { examId: assignment.examId },
+        orderBy: { questionNumber: 'asc' }
+      }),
+      prisma.submission.findMany({
+        where: { assignmentId: assignment.id, status: 'SUBMITTED' },
+        include: { answers: true }
+      }),
+      prisma.assignmentExclusion.findMany({
+        where: { assignmentId: assignment.id }
+      })
+    ]);
+
+    const excludedRuts = new Set(exclusions.map(e => e.studentRut));
+    const submissions = rawSubmissions.filter(s => !excludedRuts.has(s.studentRut));
 
     const itemPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
 
@@ -1147,21 +1222,27 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
   try {
     const assignment = await getAssignmentIfAllowed(parseInt(req.params.id, 10), req.user);
     
-    const students = await prisma.user.findMany({
-      where: { courseId: assignment.courseId, role: 'STUDENT' },
-      orderBy: { name: 'asc' }
-    });
-    
-    const submissions = await prisma.submission.findMany({
-      where: { assignmentId: assignment.id, status: 'SUBMITTED' },
-      include: { answers: { include: { question: true } } }
-    });
-    const subMap = Object.fromEntries(submissions.map(s => [s.studentRut, s]));
+    const [students, rawSubmissions, exclusions, questions] = await Promise.all([
+      prisma.user.findMany({
+        where: { courseId: assignment.courseId, role: 'STUDENT' },
+        orderBy: { name: 'asc' }
+      }),
+      prisma.submission.findMany({
+        where: { assignmentId: assignment.id, status: 'SUBMITTED' },
+        include: { answers: { include: { question: true } } }
+      }),
+      prisma.assignmentExclusion.findMany({
+        where: { assignmentId: assignment.id }
+      }),
+      prisma.question.findMany({ 
+        where: { examId: assignment.examId },
+        orderBy: { questionNumber: 'asc' }
+      })
+    ]);
 
-    const questions = await prisma.question.findMany({ 
-      where: { examId: assignment.examId },
-      orderBy: { questionNumber: 'asc' }
-    });
+    const exclusionMap = Object.fromEntries(exclusions.map(e => [e.studentRut, e]));
+    const submissions = rawSubmissions.filter(s => !exclusionMap[s.studentRut]);
+    const subMap = Object.fromEntries(rawSubmissions.map(s => [s.studentRut, s]));
 
     const exportGradingMode = normalizeGradingMode(assignment.exam?.gradingMode);
     const exportPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
@@ -1195,12 +1276,16 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
     sheet1.columns = columns1;
 
     students.forEach(st => {
+      const isExcluded = Boolean(exclusionMap[st.rut]);
+      const excl = exclusionMap[st.rut];
       const sub = subMap[st.rut];
-      const pVal = sub?.percent != null
-        ? (sub.percent > 1 ? Math.round(sub.percent) : Math.round(sub.percent * 100)) + '%'
-        : '';
+      const pVal = isExcluded
+        ? '-'
+        : (sub?.percent != null
+            ? (sub.percent > 1 ? Math.round(sub.percent) : Math.round(sub.percent * 100)) + '%'
+            : '');
       let earnedPts = 0;
-      if (sub) {
+      if (sub && !isExcluded) {
         sub.answers.forEach(a => {
           const q = a.question;
           if (!q) return;
@@ -1216,13 +1301,13 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       const row = {
         rut: st.rut,
         name: st.name,
-        grade: sub?.grade != null ? sub.grade.toFixed(1) : '',
-        ...(isNormalExport ? {} : { simceScore: sub?.simceScore != null ? sub.simceScore : '' }),
-        level: sub?.achievementLevel || '',
-        ...(isNormalExport || hasWeightedPoints ? { points: sub ? `${earnedPts} / ${maxTotalPoints} pts` : '' } : {}),
+        grade: isExcluded ? 'EXCLUIDO' : (sub?.grade != null ? sub.grade.toFixed(1) : ''),
+        ...(isNormalExport ? {} : { simceScore: isExcluded ? '-' : (sub?.simceScore != null ? sub.simceScore : '') }),
+        level: isExcluded ? `EXCLUIDO (${excl.reason})` : (sub?.achievementLevel || ''),
+        ...(isNormalExport || hasWeightedPoints ? { points: isExcluded ? '-' : (sub ? `${earnedPts} / ${maxTotalPoints} pts` : '') } : {}),
         percent: pVal
       };
-      if (sub) {
+      if (sub && !isExcluded) {
         sub.answers.forEach(a => {
           const q = a.question;
           if (q && (q.questionType === 'WRITTEN' || q.questionType === 'ORAL')) {
@@ -1246,7 +1331,8 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
 
     const totalStudents = students.length;
     const submittedCount = submissions.length;
-    const participationPct = totalStudents > 0 ? Math.round((submittedCount / totalStudents) * 100) : 0;
+    const excludedCount = exclusions.length;
+    const participationPct = (totalStudents - excludedCount) > 0 ? Math.round((submittedCount / (totalStudents - excludedCount)) * 100) : 0;
     const avgGrade = submittedCount > 0 ? (submissions.reduce((sum, s) => sum + (s.grade || 1.0), 0) / submittedCount).toFixed(1) : '0.0';
     const simceSubs = isNormalExport ? [] : submissions.filter(s => s.simceScore != null);
     const avgSimce = simceSubs.length > 0 ? Math.round(simceSubs.reduce((sum, s) => sum + s.simceScore, 0) / simceSubs.length) : 'N/A';
@@ -1262,9 +1348,10 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       { metric: 'Curso', value: `${assignment.course.level.replace('B', '° Básico').replace('M', '° Medio')} ${assignment.course.letter}` },
       { metric: 'Modo de Calificación', value: isNormalExport ? `Prueba Normal (Exigencia ${exportPassPercent}%)` : `Escala SIMCE TRI (Exigencia ${exportPassPercent}%)` },
       { metric: 'Total Matrícula del Curso', value: totalStudents },
-      { metric: 'Estudiantes Evaluados (Entregas)', value: submittedCount },
-      { metric: 'Estudiantes Ausentes / Pendientes', value: totalStudents - submittedCount },
-      { metric: 'Tasa de Participación', value: `${participationPct}%` },
+      { metric: 'Estudiantes Excluidos / Justificados', value: excludedCount },
+      { metric: 'Estudiantes Evaluados (Entregas Válidas)', value: submittedCount },
+      { metric: 'Estudiantes Ausentes / Pendientes', value: Math.max(0, totalStudents - excludedCount - submittedCount) },
+      { metric: 'Tasa de Participación (sobre matrícula activa)', value: `${participationPct}%` },
       { metric: 'Nota Promedio (1.0 - 7.0)', value: avgGrade },
       ...(isNormalExport ? [] : [{ metric: 'Puntaje SIMCE Promedio (200 - 350 pts)', value: avgSimce }]),
       { metric: '% Logro Promedio', value: `${avgPercent}%` },
@@ -1903,17 +1990,28 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
       teacherRut = req.user.rut;
     }
 
-    // 4. Obtener entregas
-    const submissions = await prisma.submission.findMany({
-      where: { assignmentId: assignment.id, status: 'SUBMITTED' },
-      include: { answers: true }
-    });
+    // 4. Obtener entregas y exclusiones
+    const [rawSubmissions, exclusions] = await Promise.all([
+      prisma.submission.findMany({
+        where: { assignmentId: assignment.id, status: 'SUBMITTED' },
+        include: { answers: true }
+      }),
+      prisma.assignmentExclusion.findMany({
+        where: { assignmentId: assignment.id },
+        include: { student: { select: { name: true, rut: true } } }
+      })
+    ]);
+
+    const excludedMap = Object.fromEntries(exclusions.map(e => [e.studentRut, e]));
+    const submissions = rawSubmissions.filter(s => !excludedMap[s.studentRut]);
 
     const students = course.students || [];
     const totalStudents = students.length;
+    const excludedCount = exclusions.length;
+    const validEnrolled = Math.max(0, totalStudents - excludedCount);
     const submittedCount = submissions.length;
-    const pendingCount = Math.max(0, totalStudents - submittedCount);
-    const participationPercent = totalStudents > 0 ? Math.round((submittedCount / totalStudents) * 1000) / 10 : 0;
+    const pendingCount = Math.max(0, validEnrolled - submittedCount);
+    const participationPercent = validEnrolled > 0 ? Math.round((submittedCount / validEnrolled) * 1000) / 10 : 0;
 
     const gradingMode = normalizeGradingMode(exam.gradingMode);
     const passThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
@@ -2069,6 +2167,29 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
     // 7. Nómina de estudiantes ordenada
     const subMap = Object.fromEntries(submissions.map(s => [s.studentRut, s]));
     const roster = students.map((st, idx) => {
+      const isExcluded = Boolean(excludedMap[st.rut]);
+      const excl = excludedMap[st.rut];
+
+      if (isExcluded) {
+        return {
+          index: idx + 1,
+          rut: st.rut,
+          name: st.name,
+          state: 'EXCLUIDO',
+          isExcluded: true,
+          exclusionReason: excl.reason,
+          exclusionDetails: excl.details || null,
+          excludedAt: excl.excludedAt,
+          grade: null,
+          percent: null,
+          simceScore: null,
+          achievementLevel: 'EXCLUIDO',
+          correctCount: null,
+          earnedPoints: null,
+          submittedAt: null
+        };
+      }
+
       const sub = subMap[st.rut];
       let earnedPoints = 0;
       let correctCount = 0;
@@ -2096,6 +2217,10 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
         rut: st.rut,
         name: st.name,
         state: sub ? 'SUBMITTED' : 'AUSENTE',
+        isExcluded: false,
+        exclusionReason: null,
+        exclusionDetails: null,
+        excludedAt: null,
         grade: sub ? (sub.grade != null ? Math.round(sub.grade * 10) / 10 : 1.0) : null,
         percent: sub ? (sub.percent != null ? Math.round(sub.percent * 10) / 10 : 0) : null,
         simceScore: sub ? sub.simceScore : null,
@@ -2147,6 +2272,8 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
       },
       summary: {
         totalStudents,
+        excludedCount,
+        validEnrolled,
         submittedCount,
         pendingCount,
         participationPercent,
@@ -2159,6 +2286,14 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
         levelCounts,
         gradeRanges
       },
+      excludedStudents: exclusions.map(e => ({
+        rut: e.studentRut,
+        name: e.student?.name || e.studentRut,
+        reason: e.reason,
+        details: e.details,
+        excludedAt: e.excludedAt
+      })),
+      exclusionsCount: exclusions.length,
       skills: skillsList,
       axes: axesList,
       criticalQuestions,
@@ -3718,6 +3853,233 @@ router.get('/assignments/:id/audios/:clipId/stream', async (req, res, next) => {
     return res.sendFile(filePath);
   } catch (error) {
     next(error);
+  }
+});
+
+// Otorgar +1 escucha a audios agotados a un estudiante
+router.post('/assignments/:id/students/:rut/audio-extra-play', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const rut = req.params.rut;
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+
+    let submission = await prisma.submission.findUnique({
+      where: { studentRut_assignmentId: { studentRut: rut, assignmentId: assignment.id } }
+    });
+    if (!submission) {
+      return res.status(404).json({ error: 'El estudiante no ha iniciado esta evaluación.' });
+    }
+
+    const clips = await prisma.examAudioClip.findMany({
+      where: { examId: assignment.examId }
+    });
+
+    let audioPlays = {};
+    try { audioPlays = JSON.parse(submission.audioPlays || '{}'); } catch { audioPlays = {}; }
+    let extraAudioPlays = {};
+    try { extraAudioPlays = JSON.parse(submission.extraAudioPlays || '{}'); } catch { extraAudioPlays = {}; }
+
+    // Encontrar audios con límite que ya hayan agotado sus reproducciones
+    const exhaustedClips = clips.filter(c => {
+      if (c.maxPlays === null || c.maxPlays === undefined) return false;
+      const played = Number(audioPlays[c.id] || 0);
+      const extra = Number(extraAudioPlays[c.id] || 0);
+      return played >= (c.maxPlays + extra);
+    });
+
+    if (exhaustedClips.length === 0) {
+      return res.status(400).json({
+        error: 'El estudiante no tiene audios con reproducciones agotadas en este momento.'
+      });
+    }
+
+    exhaustedClips.forEach(c => {
+      extraAudioPlays[c.id] = (Number(extraAudioPlays[c.id]) || 0) + 1;
+    });
+
+    await prisma.submission.update({
+      where: { id: submission.id },
+      data: { extraAudioPlays: JSON.stringify(extraAudioPlays) }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'En Vivo',
+      accion: 'Otorgar Escucha Extra Audio',
+      nivel: 'info',
+      entidad: 'Entrega',
+      entidad_id: submission.id,
+      descripcion: `Otorgó +1 escucha a audios agotados al estudiante ${rut} en evaluación #${assignment.id}`,
+      detalles: { assignmentId: assignment.id, studentRut: rut, grantedClips: exhaustedClips.map(c => c.id) }
+    });
+
+    res.json({
+      success: true,
+      extraAudioPlays,
+      grantedClipsCount: exhaustedClips.length,
+      grantedClips: exhaustedClips.map(c => ({ id: c.id, title: c.title }))
+    });
+  } catch (error) {
+    handleAssignmentError(error, res, next);
+  }
+});
+
+// Otorgar +1 escucha a audios agotados para toda la sala
+router.post('/assignments/:id/audio-extra-play/room', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+
+    const clips = await prisma.examAudioClip.findMany({
+      where: { examId: assignment.examId }
+    });
+    const limitedClips = clips.filter(c => c.maxPlays !== null && c.maxPlays !== undefined);
+    if (limitedClips.length === 0) {
+      return res.status(400).json({ error: 'Esta evaluación no contiene audios con límite de reproducciones.' });
+    }
+
+    const submissions = await prisma.submission.findMany({
+      where: { assignmentId: assignment.id }
+    });
+
+    let affectedStudentsCount = 0;
+    const updates = [];
+
+    for (const sub of submissions) {
+      let audioPlays = {};
+      try { audioPlays = JSON.parse(sub.audioPlays || '{}'); } catch { audioPlays = {}; }
+      let extraAudioPlays = {};
+      try { extraAudioPlays = JSON.parse(sub.extraAudioPlays || '{}'); } catch { extraAudioPlays = {}; }
+
+      let hasExhausted = false;
+      for (const c of limitedClips) {
+        const played = Number(audioPlays[c.id] || 0);
+        const extra = Number(extraAudioPlays[c.id] || 0);
+        if (played >= (c.maxPlays + extra)) {
+          extraAudioPlays[c.id] = extra + 1;
+          hasExhausted = true;
+        }
+      }
+
+      if (hasExhausted) {
+        affectedStudentsCount++;
+        updates.push(prisma.submission.update({
+          where: { id: sub.id },
+          data: { extraAudioPlays: JSON.stringify(extraAudioPlays) }
+        }));
+      }
+    }
+
+    if (updates.length > 0) {
+      await prisma.$transaction(updates);
+    }
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'En Vivo',
+      accion: 'Otorgar Escucha Extra Sala Completa',
+      nivel: 'info',
+      entidad: 'Asignacion',
+      entidad_id: assignment.id,
+      descripcion: `Otorgó +1 escucha a audios agotados para toda la sala en evaluación #${assignment.id} (${affectedStudentsCount} alumnos beneficiados)`,
+      detalles: { assignmentId: assignment.id, affectedStudentsCount }
+    });
+
+    res.json({
+      success: true,
+      affectedStudentsCount,
+      totalSubmissions: submissions.length
+    });
+  } catch (error) {
+    handleAssignmentError(error, res, next);
+  }
+});
+
+// Excluir estudiante de informes de una evaluación con justificación obligatoria
+router.post('/assignments/:id/students/:rut/exclude', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const rut = req.params.rut;
+    const { reason, details } = req.body || {};
+
+    if (!reason || !String(reason).trim()) {
+      return res.status(400).json({ error: 'La razón de la exclusión es obligatoria.' });
+    }
+
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+
+    // Verificar que el estudiante pertenece al curso
+    const student = await prisma.user.findFirst({
+      where: { rut, courseId: assignment.courseId, role: 'STUDENT' }
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'Estudiante no encontrado en este curso.' });
+    }
+
+    const exclusion = await prisma.assignmentExclusion.upsert({
+      where: {
+        assignmentId_studentRut: {
+          assignmentId: assignment.id,
+          studentRut: rut
+        }
+      },
+      update: {
+        reason: String(reason).trim(),
+        details: details ? String(details).trim() : null,
+        excludedBy: req.user.rut,
+        excludedAt: new Date()
+      },
+      create: {
+        assignmentId: assignment.id,
+        studentRut: rut,
+        reason: String(reason).trim(),
+        details: details ? String(details).trim() : null,
+        excludedBy: req.user.rut
+      }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Excluir Estudiante de Evaluación',
+      nivel: 'warn',
+      entidad: 'Asignacion',
+      entidad_id: assignment.id,
+      descripcion: `Excluyó de informes al estudiante ${student.name} (${rut}) en evaluación #${assignment.id}. Motivo: ${reason}`,
+      detalles: { assignmentId: assignment.id, studentRut: rut, reason, details }
+    });
+
+    res.json({ success: true, exclusion });
+  } catch (error) {
+    handleAssignmentError(error, res, next);
+  }
+});
+
+// Reintegrar estudiante a informes de evaluación
+router.post('/assignments/:id/students/:rut/unexclude', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const rut = req.params.rut;
+    const assignment = await getAssignmentIfAllowed(id, req.user);
+
+    await prisma.assignmentExclusion.deleteMany({
+      where: { assignmentId: assignment.id, studentRut: rut }
+    });
+
+    auditoria.registrarAuditoria({
+      req,
+      modulo: 'Evaluaciones',
+      accion: 'Reintegrar Estudiante a Evaluación',
+      nivel: 'info',
+      entidad: 'Asignacion',
+      entidad_id: assignment.id,
+      descripcion: `Reintegró a informes al estudiante (${rut}) en evaluación #${assignment.id}`,
+      detalles: { assignmentId: assignment.id, studentRut: rut }
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    handleAssignmentError(error, res, next);
   }
 });
 

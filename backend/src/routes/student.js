@@ -31,7 +31,8 @@ async function getOwnSubmission(req, submissionId) {
   });
 }
 
-function assignmentState(a, submission, now = new Date()) {
+function assignmentState(a, submission, now = new Date(), exclusion = null) {
+  if (exclusion) return 'EXCLUDED';
   if (submission?.status === 'SUBMITTED') return a.released ? 'RESULTS' : 'SUBMITTED';
   const effectiveMode = submission?.applicationMode || a.applicationMode || 'DIGITAL';
   if (effectiveMode === 'PRINTED') return 'PRINTED';
@@ -62,12 +63,15 @@ router.get('/assignments', async (req, res) => {
         }
       },
       submissions: { where: { studentRut: req.user.rut } },
+      exclusions: { where: { studentRut: req.user.rut } },
     },
     orderBy: { opensAt: 'desc' },
   });
 
   res.json(assignments.map((a) => {
     const submission = a.submissions[0] || null;
+    const exclusion = a.exclusions?.[0] || null;
+    const isExcluded = Boolean(exclusion);
     const effectiveMode = submission?.applicationMode || a.applicationMode || 'DIGITAL';
     const pThresh = normalizePassThreshold(a.exam?.passThreshold, 0.6);
     return {
@@ -75,6 +79,8 @@ router.get('/assignments', async (req, res) => {
       opensAt: a.opensAt,
       closesAt: submission?.extendedDeadline || a.closesAt,
       isExtended: Boolean(submission?.extendedDeadline),
+      isExcluded,
+      exclusionReason: exclusion?.reason || null,
       released: a.released,
       applicationMode: effectiveMode,
       isArchived: Boolean(a.isArchived),
@@ -87,7 +93,7 @@ router.get('/assignments', async (req, res) => {
         questionCount: a.exam._count.questions,
         _count: undefined
       },
-      state: assignmentState(a, submission),
+      state: assignmentState(a, submission, new Date(), exclusion),
       submissionId: submission?.id ?? null,
     };
   }));
@@ -97,6 +103,15 @@ router.get('/assignments', async (req, res) => {
 router.post('/assignments/:id/start', async (req, res) => {
   const assignment = await getOwnAssignment(req, Number(req.params.id));
   if (!assignment) return res.status(404).json({ error: 'Ensayo no encontrado' });
+
+  const exclusion = await prisma.assignmentExclusion.findUnique({
+    where: { assignmentId_studentRut: { assignmentId: assignment.id, studentRut: req.user.rut } }
+  });
+  if (exclusion) {
+    return res.status(403).json({
+      error: `Has sido justificado/excluido de esta evaluación (${exclusion.reason}). No requieres rendirla.`
+    });
+  }
 
   const now = new Date();
   let submission = await prisma.submission.findUnique({
@@ -226,6 +241,8 @@ router.post('/assignments/:id/start', async (req, res) => {
     questions,
     audioClips,
     answers: Object.fromEntries(answers.map((a) => [a.questionId, a.selectedAnswer])),
+    audioPlays: (() => { try { return JSON.parse(submission.audioPlays || '{}'); } catch { return {}; } })(),
+    extraAudioPlays: (() => { try { return JSON.parse(submission.extraAudioPlays || '{}'); } catch { return {}; } })(),
     serverNow: now.toISOString(),
     deadline: deadline.toISOString(),
   });
@@ -282,11 +299,30 @@ router.get('/assignments/:id/audios/:clipId', async (req, res) => {
   res.sendFile(filePath);
 });
 
+// GET /api/student/assignments/:id/audio-state -> sincronización en vivo de audios y escuchas extra
+router.get('/assignments/:id/audio-state', async (req, res) => {
+  const assignment = await getOwnAssignment(req, Number(req.params.id));
+  if (!assignment) return res.status(404).json({ error: 'Ensayo no encontrado' });
+
+  const submission = await prisma.submission.findUnique({
+    where: { studentRut_assignmentId: { studentRut: req.user.rut, assignmentId: assignment.id } },
+  });
+  if (!submission) return res.status(404).json({ error: 'Intento no encontrado' });
+
+  let extraAudioPlays = {};
+  try { extraAudioPlays = JSON.parse(submission.extraAudioPlays || '{}'); } catch { extraAudioPlays = {}; }
+  let audioPlays = {};
+  try { audioPlays = JSON.parse(submission.audioPlays || '{}'); } catch { audioPlays = {}; }
+
+  res.json({ extraAudioPlays, audioPlays });
+});
+
 const answersSchema = z.object({
   answers: z.array(z.object({
     questionId: z.number().int(),
     selectedAnswer: z.string().max(25000).nullable(),
-  })).min(1).max(200),
+  })).min(0).max(200).default([]),
+  audioPlays: z.record(z.string(), z.number().int().nonnegative()).optional(),
 });
 
 // PUT /api/student/submissions/:id/answers  -> autoguardado (acepta lote para reintentos sin conexión)
@@ -325,19 +361,57 @@ router.put('/submissions/:id/answers', async (req, res) => {
     }
   }
 
-  await prisma.$transaction(parsed.data.answers.map((a) => {
-    const where = { submissionId_questionId: { submissionId: submission.id, questionId: a.questionId } };
-    if (a.selectedAnswer === null || a.selectedAnswer === '') {
-      return prisma.submissionAnswer.deleteMany({ where: { submissionId: submission.id, questionId: a.questionId } });
-    }
-    return prisma.submissionAnswer.upsert({
-      where,
-      update: { selectedAnswer: a.selectedAnswer },
-      create: { submissionId: submission.id, questionId: a.questionId, selectedAnswer: a.selectedAnswer },
-    });
-  }));
+  if (parsed.data.answers.length > 0) {
+    await prisma.$transaction(parsed.data.answers.map((a) => {
+      const where = { submissionId_questionId: { submissionId: submission.id, questionId: a.questionId } };
+      if (a.selectedAnswer === null || a.selectedAnswer === '') {
+        return prisma.submissionAnswer.deleteMany({ where: { submissionId: submission.id, questionId: a.questionId } });
+      }
+      return prisma.submissionAnswer.upsert({
+        where,
+        update: { selectedAnswer: a.selectedAnswer },
+        create: { submissionId: submission.id, questionId: a.questionId, selectedAnswer: a.selectedAnswer },
+      });
+    }));
+  }
 
-  res.json({ saved: parsed.data.answers.length, savedAt: new Date().toISOString() });
+  // Guardar reproducciones de audio sincronizadas si se envían
+  if (parsed.data.audioPlays) {
+    let currentPlays = {};
+    try { currentPlays = JSON.parse(submission.audioPlays || '{}'); } catch { currentPlays = {}; }
+    let changed = false;
+    for (const [clipId, count] of Object.entries(parsed.data.audioPlays)) {
+      const cNum = Number(count) || 0;
+      if (cNum > (Number(currentPlays[clipId]) || 0)) {
+        currentPlays[clipId] = cNum;
+        changed = true;
+      }
+    }
+    if (changed) {
+      await prisma.submission.update({
+        where: { id: submission.id },
+        data: { audioPlays: JSON.stringify(currentPlays) }
+      });
+    }
+  }
+
+  // Leer estado fresco de escuchas extra otorgadas por el profesor
+  let extraAudioPlays = {};
+  try {
+    const freshSub = await prisma.submission.findUnique({
+      where: { id: submission.id },
+      select: { extraAudioPlays: true }
+    });
+    extraAudioPlays = JSON.parse(freshSub?.extraAudioPlays || '{}');
+  } catch {
+    extraAudioPlays = {};
+  }
+
+  res.json({
+    saved: parsed.data.answers.length,
+    savedAt: new Date().toISOString(),
+    extraAudioPlays
+  });
 });
 
 // POST /api/student/submissions/:id/submit

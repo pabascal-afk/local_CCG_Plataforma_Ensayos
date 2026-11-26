@@ -2,13 +2,14 @@ import { useEffect, useState, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/session";
 import Link from "next/link";
-import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check, PenTool, Zap, CheckSquare, Square } from "lucide-react";
+import { ChevronRight, Upload, FileSpreadsheet, Download, Printer, ScanLine, Keyboard, Sparkles, Monitor, Check, PenTool, Zap, CheckSquare, Square, ShieldAlert, Undo2 } from "lucide-react";
 import OmrScannerModal from "@/components/OmrScannerModal";
 import FastDigitizerModal from "@/components/FastDigitizerModal";
 import OpenQuestionsGradingModal from "@/components/OpenQuestionsGradingModal";
 import ReactivateCourseModal from "@/components/ReactivateCourseModal";
 import ReactivateStudentModal from "@/components/ReactivateStudentModal";
 import ReactivateBulkStudentsModal from "@/components/ReactivateBulkStudentsModal";
+import ExcludeStudentModal from "@/components/ExcludeStudentModal";
 import { useIsPruebas } from "@/lib/useIsPruebas";
 
 export default function StudentsTab({ id }: { id: number }) {
@@ -25,6 +26,7 @@ export default function StudentsTab({ id }: { id: number }) {
   const [isUpdatingMode, setIsUpdatingMode] = useState(false);
   const [showReactivateCourseModal, setShowReactivateCourseModal] = useState(false);
   const [selectedReactivateStudent, setSelectedReactivateStudent] = useState<any>(null);
+  const [selectedExcludeStudent, setSelectedExcludeStudent] = useState<any>(null);
   const [selectedRuts, setSelectedRuts] = useState<string[]>([]);
   const [showBulkReactivateModal, setShowBulkReactivateModal] = useState(false);
 
@@ -122,11 +124,24 @@ export default function StudentsTab({ id }: { id: number }) {
     setSelectedRuts(prev => prev.includes(rut) ? prev.filter(r => r !== rut) : [...prev, rut]);
   };
 
+  const handleUnexclude = async (st: any) => {
+    if (!confirm(`¿Deseas reintegrar a ${st.name} a los informes y estadísticas de la evaluación?`)) return;
+    try {
+      await apiFetch(`/teacher/assignments/${id}/students/${st.rut}/unexclude`, {
+        method: "POST"
+      });
+      await refreshData();
+    } catch (err: any) {
+      alert("Error al reintegrar: " + (err.message || "Error"));
+    }
+  };
+
   if (error) return <div className="text-red-500">{error}</div>;
   if (!data) return <div className="animate-pulse">Cargando estudiantes...</div>;
 
-  const students = data.students.filter((s: any) => s.state === "SUBMITTED").sort((a: any, b: any) => (b.grade || 0) - (a.grade || 0));
-  const pending = data.students.filter((s: any) => s.state !== "SUBMITTED");
+  const students = data.students.filter((s: any) => s.state === "SUBMITTED" && !s.isExcluded).sort((a: any, b: any) => (b.grade || 0) - (a.grade || 0));
+  const pending = data.students.filter((s: any) => s.state !== "SUBMITTED" && !s.isExcluded);
+  const excluded = data.students.filter((s: any) => s.isExcluded);
   const openQuestions = data.openQuestions || [];
   const hasOpenQuestions = openQuestions.length > 0;
 
@@ -517,6 +532,15 @@ export default function StudentsTab({ id }: { id: number }) {
                   <td className="p-4 text-right whitespace-nowrap">
                     <button
                       type="button"
+                      onClick={() => setSelectedExcludeStudent(st)}
+                      className="inline-flex items-center gap-1 text-slate-500 hover:text-amber-700 text-xs font-semibold px-2 py-1 hover:underline mr-1 cursor-pointer"
+                      title="Excluir de informes con justificación pedagógica"
+                    >
+                      <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Excluir</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setSelectedReactivateStudent(st)}
                       className="inline-flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-lg text-xs font-bold transition mr-2 cursor-pointer shadow-2xs"
                       title="Reactivar intento para este alumno (conservar o reiniciar respuestas)"
@@ -613,6 +637,15 @@ export default function StudentsTab({ id }: { id: number }) {
                   <td className="p-4 text-right whitespace-nowrap space-x-2">
                     <button
                       type="button"
+                      onClick={() => setSelectedExcludeStudent(st)}
+                      className="inline-flex items-center gap-1 text-slate-500 hover:text-amber-700 text-xs font-semibold px-2 py-1 hover:underline cursor-pointer"
+                      title="Excluir de informes con justificación pedagógica"
+                    >
+                      <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Excluir</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setSelectedReactivateStudent(st)}
                       className="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs"
                       title="Otorgar plazo individual a este alumno"
@@ -638,6 +671,56 @@ export default function StudentsTab({ id }: { id: number }) {
           </tbody>
         </table>
       </div>
+
+      {/* Tabla de Estudiantes Excluidos / Justificados */}
+      {excluded.length > 0 && (
+        <div className="mt-8 mb-8">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-6 h-6 rounded-md bg-amber-100 text-amber-800 flex items-center justify-center">
+              <ShieldAlert className="w-4 h-4" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-800">
+              Estudiantes Excluidos / Justificados de Informes ({excluded.length})
+            </h3>
+          </div>
+          <div className="overflow-x-auto border border-amber-200 rounded-xl bg-amber-50/10 shadow-2xs">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-amber-100/60 text-amber-950 font-semibold border-b border-amber-200">
+                <tr>
+                  <th className="p-3.5">RUT</th>
+                  <th className="p-3.5">Nombre</th>
+                  <th className="p-3.5">Motivo de Exclusión</th>
+                  <th className="p-3.5">Observaciones</th>
+                  <th className="p-3.5 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-amber-100">
+                {excluded.map((st: any) => (
+                  <tr key={st.rut} className="hover:bg-amber-50/50">
+                    <td className="p-3.5 font-mono text-gray-600">{st.rut}</td>
+                    <td className="p-3.5 font-bold text-gray-900">{st.name}</td>
+                    <td className="p-3.5 font-semibold text-amber-900">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs bg-amber-100 border border-amber-300">
+                        {st.exclusionReason}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-gray-600 text-xs">{st.exclusionDetails || "-"}</td>
+                    <td className="p-3.5 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleUnexclude(st)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg shadow-2xs transition cursor-pointer"
+                      >
+                        <Undo2 className="w-3.5 h-3.5 text-slate-600" /> Reintegrar a Informes
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Floating Selection Action Bar */}
       {selectedRuts.length > 0 && (
@@ -699,6 +782,23 @@ export default function StudentsTab({ id }: { id: number }) {
           refreshData();
         }}
       />
+
+      {/* Modal Excluir Estudiante */}
+      {selectedExcludeStudent && (
+        <ExcludeStudentModal
+          isOpen={true}
+          onClose={() => setSelectedExcludeStudent(null)}
+          assignmentId={id}
+          student={{
+            rut: selectedExcludeStudent.rut,
+            name: selectedExcludeStudent.name
+          }}
+          onSuccess={async () => {
+            setSelectedExcludeStudent(null);
+            await refreshData();
+          }}
+        />
+      )}
     </div>
   );
 }

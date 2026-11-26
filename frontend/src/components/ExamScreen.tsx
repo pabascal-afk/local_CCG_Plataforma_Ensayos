@@ -62,6 +62,8 @@ interface StartData {
   questions: { id: number; questionNumber: number; questionType?: string; maxPoints?: number }[];
   audioClips?: StudentAudioClip[];
   answers: Record<string, string>;
+  audioPlays?: Record<string, number>;
+  extraAudioPlays?: Record<string, number>;
   serverNow: string;
   deadline: string;
 }
@@ -157,6 +159,9 @@ export default function ExamScreen({
   const [regradingMock, setRegradingMock] = useState(false);
   const [showAuditTable, setShowAuditTable] = useState(true);
 
+  // Escuchas extra concedidas por el docente en vivo: { [clipId]: number }
+  const [extraAudioPlays, setExtraAudioPlays] = useState<Record<string, number>>({});
+
   // Cola y refs síncronas para autoguardado sin cierres obsoletos
   const pending = useRef<Map<number, string | null>>(new Map());
   const inFlight = useRef(false);
@@ -193,11 +198,37 @@ export default function ExamScreen({
     const batch = Array.from(pending.current.entries());
     pending.current.clear();
     setSaveState("saving");
+
+    // Recolectar reproducciones actuales de audios de almacenamiento local
+    const audioPlaysMap: Record<string, number> = {};
+    if (!isMock && currentData.audioClips && currentData.audioClips.length > 0) {
+      for (const clip of currentData.audioClips) {
+        try {
+          const val = localStorage.getItem(`ccg_audio_plays_${currentData.assignmentId}_${clip.id}`);
+          if (val) audioPlaysMap[String(clip.id)] = parseInt(val, 10) || 0;
+        } catch {}
+      }
+    }
+
     try {
-      await apiFetch(`/student/submissions/${currentData.submissionId}/answers`, {
-        method: "PUT",
-        body: { answers: batch.map(([questionId, selectedAnswer]) => ({ questionId, selectedAnswer })) },
-      });
+      const res = await apiFetch<{ saved: number; savedAt: string; extraAudioPlays?: Record<string, number> }>(
+        `/student/submissions/${currentData.submissionId}/answers`,
+        {
+          method: "PUT",
+          body: {
+            answers: batch.map(([questionId, selectedAnswer]) => ({ questionId, selectedAnswer })),
+            audioPlays: Object.keys(audioPlaysMap).length > 0 ? audioPlaysMap : undefined,
+          },
+        }
+      );
+      if (res?.extraAudioPlays) {
+        setExtraAudioPlays((prev) => {
+          if (JSON.stringify(prev) !== JSON.stringify(res.extraAudioPlays)) {
+            return res.extraAudioPlays!;
+          }
+          return prev;
+        });
+      }
       setSaveState(pending.current.size ? "saving" : "saved");
       return true;
     } catch (e) {
@@ -218,6 +249,27 @@ export default function ExamScreen({
     }
   }, [isMock, mockExamId]);
 
+  // Sincronización en vivo de audios y escuchas adicionales otorgadas por el profesor
+  useEffect(() => {
+    if (isMock || !data?.assignmentId || !data?.audioClips?.length) return;
+    const interval = setInterval(async () => {
+      try {
+        const state = await apiFetch<{ extraAudioPlays: Record<string, number>; audioPlays: Record<string, number> }>(
+          `/student/assignments/${data.assignmentId}/audio-state`
+        );
+        if (state?.extraAudioPlays) {
+          setExtraAudioPlays((prev) => {
+            if (JSON.stringify(prev) !== JSON.stringify(state.extraAudioPlays)) {
+              return state.extraAudioPlays;
+            }
+            return prev;
+          });
+        }
+      } catch {}
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [isMock, data?.assignmentId, data?.audioClips?.length]);
+
   // --- Carga / retoma del intento o sesión Mocktest ---
   useEffect(() => {
     let cancelled = false;
@@ -230,6 +282,9 @@ export default function ExamScreen({
     apiFetch<StartData>(endpoint, { method: "POST" })
       .then((d) => {
         if (cancelled) return;
+        if (d.extraAudioPlays) {
+          setExtraAudioPlays(d.extraAudioPlays);
+        }
         clockOffset.current = new Date(d.serverNow).getTime() - Date.now();
         const restored: Record<number, string> = {};
         for (const [k, v] of Object.entries(d.answers || {})) restored[Number(k)] = v;
@@ -1098,6 +1153,10 @@ export default function ExamScreen({
                       token={token}
                       mockExamId={isMock ? mockExamId : undefined}
                       mockResetKey={mockResetKey}
+                      extraPlays={extraAudioPlays[String(matchingClip.id)] || 0}
+                      onPlayCountChange={() => {
+                        setTimeout(() => flush(), 50);
+                      }}
                     />
                   )}
                   {isSecondaryForClip && matchingClip && (

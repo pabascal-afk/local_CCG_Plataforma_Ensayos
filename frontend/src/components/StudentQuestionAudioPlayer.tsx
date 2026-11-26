@@ -18,6 +18,8 @@ interface StudentQuestionAudioPlayerProps {
   token?: string;
   mockExamId?: number;
   mockResetKey?: number;
+  extraPlays?: number;
+  onPlayCountChange?: (clipId: number, count: number) => void;
 }
 
 function fmtSec(sec: number): string {
@@ -33,6 +35,8 @@ export default function StudentQuestionAudioPlayer({
   token,
   mockExamId,
   mockResetKey = 0,
+  extraPlays = 0,
+  onPlayCountChange,
 }: StudentQuestionAudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [clipCurrentTime, setClipCurrentTime] = useState(0);
@@ -104,10 +108,11 @@ export default function StudentQuestionAudioPlayer({
     }
   }, [storageKey, isMock, mockResetKey, startSec]);
 
-  const maxPlays = clip.maxPlays;
-  const hasPlayLimit = maxPlays !== null && maxPlays !== undefined;
-  const isLimitReached = hasPlayLimit && playCount >= maxPlays;
-  const remainingPlays = hasPlayLimit ? Math.max(0, maxPlays - playCount) : null;
+  const baseMaxPlays = clip.maxPlays;
+  const hasPlayLimit = baseMaxPlays !== null && baseMaxPlays !== undefined;
+  const effectiveMaxPlays = hasPlayLimit ? baseMaxPlays + (extraPlays || 0) : null;
+  const isLimitReached = hasPlayLimit && effectiveMaxPlays !== null && playCount >= effectiveMaxPlays;
+  const remainingPlays = hasPlayLimit && effectiveMaxPlays !== null ? Math.max(0, effectiveMaxPlays - playCount) : null;
 
   const audioSrc = isMock
     ? `/api/admin/exams/${mockExamId}/audios/${clip.id}/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`
@@ -120,6 +125,7 @@ export default function StudentQuestionAudioPlayer({
     playCountRef.current = nextCount;
     setPlayCount(nextCount);
     savePlayCount(nextCount);
+    onPlayCountChange?.(clip.id, nextCount);
   };
 
   const handleTimeUpdate = () => {
@@ -340,17 +346,27 @@ export default function StudentQuestionAudioPlayer({
         </div>
 
         {hasPlayLimit ? (
-          <span
-            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 inline-flex items-center gap-1 ${
-              isLimitReached
-                ? "bg-rose-100 text-rose-800 border border-rose-300"
-                : "bg-purple-100 text-purple-800 border border-purple-200"
-            }`}
-            title="Audio con escuchas limitadas: no permite adelantar ni retroceder"
-          >
-            <Lock className="w-2.5 h-2.5" />
-            <span>{isLimitReached ? "Escuchas agotadas" : `${remainingPlays} de ${maxPlays} escuchas`}</span>
-          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {extraPlays > 0 && (
+              <span
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-0.5 animate-in fade-in"
+                title="Escucha adicional otorgada por el profesor en vivo"
+              >
+                <span>✨ +{extraPlays} extra</span>
+              </span>
+            )}
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
+                isLimitReached
+                  ? "bg-rose-100 text-rose-800 border border-rose-300"
+                  : "bg-purple-100 text-purple-800 border border-purple-200"
+              }`}
+              title="Audio con escuchas limitadas: no permite adelantar ni retroceder"
+            >
+              <Lock className="w-2.5 h-2.5" />
+              <span>{isLimitReached ? "Escuchas agotadas" : `${remainingPlays} de ${effectiveMaxPlays} escuchas`}</span>
+            </span>
+          </div>
         ) : (
           <span className="text-[10px] font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded-full shrink-0">
             Escucha Libre
@@ -456,7 +472,7 @@ export default function StudentQuestionAudioPlayer({
 
       {isLimitReached && (
         <p className="text-[10px] text-rose-700 bg-rose-50 border border-rose-200 rounded p-1 text-center font-semibold">
-          Has completado las {maxPlays} reproducciones permitidas para este audio.
+          Has completado las {effectiveMaxPlays} reproducciones permitidas para este audio.
         </p>
       )}
     </div>

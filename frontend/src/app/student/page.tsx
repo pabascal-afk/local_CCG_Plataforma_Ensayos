@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Clock, CheckCircle2, PlayCircle, Lock, Award, AlertCircle, CalendarClock, FileText, Zap, Archive, ChevronDown } from "lucide-react";
+import { Clock, CheckCircle2, PlayCircle, Lock, Award, AlertCircle, CalendarClock, FileText, Zap, Archive, ChevronDown, ShieldAlert } from "lucide-react";
 import RequireRole from "@/components/RequireRole";
 import AppShell from "@/components/AppShell";
 import { apiFetch, ApiError } from "@/lib/api";
 
-type State = "UPCOMING" | "AVAILABLE" | "IN_PROGRESS" | "SUBMITTED" | "RESULTS" | "MISSED" | "PRINTED";
+type State = "UPCOMING" | "AVAILABLE" | "IN_PROGRESS" | "SUBMITTED" | "RESULTS" | "MISSED" | "PRINTED" | "EXCLUDED";
 
 interface StudentAssignment {
   id: number;
@@ -17,6 +17,8 @@ interface StudentAssignment {
   applicationMode?: "DIGITAL" | "PRINTED";
   submissionId: number | null;
   isExtended?: boolean;
+  isExcluded?: boolean;
+  exclusionReason?: string | null;
   isArchived?: boolean;
   archivedAt?: string | null;
   exam: {
@@ -41,6 +43,7 @@ const BADGE: Record<State, { label: string; cls: string; icon: React.ElementType
   RESULTS: { label: "Resultados disponibles", cls: "bg-purple-100 text-purple-700", icon: Award },
   MISSED: { label: "No rendido", cls: "bg-red-100 text-red-700", icon: Lock },
   PRINTED: { label: "Evaluación Impresa en Papel", cls: "bg-indigo-100 text-indigo-800", icon: FileText },
+  EXCLUDED: { label: "Justificado / Excluido", cls: "bg-slate-100 text-slate-700 border border-slate-300", icon: ShieldAlert },
 };
 
 import LongitudinalChart from "@/components/charts/LongitudinalChart";
@@ -168,6 +171,12 @@ function StudentDashboard() {
                   <span className="ml-4 shrink-0 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold px-4 py-2 rounded-lg text-center leading-tight">
                     Rendición en papel<br />
                     <span className="text-[10px] text-slate-400 font-normal">Pauta aplicada en sala</span>
+                  </span>
+                )}
+                {a.state === "EXCLUDED" && (
+                  <span className="ml-4 shrink-0 bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold px-4 py-2 rounded-lg text-center leading-tight">
+                    Justificado de evaluación<br />
+                    <span className="text-[10px] text-slate-500 font-normal">{a.exclusionReason || "Excluido por el docente"}</span>
                   </span>
                 )}
                 {a.state === "RESULTS" && a.submissionId && (
