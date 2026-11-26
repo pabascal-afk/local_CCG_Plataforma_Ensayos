@@ -21,6 +21,7 @@ model User {
   managedAssignments ExamAssignment[] @relation("ManagedAssignments")
   proposedRemedials   RemedialProposal[] @relation("ProposedRemedials")
   submissions        Submission[]
+  assignmentExclusions AssignmentExclusion[]
   createdAt          DateTime        @default(now())
 }
 
@@ -115,6 +116,7 @@ model ExamAssignment {
   exam               Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
   course             Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
   submissions        Submission[]
+  exclusions         AssignmentExclusion[]
   remedialProposals  RemedialProposal[] @relation("OriginRemedials")
   actionLogs         AssignmentActionLog[]
 
@@ -139,11 +141,27 @@ model Submission {
   simceScore       Int? // Escala oficial SIMCE (100 a 400)
   theta            Float? // Habilidad latente estimada (-3.5 a +3.5)
   seTheta          Float? // Error estándar de medición
+  audioPlays       String?            @default("{}") // JSON: { [clipId]: totalPlays }
+  extraAudioPlays  String?            @default("{}") // JSON: { [clipId]: extraGranted }
   student          User               @relation(fields: [studentRut], references: [rut], onDelete: Cascade)
   assignment       ExamAssignment     @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   answers          SubmissionAnswer[]
 
   @@unique([studentRut, assignmentId]) // un solo intento
+}
+
+model AssignmentExclusion {
+  id           Int            @id @default(autoincrement())
+  assignmentId Int
+  studentRut   String
+  reason       String         // Obligatorio: "No alcanzó a rendirlo", "Se negó a rendirlo", etc.
+  details      String?        // Observación o justificación adicional
+  excludedAt   DateTime       @default(now())
+  excludedBy   String?        // RUT del usuario que realizó la exclusión
+  assignment   ExamAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student      User           @relation(fields: [studentRut], references: [rut], onDelete: Cascade)
+
+  @@unique([assignmentId, studentRut])
 }
 
 model SubmissionAnswer {
