@@ -1,4 +1,11 @@
-const { chileanGrade, achievementLevel, computeResults } = require('../src/services/grading');
+const {
+  chileanGrade,
+  achievementLevel,
+  computeResults,
+  isBasicLevel,
+  getMinGradeForLevel,
+  resolveMinGrade
+} = require('../src/services/grading');
 
 describe('chileanGrade (exigencia 60%, mínimo 1.0)', () => {
   test.each([
@@ -86,5 +93,54 @@ describe('computeResults', () => {
     expect(r.percent).toBe(0);
     expect(r.grade).toBe(1.0);
     expect(r.simceScore).toBe(100);
+  });
+
+  test('cursos basicos (1B a 8B) tienen nota minima 2.0 y escala proporcional', () => {
+    const rZero = computeResults(questions, {}, { level: '4B' });
+    expect(rZero.grade).toBe(2.0);
+    expect(rZero.minGrade).toBe(2.0);
+    expect(rZero.isBasicLevel).toBe(true);
+
+    const rPartial = computeResults(questions, { 1: 'A' }, { level: '6B', passThreshold: 0.6 });
+    // 1 de 4 = 25%. Con min 2.0 y exigencia 0.6: 2.0 + (4.0 - 2.0) * (0.25 / 0.6) = 2.0 + 2.0 * 0.4167 = 2.83 => 2.8
+    expect(rPartial.grade).toBe(2.8);
+    expect(rPartial.minGrade).toBe(2.0);
+  });
+
+  test('cursos de ensenanza media (1M a 4M) mantienen nota minima 1.0', () => {
+    const rZero = computeResults(questions, {}, { level: '2M' });
+    expect(rZero.grade).toBe(1.0);
+    expect(rZero.minGrade).toBe(1.0);
+    expect(rZero.isBasicLevel).toBe(false);
+  });
+});
+
+describe('Deteccion de nivel basico y resolucion de nota minima (1° a 8° basico = 2.0)', () => {
+  test.each(['1B', '2B', '3B', '4B', '5B', '6B', '7B', '8B', '1° Básico', '4 BÁSICO', '8° Basico'])(
+    'isBasicLevel(%p) es true',
+    (lvl) => {
+      expect(isBasicLevel(lvl)).toBe(true);
+      expect(getMinGradeForLevel(lvl)).toBe(2.0);
+    }
+  );
+
+  test.each(['1M', '2M', '3M', '4M', '1° Medio', '2 MEDIO', null, undefined, '', 'PREKINDER'])(
+    'isBasicLevel(%p) es false',
+    (lvl) => {
+      expect(isBasicLevel(lvl)).toBe(false);
+      expect(getMinGradeForLevel(lvl)).toBe(1.0);
+    }
+  );
+
+  test('resolveMinGrade da 2.0 para basicos aun con exam.minGrade = 1.0 por defecto', () => {
+    expect(resolveMinGrade({ level: '4B', minGrade: 1.0 })).toBe(2.0);
+    expect(resolveMinGrade({ level: '8B' })).toBe(2.0);
+    expect(resolveMinGrade(null, '5B')).toBe(2.0);
+    expect(resolveMinGrade({ level: '2M' }, '3B')).toBe(2.0);
+  });
+
+  test('resolveMinGrade da 1.0 para ensenanza media con default', () => {
+    expect(resolveMinGrade({ level: '2M', minGrade: 1.0 })).toBe(1.0);
+    expect(resolveMinGrade('3M')).toBe(1.0);
   });
 });

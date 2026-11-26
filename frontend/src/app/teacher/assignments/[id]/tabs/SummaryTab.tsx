@@ -27,11 +27,15 @@ export default function SummaryTab({ id }: { id: number }) {
     { label: "Insuficiente", count: data.levelCounts.INSUFICIENTE || 0, color: "bg-red-500" },
   ];
 
+  const isBasic = Boolean(data.isBasicLevel || data.minGrade === 2.0);
+  const minGradeLabel = isBasic ? "2.0 - 3.9" : "1.0 - 3.9";
+  const minGradeCount = (data.gradeRanges?.['2.0-3.9'] ?? data.gradeRanges?.['1.0-3.9']) || 0;
+
   const ranges = [
     { label: "6.0 - 7.0", count: data.gradeRanges['6.0-7.0'] || 0 },
     { label: "5.0 - 5.9", count: data.gradeRanges['5.0-5.9'] || 0 },
     { label: "4.0 - 4.9", count: data.gradeRanges['4.0-4.9'] || 0 },
-    { label: "1.0 - 3.9", count: data.gradeRanges['1.0-3.9'] || 0 },
+    { label: minGradeLabel, count: minGradeCount },
   ];
 
   const maxLevelCount = Math.max(...levels.map(l => l.count), 1);

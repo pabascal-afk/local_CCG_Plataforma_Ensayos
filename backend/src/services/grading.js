@@ -6,6 +6,39 @@ const round1 = (n) => Math.round(n * 10) / 10;
 
 const GRADING_MODES = ['SIMCE', 'NORMAL'];
 
+function isBasicLevel(level) {
+  if (!level) return false;
+  const clean = String(level).trim().toUpperCase();
+  if (/^[1-8]B$/.test(clean)) return true;
+  if (/[1-8].*(BÁSIC|BASIC)/.test(clean)) return true;
+  return false;
+}
+
+function getMinGradeForLevel(level) {
+  return isBasicLevel(level) ? 2.0 : 1.0;
+}
+
+function resolveMinGrade(examOrLevel, courseLevel) {
+  let targetLevel = null;
+  let minGradeRaw = undefined;
+  if (typeof examOrLevel === 'string') {
+    targetLevel = examOrLevel;
+  } else if (examOrLevel && typeof examOrLevel === 'object') {
+    targetLevel = courseLevel || examOrLevel.courseLevel || examOrLevel.course?.level || examOrLevel.level;
+    minGradeRaw = examOrLevel.minGrade;
+  } else if (courseLevel) {
+    targetLevel = courseLevel;
+  }
+  const isBasic = isBasicLevel(targetLevel);
+  const parsedMin = Number(minGradeRaw);
+  if (isBasic) {
+    if (Number.isFinite(parsedMin) && parsedMin > 2.0 && parsedMin < 4.0) return parsedMin;
+    return 2.0;
+  }
+  if (Number.isFinite(parsedMin) && parsedMin >= 1.0 && parsedMin < 4.0) return parsedMin;
+  return 1.0;
+}
+
 function normalizeGradingMode(mode) {
   if (mode === undefined || mode === null || String(mode).trim() === '') return 'SIMCE';
   const clean = String(mode).trim().toUpperCase();
@@ -100,8 +133,8 @@ const { estimateThetaEAP, thetaToSimceScore, simceAchievementLevel } = require('
 function computeResults(questions, answers, exam = {}, awardedPointsMap = {}) {
   const mode = normalizeGradingMode(exam?.gradingMode);
   const passThreshold = normalizePassThreshold(exam?.passThreshold, 0.6);
-  const minGradeRaw = Number(exam?.minGrade);
-  const minGrade = Number.isFinite(minGradeRaw) && minGradeRaw >= 1 && minGradeRaw < 4 ? minGradeRaw : 1.0;
+  const minGrade = resolveMinGrade(exam);
+  const isBasic = isBasicLevel(exam?.courseLevel || exam?.course?.level || exam?.level);
 
   let totalMaxPoints = 0;
   let totalEarnedPoints = 0;
@@ -195,6 +228,8 @@ function computeResults(questions, answers, exam = {}, awardedPointsMap = {}) {
     correctCount: Math.round(totalEarnedPoints),
     percent: Math.round(ratio * 1000) / 10,
     grade,
+    minGrade,
+    isBasicLevel: isBasic,
     achievementLevel: level,
     simceScore,
     theta,
@@ -209,6 +244,9 @@ function computeResults(questions, answers, exam = {}, awardedPointsMap = {}) {
 
 module.exports = {
   GRADING_MODES,
+  isBasicLevel,
+  getMinGradeForLevel,
+  resolveMinGrade,
   normalizeGradingMode,
   normalizePassThreshold,
   chileanGrade,

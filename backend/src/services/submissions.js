@@ -50,7 +50,12 @@ async function finalizeSubmission(submissionId, { auto = false, req = null, acto
       }
     }
 
-    const results = computeResults(exam.questions, answersMap, exam, awardedPointsMap);
+    const examWithLevel = {
+      ...exam,
+      courseLevel: submission.assignment?.course?.level,
+      level: submission.assignment?.course?.level || exam?.level,
+    };
+    const results = computeResults(exam.questions, answersMap, examWithLevel, awardedPointsMap);
 
     for (const pq of results.perQuestion) {
       if (pq.selected === null && pq.awardedPoints === null) continue;
@@ -266,7 +271,12 @@ async function recalculateExamSubmissions(examId, { assignmentId = null, actor =
       }
     }
 
-    const results = computeResults(exam.questions || [], answersMap, exam, awardedPointsMap);
+    const examWithLevel = {
+      ...exam,
+      courseLevel: sub.assignment?.course?.level,
+      level: sub.assignment?.course?.level || exam?.level,
+    };
+    const results = computeResults(exam.questions || [], answersMap, examWithLevel, awardedPointsMap);
     const perQuestionById = Object.fromEntries(results.perQuestion.map((pq) => [pq.questionId, pq]));
 
     let subAnswersChanged = 0;
