@@ -13,7 +13,9 @@ const {
   isOpenQuestion,
   getQuestionMaxPoints,
   normalizeGradingMode,
-  normalizePassThreshold
+  normalizePassThreshold,
+  isBasicLevel,
+  resolveMinGrade
 } = require('../services/grading');
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
 const {
@@ -747,19 +749,22 @@ router.get('/assignments/:id/summary', async (req, res, next) => {
     const excludedRuts = new Set(exclusions.map(e => e.studentRut));
     const submissions = rawSubmissions.filter(s => !excludedRuts.has(s.studentRut));
 
+    const isBasic = isBasicLevel(assignment.course?.level || assignment.exam?.level);
+    const minGrade = resolveMinGrade(assignment.exam, assignment.course?.level);
+
     const totalStudents = await prisma.user.count({ where: { courseId: assignment.courseId, role: 'STUDENT' } });
     
     let averageGrade = 0;
     let averagePercent = 0;
     let averageSimceScore = null;
     const levelCounts = { INSUFICIENTE: 0, ELEMENTAL: 0, ADECUADO: 0 };
-    const gradeRanges = { '1.0-3.9': 0, '4.0-4.9': 0, '5.0-5.9': 0, '6.0-7.0': 0 };
+    const gradeRanges = { '1.0-3.9': 0, '2.0-3.9': 0, '4.0-4.9': 0, '5.0-5.9': 0, '6.0-7.0': 0 };
 
     const summaryGradingMode = normalizeGradingMode(assignment.exam?.gradingMode);
     const summaryPassThreshold = normalizePassThreshold(assignment.exam?.passThreshold, 0.6);
 
     if (submissions.length > 0) {
-      averageGrade = submissions.reduce((sum, s) => sum + (s.grade || 1.0), 0) / submissions.length;
+      averageGrade = submissions.reduce((sum, s) => sum + (s.grade != null ? s.grade : minGrade), 0) / submissions.length;
       averagePercent = submissions.reduce((sum, s) => sum + (s.percent || 0), 0) / submissions.length;
       if (summaryGradingMode !== 'NORMAL') {
         const simceSubmissions = submissions.filter(s => s.simceScore != null);
@@ -772,8 +777,11 @@ router.get('/assignments/:id/summary', async (req, res, next) => {
         if (s.achievementLevel && levelCounts[s.achievementLevel] !== undefined) {
           levelCounts[s.achievementLevel]++;
         }
-        const g = s.grade || 1.0;
-        if (g < 4.0) gradeRanges['1.0-3.9']++;
+        const g = s.grade != null ? s.grade : minGrade;
+        if (g < 4.0) {
+          gradeRanges['1.0-3.9']++;
+          gradeRanges['2.0-3.9']++;
+        }
         else if (g < 5.0) gradeRanges['4.0-4.9']++;
         else if (g < 6.0) gradeRanges['5.0-5.9']++;
         else gradeRanges['6.0-7.0']++;
@@ -784,6 +792,8 @@ router.get('/assignments/:id/summary', async (req, res, next) => {
       gradingMode: summaryGradingMode,
       passThreshold: summaryPassThreshold,
       passThresholdPercent: Math.round(summaryPassThreshold * 1000) / 10,
+      minGrade,
+      isBasicLevel: isBasic,
       totalStudents,
       submittedCount: submissions.length,
       excludedCount: excludedRuts.size,
@@ -1329,11 +1339,14 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       { header: 'Valor', key: 'value', width: 28 }
     ];
 
+    const isBasicCourse = isBasicLevel(assignment.course?.level || assignment.exam?.level);
+    const minGradeValue = resolveMinGrade(assignment.exam, assignment.course?.level);
+
     const totalStudents = students.length;
     const submittedCount = submissions.length;
     const excludedCount = exclusions.length;
     const participationPct = (totalStudents - excludedCount) > 0 ? Math.round((submittedCount / (totalStudents - excludedCount)) * 100) : 0;
-    const avgGrade = submittedCount > 0 ? (submissions.reduce((sum, s) => sum + (s.grade || 1.0), 0) / submittedCount).toFixed(1) : '0.0';
+    const avgGrade = submittedCount > 0 ? (submissions.reduce((sum, s) => sum + (s.grade != null ? s.grade : minGradeValue), 0) / submittedCount).toFixed(1) : (isBasicCourse ? '2.0' : '1.0');
     const simceSubs = isNormalExport ? [] : submissions.filter(s => s.simceScore != null);
     const avgSimce = simceSubs.length > 0 ? Math.round(simceSubs.reduce((sum, s) => sum + s.simceScore, 0) / simceSubs.length) : 'N/A';
     const avgPercent = submittedCount > 0 ? Math.round(submissions.reduce((sum, s) => sum + (s.percent || 0), 0) / submittedCount) : 0;
@@ -1352,7 +1365,7 @@ router.get('/assignments/:id/export.xlsx', async (req, res, next) => {
       { metric: 'Estudiantes Evaluados (Entregas Válidas)', value: submittedCount },
       { metric: 'Estudiantes Ausentes / Pendientes', value: Math.max(0, totalStudents - excludedCount - submittedCount) },
       { metric: 'Tasa de Participación (sobre matrícula activa)', value: `${participationPct}%` },
-      { metric: 'Nota Promedio (1.0 - 7.0)', value: avgGrade },
+      { metric: isBasicCourse ? 'Nota Promedio (2.0 - 7.0)' : 'Nota Promedio (1.0 - 7.0)', value: avgGrade },
       ...(isNormalExport ? [] : [{ metric: 'Puntaje SIMCE Promedio (200 - 350 pts)', value: avgSimce }]),
       { metric: '% Logro Promedio', value: `${avgPercent}%` },
       { metric: isNormalExport ? 'Nivel Adecuado (Nota ≥ 6.0)' : 'Nivel Adecuado (≥ 284 pts)', value: `${countAdecuado} estudiantes (${submittedCount > 0 ? Math.round((countAdecuado / submittedCount) * 100) : 0}%)` },
@@ -2013,6 +2026,9 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
     const pendingCount = Math.max(0, validEnrolled - submittedCount);
     const participationPercent = validEnrolled > 0 ? Math.round((submittedCount / validEnrolled) * 1000) / 10 : 0;
 
+    const isBasicCourse = isBasicLevel(course?.level || exam?.level);
+    const minGradeValue = resolveMinGrade(exam, course?.level);
+
     const gradingMode = normalizeGradingMode(exam.gradingMode);
     const passThreshold = normalizePassThreshold(exam.passThreshold, 0.6);
     const passThresholdPercent = Math.round(passThreshold * 1000) / 10;
@@ -2023,10 +2039,10 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
     let approvedCount = 0;
     let failedCount = 0;
     const levelCounts = { INSUFICIENTE: 0, ELEMENTAL: 0, ADECUADO: 0 };
-    const gradeRanges = { '1.0-3.9': 0, '4.0-4.9': 0, '5.0-5.9': 0, '6.0-7.0': 0 };
+    const gradeRanges = { '1.0-3.9': 0, '2.0-3.9': 0, '4.0-4.9': 0, '5.0-5.9': 0, '6.0-7.0': 0 };
 
     if (submittedCount > 0) {
-      averageGrade = Math.round((submissions.reduce((sum, s) => sum + (s.grade || 1.0), 0) / submittedCount) * 10) / 10;
+      averageGrade = Math.round((submissions.reduce((sum, s) => sum + (s.grade != null ? s.grade : minGradeValue), 0) / submittedCount) * 10) / 10;
       averagePercent = Math.round((submissions.reduce((sum, s) => sum + (s.percent || 0), 0) / submittedCount) * 10) / 10;
 
       if (gradingMode !== 'NORMAL') {
@@ -2037,7 +2053,7 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
       }
 
       submissions.forEach(s => {
-        const g = s.grade != null ? s.grade : 1.0;
+        const g = s.grade != null ? s.grade : minGradeValue;
         if (g >= 4.0) approvedCount++;
         else failedCount++;
 
@@ -2045,7 +2061,10 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
           levelCounts[s.achievementLevel]++;
         }
 
-        if (g < 4.0) gradeRanges['1.0-3.9']++;
+        if (g < 4.0) {
+          gradeRanges['1.0-3.9']++;
+          gradeRanges['2.0-3.9']++;
+        }
         else if (g < 5.0) gradeRanges['4.0-4.9']++;
         else if (g < 6.0) gradeRanges['5.0-5.9']++;
         else gradeRanges['6.0-7.0']++;
@@ -2255,6 +2274,8 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
         gradingMode,
         passThreshold,
         passThresholdPercent,
+        minGrade: minGradeValue,
+        isBasicLevel: isBasicCourse,
         totalQuestions: questions.length,
         maxTotalPoints,
         hasWeightedPoints
@@ -2284,7 +2305,9 @@ router.get('/assignments/:id/report-data', async (req, res, next) => {
         failedCount,
         approvalPercent,
         levelCounts,
-        gradeRanges
+        gradeRanges,
+        minGrade: minGradeValue,
+        isBasicLevel: isBasicCourse
       },
       excludedStudents: exclusions.map(e => ({
         rut: e.studentRut,
@@ -2567,7 +2590,12 @@ router.post('/assignments/:id/omr-bulk-submit', async (req, res, next) => {
           }
         }
 
-        const computed = computeResults(questions, answersMap, assignment.exam, finalAwardedMap);
+        const effectiveExam = {
+          ...assignment.exam,
+          courseLevel: assignment.course?.level,
+          level: assignment.course?.level || assignment.exam?.level
+        };
+        const computed = computeResults(questions, answersMap, effectiveExam, finalAwardedMap);
 
         await prisma.submission.update({
           where: { id: submission.id },
@@ -2805,7 +2833,12 @@ router.post('/assignments/:id/import-answers', uploadMemory.single('file'), asyn
         }
 
         // Compute scores
-        const computed = computeResults(questions, answersMap, assignment.exam, finalAwardedMap);
+        const effectiveExam = {
+          ...assignment.exam,
+          courseLevel: assignment.course?.level,
+          level: assignment.course?.level || assignment.exam?.level
+        };
+        const computed = computeResults(questions, answersMap, effectiveExam, finalAwardedMap);
 
         // Finalize submission with 3PL TRI & SIMCE Score
         await prisma.submission.update({
@@ -2966,7 +2999,12 @@ router.post('/assignments/:id/grade-open-questions', async (req, res, next) => {
       allAnswers.filter(a => a.awardedPoints != null).map(a => [a.questionId, a.awardedPoints])
     );
 
-    const computed = computeResults(questions, answersMap, assignment.exam, awardedPointsMap);
+    const effectiveExam = {
+      ...assignment.exam,
+      courseLevel: assignment.course?.level,
+      level: assignment.course?.level || assignment.exam?.level
+    };
+    const computed = computeResults(questions, answersMap, effectiveExam, awardedPointsMap);
 
     const updatedSubmission = await prisma.submission.update({
       where: { id: submission.id },

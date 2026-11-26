@@ -9,7 +9,7 @@ const exceljs = require('exceljs');
 const { normalizeRut } = require('../utils/rut');
 const { parseSpreadsheet, createEmptyTemplate } = require('../utils/spreadsheet');
 const { logAssignmentAction, getAssignmentLogs, getSchoolBellBlocks } = require('../services/assignmentLog');
-const { computeResults, normalizeGradingMode, normalizePassThreshold } = require('../services/grading');
+const { computeResults, normalizeGradingMode, normalizePassThreshold, isBasicLevel, resolveMinGrade } = require('../services/grading');
 const { recalculateExamSubmissions } = require('../services/submissions');
 const {
   getArchiveSettings,
@@ -2235,7 +2235,7 @@ router.get('/exams', async (req, res, next) => {
         gradingMode: normalizedMode,
         passThreshold: normalizedThreshold,
         passThresholdPercent: Math.round(normalizedThreshold * 1000) / 10,
-        minGrade: e.minGrade ?? 1.0,
+        minGrade: resolveMinGrade(e, e.level),
         questionCount: (e.questions || []).length,
         submittedCount,
         createdAt: e.createdAt,
@@ -2407,7 +2407,7 @@ router.get('/exams/:id', checkAdmin, async (req, res, next) => {
       gradingMode: normalizedMode,
       passThreshold: normalizedThreshold,
       passThresholdPercent: Math.round(normalizedThreshold * 1000) / 10,
-      minGrade: e.minGrade ?? 1.0,
+      minGrade: resolveMinGrade(e, e.level),
       questionCount: e.questions.length,
       submittedCount,
       inProgressCount,

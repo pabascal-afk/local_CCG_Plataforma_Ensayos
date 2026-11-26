@@ -322,7 +322,7 @@ describe('Selector de modalidad de calificación (SIMCE TRI vs Prueba normal edi
       expect(mockGradeNormal.body.passThresholdPercent).toBe(70);
       expect(mockGradeNormal.body.simceScore).toBeNull();
       expect(mockGradeNormal.body.theta).toBeNull();
-      expect(mockGradeNormal.body.grade).toBe(3.6);
+      expect(mockGradeNormal.body.grade).toBe(3.7);
       expect(mockGradeNormal.body.achievementLevel).toBe('INSUFICIENTE');
 
       // Simular preview con 50% sin persistir cambio en BD
@@ -419,7 +419,7 @@ describe('Selector de modalidad de calificación (SIMCE TRI vs Prueba normal edi
       expect(dbSubInitial.status).toBe('SUBMITTED');
       expect(dbSubInitial.simceScore).toBeNull();
       expect(dbSubInitial.theta).toBeNull();
-      expect(dbSubInitial.grade).toBe(3.6);
+      expect(dbSubInitial.grade).toBe(3.7);
       expect(dbSubInitial.achievementLevel).toBe('INSUFICIENTE');
 
       // Resultado estudiante
@@ -431,7 +431,7 @@ describe('Selector de modalidad de calificación (SIMCE TRI vs Prueba normal edi
       expect(studentResultRes.body.passThresholdPercent).toBe(70);
       expect(studentResultRes.body.simceScore).toBeNull();
       expect(studentResultRes.body.theta).toBeNull();
-      expect(studentResultRes.body.grade).toBe(3.6);
+      expect(studentResultRes.body.grade).toBe(3.7);
       expect(studentResultRes.body.maxScore).toBe(5);
       expect(studentResultRes.body.totalScore).toBe(3);
 
@@ -727,7 +727,7 @@ describe('Selector de modalidad de calificación (SIMCE TRI vs Prueba normal edi
       expect(sResultWeighted.body.questionCount).toBe(4);
       expect(sResultWeighted.body.hasWeightedPoints).toBe(true);
       expect(sResultWeighted.body.percent).toBe(50);
-      expect(sResultWeighted.body.grade).toBe(3.5);
+      expect(sResultWeighted.body.grade).toBe(3.7);
 
       // Vista Live Docente expone earnedPoints=5, correctQuestionsCount=2, maxTotalPoints=10, hasWeightedPoints=true
       const liveWeighted = await request(app)

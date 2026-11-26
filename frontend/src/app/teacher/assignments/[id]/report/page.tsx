@@ -48,6 +48,8 @@ type ReportData = {
     totalQuestions: number;
     maxTotalPoints: number;
     hasWeightedPoints: boolean;
+    minGrade?: number;
+    isBasicLevel?: boolean;
   };
   course: {
     id: number;
@@ -79,11 +81,14 @@ type ReportData = {
       INSUFICIENTE: number;
     };
     gradeRanges: {
-      "1.0-3.9": number;
+      "1.0-3.9"?: number;
+      "2.0-3.9"?: number;
       "4.0-4.9": number;
       "5.0-5.9": number;
       "6.0-7.0": number;
     };
+    minGrade?: number;
+    isBasicLevel?: boolean;
   };
   excludedStudents?: Array<{
     rut: string;
@@ -471,12 +476,22 @@ export default function AssignmentReportPdfPage() {
                   Distribución de Calificaciones
                 </h3>
                 <div className="space-y-2 text-xs">
-                  {[
-                    { range: "6.0 - 7.0", label: "Sobresaliente", count: summary.gradeRanges["6.0-7.0"], color: "bg-emerald-600" },
-                    { range: "5.0 - 5.9", label: "Bueno", count: summary.gradeRanges["5.0-5.9"], color: "bg-blue-600" },
-                    { range: "4.0 - 4.9", label: "Suficiente", count: summary.gradeRanges["4.0-4.9"], color: "bg-amber-500" },
-                    { range: "1.0 - 3.9", label: "Insuficiente", count: summary.gradeRanges["1.0-3.9"], color: "bg-rose-600" },
-                  ].map((r) => {
+                  {(() => {
+                    const isBasicCourse = Boolean(
+                      summary.isBasicLevel ||
+                      exam?.minGrade === 2.0 ||
+                      /^[1-8]B$/i.test(course?.level || '') ||
+                      /[1-8].*(BÁSIC|BASIC)/i.test(course?.fullName || course?.level || '')
+                    );
+                    const minRangeLabel = isBasicCourse ? "2.0 - 3.9" : "1.0 - 3.9";
+                    const minRangeCount = summary.gradeRanges["2.0-3.9"] ?? summary.gradeRanges["1.0-3.9"] ?? 0;
+                    return [
+                      { range: "6.0 - 7.0", label: "Sobresaliente", count: summary.gradeRanges["6.0-7.0"] || 0, color: "bg-emerald-600" },
+                      { range: "5.0 - 5.9", label: "Bueno", count: summary.gradeRanges["5.0-5.9"] || 0, color: "bg-blue-600" },
+                      { range: "4.0 - 4.9", label: "Suficiente", count: summary.gradeRanges["4.0-4.9"] || 0, color: "bg-amber-500" },
+                      { range: minRangeLabel, label: "Insuficiente", count: minRangeCount, color: "bg-rose-600" },
+                    ];
+                  })().map((r) => {
                     const pct = Math.round((r.count / totalSubmittedOrMax) * 100);
                     return (
                       <div key={r.range} className="flex items-center gap-2">

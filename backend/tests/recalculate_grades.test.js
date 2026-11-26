@@ -424,7 +424,7 @@ describe('Recálculo masivo de notas post-rendición con pauta actual', () => {
     });
     expect(dbSub2.correctCount).toBe(0);
     expect(dbSub2.percent).toBe(0);
-    expect(dbSub2.grade).toBe(1.0);
+    expect(dbSub2.grade).toBe(2.0);
     expect(dbSub2.achievementLevel).toBe('INSUFICIENTE');
 
     const dbSub2Q1 = dbSub2.answers.find((a) => a.questionId === q1.id);
